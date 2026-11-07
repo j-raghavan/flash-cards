@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 from fastapi import FastAPI
@@ -102,14 +103,16 @@ def test_login_suspended_account_is_403(app: FastAPI, client: TestClient) -> Non
     container = app.state.container
     now = container.clock.now()
     hashed = Argon2PasswordHasher().hash(PASSWORD)
-    container.user_repo.add(
-        User(
-            id="susp-1",
-            email="suspended@example.com",
-            password_hash=hashed,
-            role=Role.MEMBER,
-            created_at=now,
-            suspended_at=now,
+    asyncio.run(
+        container.user_repo.add(
+            User(
+                id="susp-1",
+                email="suspended@example.com",
+                password_hash=hashed,
+                role=Role.MEMBER,
+                created_at=now,
+                suspended_at=now,
+            )
         )
     )
     response = client.post(
@@ -133,7 +136,7 @@ def test_suspended_user_loses_access_mid_session(
     token = seed_invite(role=Role.ADMIN)
     _signup(client, token, "admin@example.com")
     container = app.state.container
-    user = container.user_repo.get_by_email("admin@example.com")
+    user = asyncio.run(container.user_repo.get_by_email("admin@example.com"))
     assert user is not None
     container.user_repo._by_id[user.id] = user.with_suspended(container.clock.now())
     assert client.get("/auth/me").status_code == 401

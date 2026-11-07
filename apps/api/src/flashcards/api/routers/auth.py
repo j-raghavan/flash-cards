@@ -24,14 +24,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED, response_model=UserOut)
-def signup(
+async def signup(
     body: SignupRequest,
     response: Response,
     container: Container = Depends(get_container),
     settings: Settings = Depends(get_settings),
 ) -> UserOut:
     try:
-        user = container.registration.register(
+        user = await container.registration.register(
             raw_token=body.token, email=body.email, password=body.password
         )
     except (WeakPassword, InvalidEmail) as exc:
@@ -43,26 +43,26 @@ def signup(
         # whether a token was unknown, expired, revoked or already used.
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "This invite is not valid.") from exc
 
-    issued = container.auth.start_session(user)
+    issued = await container.auth.start_session(user)
     set_session_cookie(response, issued.raw_token, settings)
     return UserOut.from_user(user)
 
 
 @router.post("/login", response_model=UserOut)
-def login(
+async def login(
     body: LoginRequest,
     response: Response,
     container: Container = Depends(get_container),
     settings: Settings = Depends(get_settings),
 ) -> UserOut:
     try:
-        issued = container.auth.login(email=body.email, password=body.password)
+        issued = await container.auth.login(email=body.email, password=body.password)
     except InvalidCredentials as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.") from exc
     except AccountSuspended as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account is suspended.") from exc
 
-    user = container.user_repo.get(issued.session.user_id)
+    user = await container.user_repo.get(issued.session.user_id)
     if user is None:  # pragma: no cover - login just authenticated this user
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
     set_session_cookie(response, issued.raw_token, settings)
@@ -70,42 +70,42 @@ def login(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(
+async def logout(
     response: Response,
     container: Container = Depends(get_container),
     settings: Settings = Depends(get_settings),
     caller: CurrentUser = Depends(current_user),
 ) -> Response:
-    container.auth.revoke_session(caller.session.id)
+    await container.auth.revoke_session(caller.session.id)
     clear_session_cookie(response, settings)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
 
 
 @router.get("/me", response_model=UserOut)
-def me(caller: CurrentUser = Depends(current_user)) -> UserOut:
+async def me(caller: CurrentUser = Depends(current_user)) -> UserOut:
     return UserOut.from_user(caller.user)
 
 
 @router.get("/sessions", response_model=list[SessionOut])
-def list_sessions(
+async def list_sessions(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> list[SessionOut]:
     return [
         SessionOut.from_session(s, current=s.id == caller.session.id)
-        for s in container.auth.sessions_for(caller.user.id)
+        for s in await container.auth.sessions_for(caller.user.id)
     ]
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_session(
+async def revoke_session(
     session_id: str,
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> Response:
-    owned = {s.id for s in container.auth.sessions_for(caller.user.id)}
-    if session_id not in owned or not container.auth.revoke_session(session_id):
+    owned = {s.id for s in await container.auth.sessions_for(caller.user.id)}
+    if session_id not in owned or not await container.auth.revoke_session(session_id):
         # Unknown to this user, or already revoked: either way nothing to revoke.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such session.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

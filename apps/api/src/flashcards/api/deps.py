@@ -40,16 +40,16 @@ _NOT_AUTHENTICATED = HTTPException(
 )
 
 
-def current_user(
+async def current_user(
     request: Request, container: Container = Depends(get_container)
 ) -> CurrentUser:
     raw_token = request.cookies.get(SESSION_COOKIE)
     if raw_token is None:
         raise _NOT_AUTHENTICATED
-    session = container.auth.authenticate(raw_token)
+    session = await container.auth.authenticate(raw_token)
     if session is None:
         raise _NOT_AUTHENTICATED
-    user = container.user_repo.get(session.user_id)
+    user = await container.user_repo.get(session.user_id)
     if user is None:  # pragma: no cover - a live session always points to a live user
         raise _NOT_AUTHENTICATED
     if user.status() is UserStatus.SUSPENDED:

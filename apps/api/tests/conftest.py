@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 import pytest
@@ -28,7 +29,9 @@ def client(app: FastAPI) -> TestClient:
 @pytest.fixture
 def seed_invite(app: FastAPI) -> Callable[..., str]:
     def _seed(role: Role = Role.MEMBER, email: str | None = None) -> str:
-        created = app.state.container.invites.create(created_by="seed", role=role, email=email)
+        created = asyncio.run(
+            app.state.container.invites.create(created_by="seed", role=role, email=email)
+        )
         return created.raw_token
 
     return _seed

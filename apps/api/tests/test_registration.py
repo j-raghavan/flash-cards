@@ -68,96 +68,102 @@ def service(
     return RegistrationService(invites, users, FakeHasher(), clock)
 
 
-def test_register_creates_account_from_invite(
+async def test_register_creates_account_from_invite(
     service: RegistrationService, invites: InviteService, users: InMemoryUserRepository
 ) -> None:
-    created = invites.create(created_by="admin-1", role=Role.ADMIN)
-    user = service.register(
+    created = await invites.create(created_by="admin-1", role=Role.ADMIN)
+    user = await service.register(
         raw_token=created.raw_token, email="  New@Example.COM ", password=PASSWORD
     )
     assert user.role is Role.ADMIN
     assert user.email == "new@example.com"
     assert user.is_verified is False
     assert user.password_hash == f"hashed:{PASSWORD}"
-    assert users.get_by_email("new@example.com") is not None
+    assert await users.get_by_email("new@example.com") is not None
 
 
-def test_invite_is_consumed_exactly_once(
+async def test_invite_is_consumed_exactly_once(
     service: RegistrationService, invites: InviteService, invite_repo: InMemoryInviteRepository
 ) -> None:
-    created = invites.create(created_by="admin-1")
-    service.register(raw_token=created.raw_token, email="a@example.com", password=PASSWORD)
-    stored = invite_repo.get(created.invite.id)
+    created = await invites.create(created_by="admin-1")
+    await service.register(raw_token=created.raw_token, email="a@example.com", password=PASSWORD)
+    stored = await invite_repo.get(created.invite.id)
     assert stored is not None
     assert stored.status(START) is InviteStatus.REDEEMED
 
 
-def test_weak_password_does_not_consume_the_invite(
+async def test_weak_password_does_not_consume_the_invite(
     service: RegistrationService,
     invites: InviteService,
     invite_repo: InMemoryInviteRepository,
     users: InMemoryUserRepository,
 ) -> None:
-    created = invites.create(created_by="admin-1")
+    created = await invites.create(created_by="admin-1")
     with pytest.raises(WeakPassword):
-        service.register(raw_token=created.raw_token, email="a@example.com", password="short")
-    stored = invite_repo.get(created.invite.id)
+        await service.register(raw_token=created.raw_token, email="a@example.com", password="short")
+    stored = await invite_repo.get(created.invite.id)
     assert stored is not None
     assert stored.status(START) is InviteStatus.ACTIVE
-    assert users.get_by_email("a@example.com") is None
+    assert await users.get_by_email("a@example.com") is None
 
 
-def test_invalid_email_does_not_consume_the_invite(
+async def test_invalid_email_does_not_consume_the_invite(
     service: RegistrationService, invites: InviteService, invite_repo: InMemoryInviteRepository
 ) -> None:
-    created = invites.create(created_by="admin-1")
+    created = await invites.create(created_by="admin-1")
     with pytest.raises(InvalidEmail):
-        service.register(raw_token=created.raw_token, email="nope", password=PASSWORD)
-    stored = invite_repo.get(created.invite.id)
+        await service.register(raw_token=created.raw_token, email="nope", password=PASSWORD)
+    stored = await invite_repo.get(created.invite.id)
     assert stored is not None
     assert stored.status(START) is InviteStatus.ACTIVE
 
 
-def test_duplicate_email_is_rejected_before_consuming_a_second_invite(
+async def test_duplicate_email_is_rejected_before_consuming_a_second_invite(
     service: RegistrationService, invites: InviteService, invite_repo: InMemoryInviteRepository
 ) -> None:
-    first = invites.create(created_by="admin-1")
-    service.register(raw_token=first.raw_token, email="dup@example.com", password=PASSWORD)
-    second = invites.create(created_by="admin-1")
+    first = await invites.create(created_by="admin-1")
+    await service.register(raw_token=first.raw_token, email="dup@example.com", password=PASSWORD)
+    second = await invites.create(created_by="admin-1")
     with pytest.raises(EmailAlreadyRegistered):
-        service.register(raw_token=second.raw_token, email="Dup@example.com", password=PASSWORD)
-    stored = invite_repo.get(second.invite.id)
+        await service.register(
+            raw_token=second.raw_token, email="Dup@example.com", password=PASSWORD
+        )
+    stored = await invite_repo.get(second.invite.id)
     assert stored is not None
     assert stored.status(START) is InviteStatus.ACTIVE
 
 
-def test_unknown_invite_is_rejected(service: RegistrationService) -> None:
+async def test_unknown_invite_is_rejected(service: RegistrationService) -> None:
     with pytest.raises(InviteNotFound):
-        service.register(raw_token="not-a-token", email="a@example.com", password=PASSWORD)
+        await service.register(raw_token="not-a-token", email="a@example.com", password=PASSWORD)
 
 
-def test_expired_invite_is_rejected(
+async def test_expired_invite_is_rejected(
     service: RegistrationService, invites: InviteService, clock: FakeClock
 ) -> None:
-    created = invites.create(created_by="admin-1", ttl=timedelta(hours=1))
+    created = await invites.create(created_by="admin-1", ttl=timedelta(hours=1))
     clock.advance(timedelta(hours=1))
     with pytest.raises(InviteExpired):
-        service.register(raw_token=created.raw_token, email="a@example.com", password=PASSWORD)
+        await service.register(
+            raw_token=created.raw_token, email="a@example.com", password=PASSWORD
+        )
 
 
-def test_add_race_after_redeem_surfaces_as_already_registered(
+async def test_add_race_after_redeem_surfaces_as_already_registered(
     invites: InviteService, clock: FakeClock
 ) -> None:
     class RacingUserRepository(InMemoryUserRepository):
         """A rival signup inserted the same email between our pre-check and add."""
 
-        def get_by_email(self, email: str) -> User | None:
+        async def get_by_email(self, email: str) -> User | None:
             return None
 
-        def add(self, user: User) -> None:
+        async def add(self, user: User) -> None:
             raise EmailAlreadyRegistered(user.email)
 
     service = RegistrationService(invites, RacingUserRepository(), FakeHasher(), clock)
-    created = invites.create(created_by="admin-1")
+    created = await invites.create(created_by="admin-1")
     with pytest.raises(EmailAlreadyRegistered):
-        service.register(raw_token=created.raw_token, email="a@example.com", password=PASSWORD)
+        await service.register(
+            raw_token=created.raw_token, email="a@example.com", password=PASSWORD
+        )

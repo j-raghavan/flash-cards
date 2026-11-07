@@ -53,8 +53,8 @@ class AuthService:
         # wrong password cost the same work and cannot be told apart by timing.
         self._dummy_hash = hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
 
-    def login(self, *, email: str, password: str) -> IssuedSession:
-        user = self._users.get_by_email(normalize_email(email))
+    async def login(self, *, email: str, password: str) -> IssuedSession:
+        user = await self._users.get_by_email(normalize_email(email))
         if user is None:
             self._hasher.verify(self._dummy_hash, password)
             raise InvalidCredentials()
@@ -62,9 +62,9 @@ class AuthService:
             raise InvalidCredentials()
         if user.status() is UserStatus.SUSPENDED:
             raise AccountSuspended()
-        return self.start_session(user)
+        return await self.start_session(user)
 
-    def start_session(self, user: User) -> IssuedSession:
+    async def start_session(self, user: User) -> IssuedSession:
         """Issue a session for an already-authenticated user (e.g. just after signup)."""
         now = self._clock.now()
         raw_token = secrets.token_urlsafe(TOKEN_BYTES)
@@ -75,24 +75,24 @@ class AuthService:
             created_at=now,
             expires_at=now + self._ttl,
         )
-        self._sessions.add(session)
+        await self._sessions.add(session)
         return IssuedSession(session=session, raw_token=raw_token)
 
-    def authenticate(self, raw_token: str) -> Session | None:
+    async def authenticate(self, raw_token: str) -> Session | None:
         """Return the live session for a cookie token, or None if absent/expired/revoked."""
-        session = self._sessions.get_by_token_hash(hash_token(raw_token))
+        session = await self._sessions.get_by_token_hash(hash_token(raw_token))
         if session is None or not session.is_valid(self._clock.now()):
             return None
         return session
 
-    def logout(self, raw_token: str) -> bool:
-        session = self._sessions.get_by_token_hash(hash_token(raw_token))
+    async def logout(self, raw_token: str) -> bool:
+        session = await self._sessions.get_by_token_hash(hash_token(raw_token))
         if session is None:
             return False
-        return self._sessions.revoke(session.id, self._clock.now())
+        return await self._sessions.revoke(session.id, self._clock.now())
 
-    def sessions_for(self, user_id: str) -> list[Session]:
-        return self._sessions.list_for_user(user_id)
+    async def sessions_for(self, user_id: str) -> list[Session]:
+        return await self._sessions.list_for_user(user_id)
 
-    def revoke_session(self, session_id: str) -> bool:
-        return self._sessions.revoke(session_id, self._clock.now())
+    async def revoke_session(self, session_id: str) -> bool:
+        return await self._sessions.revoke(session_id, self._clock.now())

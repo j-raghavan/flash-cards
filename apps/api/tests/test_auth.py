@@ -71,99 +71,99 @@ def service(
     return AuthService(users, sessions, FakeHasher(), clock)
 
 
-def test_login_issues_a_session_for_valid_credentials(
+async def test_login_issues_a_session_for_valid_credentials(
     service: AuthService, users: InMemoryUserRepository, sessions: InMemorySessionRepository
 ) -> None:
-    users.add(make_user())
-    issued = service.login(email="  Person@Example.COM ", password=PASSWORD)
+    await users.add(make_user())
+    issued = await service.login(email="  Person@Example.COM ", password=PASSWORD)
     assert issued.session.user_id == "user-1"
     assert issued.session.expires_at == START + timedelta(days=14)
-    stored = sessions.get_by_token_hash(hash_token(issued.raw_token))
+    stored = await sessions.get_by_token_hash(hash_token(issued.raw_token))
     assert stored is not None
     assert stored.id == issued.session.id
 
 
-def test_login_unknown_email_is_invalid(service: AuthService) -> None:
+async def test_login_unknown_email_is_invalid(service: AuthService) -> None:
     with pytest.raises(InvalidCredentials):
-        service.login(email="nobody@example.com", password=PASSWORD)
+        await service.login(email="nobody@example.com", password=PASSWORD)
 
 
-def test_login_wrong_password_is_invalid(
+async def test_login_wrong_password_is_invalid(
     service: AuthService, users: InMemoryUserRepository
 ) -> None:
-    users.add(make_user())
+    await users.add(make_user())
     with pytest.raises(InvalidCredentials):
-        service.login(email=EMAIL, password="wrong-password-xyz")
+        await service.login(email=EMAIL, password="wrong-password-xyz")
 
 
-def test_login_suspended_account_is_rejected(
+async def test_login_suspended_account_is_rejected(
     service: AuthService, users: InMemoryUserRepository
 ) -> None:
-    users.add(make_user(suspended=True))
+    await users.add(make_user(suspended=True))
     with pytest.raises(AccountSuspended):
-        service.login(email=EMAIL, password=PASSWORD)
+        await service.login(email=EMAIL, password=PASSWORD)
 
 
-def test_authenticate_returns_the_live_session(
+async def test_authenticate_returns_the_live_session(
     service: AuthService, users: InMemoryUserRepository
 ) -> None:
-    users.add(make_user())
-    issued = service.login(email=EMAIL, password=PASSWORD)
-    found = service.authenticate(issued.raw_token)
+    await users.add(make_user())
+    issued = await service.login(email=EMAIL, password=PASSWORD)
+    found = await service.authenticate(issued.raw_token)
     assert found is not None
     assert found.id == issued.session.id
 
 
-def test_authenticate_unknown_token_is_none(service: AuthService) -> None:
-    assert service.authenticate("not-a-session-token") is None
+async def test_authenticate_unknown_token_is_none(service: AuthService) -> None:
+    assert await service.authenticate("not-a-session-token") is None
 
 
-def test_authenticate_expired_session_is_none(
+async def test_authenticate_expired_session_is_none(
     service: AuthService, users: InMemoryUserRepository, clock: FakeClock
 ) -> None:
-    users.add(make_user())
-    issued = service.login(email=EMAIL, password=PASSWORD)
+    await users.add(make_user())
+    issued = await service.login(email=EMAIL, password=PASSWORD)
     clock.advance(timedelta(days=14))
-    assert service.authenticate(issued.raw_token) is None
+    assert await service.authenticate(issued.raw_token) is None
 
 
-def test_logout_revokes_the_session(
+async def test_logout_revokes_the_session(
     service: AuthService, users: InMemoryUserRepository
 ) -> None:
-    users.add(make_user())
-    issued = service.login(email=EMAIL, password=PASSWORD)
-    assert service.logout(issued.raw_token) is True
-    assert service.authenticate(issued.raw_token) is None
+    await users.add(make_user())
+    issued = await service.login(email=EMAIL, password=PASSWORD)
+    assert await service.logout(issued.raw_token) is True
+    assert await service.authenticate(issued.raw_token) is None
 
 
-def test_logout_unknown_token_is_false(service: AuthService) -> None:
-    assert service.logout("not-a-session-token") is False
+async def test_logout_unknown_token_is_false(service: AuthService) -> None:
+    assert await service.logout("not-a-session-token") is False
 
 
-def test_logout_is_idempotent_only_once(
+async def test_logout_is_idempotent_only_once(
     service: AuthService, users: InMemoryUserRepository
 ) -> None:
-    users.add(make_user())
-    issued = service.login(email=EMAIL, password=PASSWORD)
-    assert service.logout(issued.raw_token) is True
-    assert service.logout(issued.raw_token) is False
+    await users.add(make_user())
+    issued = await service.login(email=EMAIL, password=PASSWORD)
+    assert await service.logout(issued.raw_token) is True
+    assert await service.logout(issued.raw_token) is False
 
 
-def test_sessions_for_lists_newest_first(
+async def test_sessions_for_lists_newest_first(
     service: AuthService, users: InMemoryUserRepository, clock: FakeClock
 ) -> None:
-    users.add(make_user())
-    first = service.login(email=EMAIL, password=PASSWORD)
+    await users.add(make_user())
+    first = await service.login(email=EMAIL, password=PASSWORD)
     clock.advance(timedelta(minutes=5))
-    second = service.login(email=EMAIL, password=PASSWORD)
-    listed = service.sessions_for("user-1")
+    second = await service.login(email=EMAIL, password=PASSWORD)
+    listed = await service.sessions_for("user-1")
     assert [s.id for s in listed] == [second.session.id, first.session.id]
 
 
-def test_revoke_session_by_id(
+async def test_revoke_session_by_id(
     service: AuthService, users: InMemoryUserRepository
 ) -> None:
-    users.add(make_user())
-    issued = service.login(email=EMAIL, password=PASSWORD)
-    assert service.revoke_session(issued.session.id) is True
-    assert service.revoke_session(issued.session.id) is False
+    await users.add(make_user())
+    issued = await service.login(email=EMAIL, password=PASSWORD)
+    assert await service.revoke_session(issued.session.id) is True
+    assert await service.revoke_session(issued.session.id) is False

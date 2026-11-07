@@ -34,7 +34,7 @@ class RegistrationService:
         self._hasher = hasher
         self._clock = clock
 
-    def register(self, *, raw_token: str, email: str, password: str) -> User:
+    async def register(self, *, raw_token: str, email: str, password: str) -> User:
         """Redeem the invite and create the user, returning the new account.
 
         Validates input before touching the invite so a weak password or bad
@@ -48,10 +48,10 @@ class RegistrationService:
         """
         normalized_email = validate_email(email)
         validate_password(password)
-        if self._users.get_by_email(normalized_email) is not None:
+        if await self._users.get_by_email(normalized_email) is not None:
             raise EmailAlreadyRegistered(normalized_email)
 
-        invite = self._invites.redeem(raw_token, email=normalized_email)
+        invite = await self._invites.redeem(raw_token, email=normalized_email)
 
         user = User(
             id=str(uuid.uuid4()),
@@ -60,5 +60,5 @@ class RegistrationService:
             role=invite.role,
             created_at=self._clock.now(),
         )
-        self._users.add(user)
+        await self._users.add(user)
         return user

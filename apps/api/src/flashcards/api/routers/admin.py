@@ -15,12 +15,12 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.post("/invites", status_code=status.HTTP_201_CREATED, response_model=CreatedInviteOut)
-def create_invite(
+async def create_invite(
     body: InviteCreateRequest,
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container),
 ) -> CreatedInviteOut:
-    created = container.invites.create(
+    created = await container.invites.create(
         created_by=admin.user.id,
         role=body.role,
         email=body.email,
@@ -36,20 +36,20 @@ def create_invite(
 
 
 @router.get("/invites", response_model=list[InviteOut])
-def list_invites(
+async def list_invites(
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container),
 ) -> list[InviteOut]:
     now = container.clock.now()
-    return [InviteOut.from_invite(inv, now) for inv in container.invite_repo.list_all()]
+    return [InviteOut.from_invite(inv, now) for inv in await container.invite_repo.list_all()]
 
 
 @router.post("/invites/{invite_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_invite(
+async def revoke_invite(
     invite_id: str,
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container),
 ) -> Response:
-    if not container.invites.revoke(invite_id):
+    if not await container.invites.revoke(invite_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No active invite with that id.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
