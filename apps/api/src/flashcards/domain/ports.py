@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Protocol
 
 from flashcards.domain.invites import Invite
+from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
 
 
@@ -39,6 +40,20 @@ class UserRepository(Protocol):
     def get(self, user_id: str) -> User | None: ...
 
     def get_by_email(self, email: str) -> User | None: ...
+
+
+class SessionRepository(Protocol):
+    def add(self, session: Session) -> None: ...
+
+    def get_by_token_hash(self, token_hash: str) -> Session | None: ...
+
+    def list_for_user(self, user_id: str) -> list[Session]:
+        """Return the user's sessions, newest first, for a device list."""
+        ...
+
+    def revoke(self, session_id: str, now: datetime) -> bool:
+        """Mark an active session revoked; return whether it changed."""
+        ...
 
 
 class InviteRepository(Protocol):

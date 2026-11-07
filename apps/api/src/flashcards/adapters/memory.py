@@ -7,6 +7,7 @@ import threading
 from datetime import UTC, datetime
 
 from flashcards.domain.invites import Invite
+from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 
@@ -73,3 +74,33 @@ class InMemoryUserRepository:
         with self._lock:
             user_id = self._email_to_id.get(email)
             return self._by_id.get(user_id) if user_id is not None else None
+
+
+class InMemorySessionRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Session] = {}
+        self._lock = threading.Lock()
+
+    def add(self, session: Session) -> None:
+        with self._lock:
+            self._by_id[session.id] = session
+
+    def get_by_token_hash(self, token_hash: str) -> Session | None:
+        with self._lock:
+            for session in self._by_id.values():
+                if session.token_hash == token_hash:
+                    return session
+        return None
+
+    def list_for_user(self, user_id: str) -> list[Session]:
+        with self._lock:
+            sessions = [s for s in self._by_id.values() if s.user_id == user_id]
+        return sorted(sessions, key=lambda s: s.created_at, reverse=True)
+
+    def revoke(self, session_id: str, now: datetime) -> bool:
+        with self._lock:
+            session = self._by_id.get(session_id)
+            if session is None or session.revoked_at is not None:
+                return False
+            self._by_id[session_id] = session.with_revoked(now)
+            return True
