@@ -7,12 +7,38 @@ from datetime import datetime
 from typing import Protocol
 
 from flashcards.domain.invites import Invite
+from flashcards.domain.users import User
 
 
 class Clock(Protocol):
     def now(self) -> datetime:
         """Return the current time as a timezone-aware UTC datetime."""
         ...
+
+
+class PasswordHasher(Protocol):
+    def hash(self, password: str) -> str:
+        """Return a self-describing password hash (algorithm and parameters embedded)."""
+        ...
+
+    def verify(self, password_hash: str, password: str) -> bool:
+        """Return whether the password matches the hash. Never raises on a mismatch."""
+        ...
+
+
+class UserRepository(Protocol):
+    def add(self, user: User) -> None:
+        """Persist a new user.
+
+        Raise flashcards.domain.users.EmailAlreadyRegistered if the email is
+        already taken. A SQL adapter enforces this with a unique constraint and
+        creates the user in the same transaction that consumes the invite.
+        """
+        ...
+
+    def get(self, user_id: str) -> User | None: ...
+
+    def get_by_email(self, email: str) -> User | None: ...
 
 
 class InviteRepository(Protocol):

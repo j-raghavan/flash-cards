@@ -81,8 +81,10 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S", "SIM"]
 
+# Tests use asserts (S101) and literal fixture passwords/tokens (S105/S106);
+# these are not production secrets.
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+"tests/*" = ["S101", "S105", "S106"]
 
 [tool.mypy]
 strict = true

@@ -7,6 +7,7 @@ import threading
 from datetime import UTC, datetime
 
 from flashcards.domain.invites import Invite
+from flashcards.domain.users import EmailAlreadyRegistered, User
 
 
 class SystemClock:
@@ -49,3 +50,26 @@ class InMemoryInviteRepository:
                 return False
             self._by_id[invite_id] = invite.with_revoked(now)
             return True
+
+
+class InMemoryUserRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, User] = {}
+        self._email_to_id: dict[str, str] = {}
+        self._lock = threading.Lock()
+
+    def add(self, user: User) -> None:
+        with self._lock:
+            if user.email in self._email_to_id:
+                raise EmailAlreadyRegistered(user.email)
+            self._by_id[user.id] = user
+            self._email_to_id[user.email] = user.id
+
+    def get(self, user_id: str) -> User | None:
+        with self._lock:
+            return self._by_id.get(user_id)
+
+    def get_by_email(self, email: str) -> User | None:
+        with self._lock:
+            user_id = self._email_to_id.get(email)
+            return self._by_id.get(user_id) if user_id is not None else None
