@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Callable
+
+# Testcontainers' Ryuk reaper fails to start under some Docker Desktop setups;
+# the container context managers clean up their own containers, so disable it.
+os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 import pytest
 from fastapi import FastAPI

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request, Response, status
@@ -17,9 +18,12 @@ from flashcards.domain.users import User, UserStatus
 SESSION_COOKIE = "fc_session"
 
 
-def get_container(request: Request) -> Container:
-    container: Container = request.app.state.container
-    return container
+async def get_container(request: Request) -> AsyncIterator[Container]:
+    # Resolve the per-request container from the configured provider. In SQL mode
+    # this opens a session+transaction that commits after the response (or rolls
+    # back if the handler raises); in-memory mode yields the shared container.
+    async for container in request.app.state.services_provider():
+        yield container
 
 
 def get_settings(request: Request) -> Settings:

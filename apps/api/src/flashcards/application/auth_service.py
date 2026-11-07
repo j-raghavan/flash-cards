@@ -43,6 +43,7 @@ class AuthService:
         hasher: PasswordHasher,
         clock: Clock,
         ttl: timedelta = DEFAULT_SESSION_TTL,
+        dummy_hash: str | None = None,
     ) -> None:
         self._users = users
         self._sessions = sessions
@@ -51,7 +52,11 @@ class AuthService:
         self._ttl = ttl
         # A throwaway hash verified when no user matches, so an absent account and a
         # wrong password cost the same work and cannot be told apart by timing.
-        self._dummy_hash = hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
+        # Callers that build one AuthService per request pass a precomputed value
+        # so the Argon2 work happens once at startup, not on every request.
+        self._dummy_hash = dummy_hash if dummy_hash is not None else hasher.hash(
+            secrets.token_urlsafe(TOKEN_BYTES)
+        )
 
     async def login(self, *, email: str, password: str) -> IssuedSession:
         user = await self._users.get_by_email(normalize_email(email))

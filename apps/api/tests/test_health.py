@@ -27,3 +27,9 @@ def test_docs_are_available_in_development() -> None:
 
 def test_invite_only_is_on_by_default() -> None:
     assert Settings().invite_only is True
+
+
+def test_lifespan_runs_for_in_memory_app() -> None:
+    # Entering the context runs startup/shutdown; in-memory mode has no engine to dispose.
+    with TestClient(create_app(Settings(environment="test"))) as client:
+        assert client.get("/healthz").status_code == 200

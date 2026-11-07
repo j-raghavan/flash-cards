@@ -22,6 +22,7 @@ from flashcards.application.registration_service import RegistrationService
 from flashcards.domain.ports import (
     Clock,
     InviteRepository,
+    PasswordHasher,
     SessionRepository,
     UserRepository,
 )
@@ -38,17 +39,18 @@ class Container:
     auth: AuthService
 
 
-def build_container() -> Container:
-    clock = SystemClock()
-    invite_repo = InMemoryInviteRepository()
-    user_repo = InMemoryUserRepository()
-    session_repo = InMemorySessionRepository()
-    hasher = Argon2PasswordHasher()
-
+def build_services(
+    clock: Clock,
+    invite_repo: InviteRepository,
+    user_repo: UserRepository,
+    session_repo: SessionRepository,
+    hasher: PasswordHasher,
+    dummy_hash: str | None = None,
+) -> Container:
+    """Wire the services over a given set of repositories and clock."""
     invites = InviteService(invite_repo, clock)
     registration = RegistrationService(invites, user_repo, hasher, clock)
-    auth = AuthService(user_repo, session_repo, hasher, clock)
-
+    auth = AuthService(user_repo, session_repo, hasher, clock, dummy_hash=dummy_hash)
     return Container(
         clock=clock,
         invite_repo=invite_repo,
@@ -57,4 +59,15 @@ def build_container() -> Container:
         invites=invites,
         registration=registration,
         auth=auth,
+    )
+
+
+def build_container() -> Container:
+    """Build an in-memory container (default for dev and tests)."""
+    return build_services(
+        SystemClock(),
+        InMemoryInviteRepository(),
+        InMemoryUserRepository(),
+        InMemorySessionRepository(),
+        Argon2PasswordHasher(),
     )

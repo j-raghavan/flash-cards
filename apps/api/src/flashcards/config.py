@@ -16,5 +16,7 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = True
     # Dev convenience: seed one admin invite at startup and log its token, so a
     # local instance is usable before persistence/first-admin bootstrap exist.
-    # Ignored in production.
+    # Ignored in production and in SQL mode.
     dev_bootstrap_invite: bool = False
+    # SQLAlchemy async URL (postgresql+asyncpg://...). Unset means in-memory mode.
+    database_url: str | None = None
