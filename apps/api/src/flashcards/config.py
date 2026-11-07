@@ -14,3 +14,7 @@ class Settings(BaseSettings):
     max_upload_pages: int = 20
     # Session cookie is marked Secure by default; turn off only for HTTP in tests.
     session_cookie_secure: bool = True
+    # Dev convenience: seed one admin invite at startup and log its token, so a
+    # local instance is usable before persistence/first-admin bootstrap exist.
+    # Ignored in production.
+    dev_bootstrap_invite: bool = False
