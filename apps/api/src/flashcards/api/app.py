@@ -6,6 +6,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from flashcards import __version__
+from flashcards.api.container import build_container
+from flashcards.api.routers import admin, auth
 from flashcards.config import Settings
 
 
@@ -20,6 +22,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json" if settings.environment == "development" else None,
     )
     app.state.settings = settings
+    app.state.container = build_container()
+
+    app.include_router(auth.router)
+    app.include_router(admin.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

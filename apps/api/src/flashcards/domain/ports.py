@@ -63,6 +63,10 @@ class InviteRepository(Protocol):
 
     def get_by_token_hash(self, token_hash: str) -> Invite | None: ...
 
+    def list_all(self) -> list[Invite]:
+        """Return all invites, newest first, for the admin console."""
+        ...
+
     def try_redeem(self, invite_id: str, now: datetime) -> bool:
         """Atomically mark the invite redeemed.
 

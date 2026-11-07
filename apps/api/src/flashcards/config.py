@@ -12,3 +12,5 @@ class Settings(BaseSettings):
     environment: str = "development"
     invite_only: bool = True
     max_upload_pages: int = 20
+    # Session cookie is marked Secure by default; turn off only for HTTP in tests.
+    session_cookie_secure: bool = True

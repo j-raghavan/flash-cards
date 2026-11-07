@@ -11,7 +11,7 @@ from datetime import timedelta
 from flashcards.domain.invites import hash_token, normalize_email
 from flashcards.domain.ports import Clock, PasswordHasher, SessionRepository, UserRepository
 from flashcards.domain.sessions import Session
-from flashcards.domain.users import UserStatus
+from flashcards.domain.users import User, UserStatus
 
 DEFAULT_SESSION_TTL = timedelta(days=14)
 TOKEN_BYTES = 32
@@ -62,7 +62,10 @@ class AuthService:
             raise InvalidCredentials()
         if user.status() is UserStatus.SUSPENDED:
             raise AccountSuspended()
+        return self.start_session(user)
 
+    def start_session(self, user: User) -> IssuedSession:
+        """Issue a session for an already-authenticated user (e.g. just after signup)."""
         now = self._clock.now()
         raw_token = secrets.token_urlsafe(TOKEN_BYTES)
         session = Session(

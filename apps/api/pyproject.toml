@@ -81,6 +81,21 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S", "SIM"]
 
+# FastAPI's dependency/parameter markers are meant to be called in argument
+# defaults, so they are not the mutable-default footgun B008 warns about.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Query",
+  "fastapi.Path",
+  "fastapi.Header",
+  "fastapi.Cookie",
+  "fastapi.Body",
+  "fastapi.Form",
+  "fastapi.File",
+  "fastapi.Security",
+]
+
 # Tests use asserts (S101) and literal fixture passwords/tokens (S105/S106);
 # these are not production secrets.
 [tool.ruff.lint.per-file-ignores]

@@ -36,6 +36,11 @@ class InMemoryInviteRepository:
                     return invite
         return None
 
+    def list_all(self) -> list[Invite]:
+        with self._lock:
+            invites = list(self._by_id.values())
+        return sorted(invites, key=lambda inv: inv.created_at, reverse=True)
+
     def try_redeem(self, invite_id: str, now: datetime) -> bool:
         with self._lock:
             invite = self._by_id.get(invite_id)
