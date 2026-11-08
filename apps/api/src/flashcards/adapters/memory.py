@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
@@ -96,3 +97,24 @@ class InMemorySessionRepository:
             return False
         self._by_id[session_id] = session.with_revoked(now)
         return True
+
+
+class InMemoryDeckRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Deck] = {}
+
+    async def add(self, deck: Deck) -> None:
+        self._by_id[deck.id] = deck
+
+    async def get(self, deck_id: str) -> Deck | None:
+        return self._by_id.get(deck_id)
+
+    async def list_for_owner(self, owner_id: str) -> list[Deck]:
+        owned = [d for d in self._by_id.values() if d.owner_id == owner_id]
+        return sorted(owned, key=lambda d: d.created_at)
+
+    async def update(self, deck: Deck) -> None:
+        self._by_id[deck.id] = deck
+
+    async def delete(self, deck_id: str) -> None:
+        self._by_id.pop(deck_id, None)

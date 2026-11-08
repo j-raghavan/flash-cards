@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
@@ -79,3 +80,19 @@ class InviteRepository(Protocol):
     async def try_revoke(self, invite_id: str, now: datetime) -> bool:
         """Mark an unredeemed, unrevoked invite revoked; return whether it changed."""
         ...
+
+
+class DeckRepository(Protocol):
+    async def add(self, deck: Deck) -> None: ...
+
+    async def get(self, deck_id: str) -> Deck | None: ...
+
+    async def list_for_owner(self, owner_id: str) -> list[Deck]:
+        """Return the owner's decks, oldest first."""
+        ...
+
+    async def update(self, deck: Deck) -> None:
+        """Persist a rename or move of an existing deck."""
+        ...
+
+    async def delete(self, deck_id: str) -> None: ...
