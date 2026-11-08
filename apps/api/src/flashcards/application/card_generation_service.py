@@ -20,7 +20,7 @@ from flashcards.domain.ai import (
     StructuredRequest,
     parse_draft_cards,
 )
-from flashcards.domain.jobs import AiJob
+from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
@@ -60,7 +60,14 @@ class CardGenerationService:
         try:
             await self._process(job)
         except Exception as exc:  # any failure is captured on the job, never raised
-            await self._jobs.update(job.failed(str(exc), self._clock.now()))
+            # Fail the latest job state, not the stale claimed one, so the progress
+            # _process persisted (completed_units, total_units) survives the failure
+            # and a retry can resume. Only a still-RUNNING job can go to FAILED, which
+            # it always is here (a job it finishes any other way returns, never raises).
+            current = await self._jobs.get(job_id)
+            if current is None or current.status is not JobStatus.RUNNING:
+                return  # pragma: no cover - defensive: the claimed job is RUNNING here
+            await self._jobs.update(current.failed(str(exc), self._clock.now()))
 
     async def _process(self, job: AiJob) -> None:
         data = await self._store.get(job.source_id)
@@ -73,20 +80,45 @@ class CardGenerationService:
                 data, file_id=job.source_id, max_pages=self._max_pages
             )
         ]
-        job = job.with_total(len(pages), self._clock.now())
-        await self._jobs.update(job)
+        if not pages:
+            # An empty/garbage upload must not look like a done job stuck at 0%.
+            await self._jobs.update(
+                job.failed("the document has no readable pages", self._clock.now())
+            )
+            return
 
-        for page in pages:
+        # On a retry, completed_units marks the pages already generated on an earlier
+        # attempt; resume from there so their drafts are not regenerated and duplicated.
+        resume_from = job.completed_units
+        await self._jobs.update(job.with_total(len(pages), self._clock.now()))
+
+        for index, page in enumerate(pages):
+            if index < resume_from:
+                continue
             current = await self._jobs.get(job.id)
-            if current is not None and current.cancel_requested:
+            if current is None:
+                return  # pragma: no cover - the job cannot vanish mid-run
+            if current.cancel_requested:
                 await self._jobs.update(current.cancelled(self._clock.now()))
                 return
-            for record in await self._generate_page(job, page):
+            records = await self._generate_page(current, page)
+            for record in records:
                 await self._drafts.add(record)
-            job = job.advanced(self._clock.now())
-            await self._jobs.update(job)
+            # Re-read before advancing: generation is the slow step, so a cancel can
+            # arrive during it. Advancing a fresh read records progress AND preserves
+            # that flag, where writing the pre-generation snapshot would wipe it.
+            latest = await self._jobs.get(job.id)
+            if latest is None:
+                return  # pragma: no cover - the job cannot vanish mid-run
+            if latest.cancel_requested:
+                await self._jobs.update(latest.cancelled(self._clock.now()))
+                return  # this page's drafts are kept; later pages are not generated
+            await self._jobs.update(latest.advanced(self._clock.now()))
 
-        await self._jobs.update(job.succeeded(self._clock.now()))
+        final = await self._jobs.get(job.id)
+        if final is None:
+            return  # pragma: no cover - the job cannot vanish mid-run
+        await self._jobs.update(final.succeeded(self._clock.now()))
 
     async def _generate_page(self, job: AiJob, page: ExtractedPage) -> list[DraftCardRecord]:
         request = StructuredRequest(

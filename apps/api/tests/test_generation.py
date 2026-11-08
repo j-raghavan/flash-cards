@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 
 from flashcards.adapters.memory import (
@@ -65,14 +65,26 @@ class FakeExtractor:
 
 
 class FakeLLM:
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        error: Exception | None = None,
+        *,
+        fail_on_call: int | None = None,
+        after_call: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self._error = error
+        self._fail_on_call = fail_on_call
+        self._after_call = after_call
         self.seen: list[StructuredRequest] = []
 
     async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
         self.seen.append(request)
         if self._error is not None:
             raise self._error
+        if self._fail_on_call is not None and len(self.seen) == self._fail_on_call:
+            raise LlmError(f"failed on call {self._fail_on_call}")
+        if self._after_call is not None:
+            await self._after_call()
         return StructuredResult(
             data={"cards": [{"type": "basic", "fields": {"front": "Q", "back": "A"}}]},
             usage=TokenUsage(input_tokens=10, output_tokens=20),
@@ -202,6 +214,73 @@ async def test_extractor_failure_marks_job_failed() -> None:
 
     job = await jobs.get(job_id)
     assert job is not None and job.status is JobStatus.FAILED
+
+
+async def test_failure_midway_preserves_progress_and_resumes_on_retry() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    extractor = FakeExtractor([_text_page(1), _text_page(2), _text_page(3)])
+    # The LLM fails on the second page's call the first time through.
+    failing_llm = FakeLLM(fail_on_call=2)
+    job_id = await _seed_job(jobs, store)
+
+    await _service(jobs, drafts, store, extractor, failing_llm).run(job_id)
+
+    failed = await jobs.get(job_id)
+    assert failed is not None and failed.status is JobStatus.FAILED
+    # Page 1 succeeded, so the resume point and the page total survive the failure.
+    assert (failed.completed_units, failed.total_units) == (1, 3)
+    assert [r.source_page for r in await drafts.list_for_job(job_id)] == [1]
+
+    # Retry with a healthy LLM: it resumes from page 2 and does not re-generate page 1.
+    await jobs.update(failed.retried(NOW))
+    await _service(jobs, drafts, store, extractor, FakeLLM()).run(job_id)
+
+    done = await jobs.get(job_id)
+    assert done is not None and done.status is JobStatus.SUCCEEDED
+    assert [r.source_page for r in await drafts.list_for_job(job_id)] == [1, 2, 3]
+
+
+async def test_zero_page_document_fails_rather_than_succeeding_at_zero() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    service = _service(jobs, drafts, store, FakeExtractor([]), FakeLLM())
+    job_id = await _seed_job(jobs, store)
+
+    await service.run(job_id)
+
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.FAILED
+    assert "no readable pages" in (job.error or "")
+    assert await drafts.list_for_job(job_id) == []
+
+
+async def test_cancel_between_pages_keeps_earlier_drafts() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    job_id = await _seed_job(jobs, store)
+
+    async def cancel_after_first_page() -> None:
+        await jobs.request_cancel(job_id, NOW)
+
+    # Cancel arrives while page 1 is generating; page 2 is never produced.
+    llm = FakeLLM(after_call=cancel_after_first_page)
+    service = _service(jobs, drafts, store, FakeExtractor([_text_page(1), _text_page(2)]), llm)
+
+    await service.run(job_id)
+
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.CANCELLED
+    assert [r.source_page for r in await drafts.list_for_job(job_id)] == [1]
 
 
 async def test_run_is_a_noop_when_not_claimable() -> None:
