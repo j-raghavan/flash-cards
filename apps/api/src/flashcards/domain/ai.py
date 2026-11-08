@@ -27,6 +27,10 @@ class InvalidDraft(LlmError):
     """The model output did not match the draft-card schema or had unusable fields."""
 
 
+class DraftNotFound(Exception):
+    """A draft card that does not exist, or is not the caller's / not in this job."""
+
+
 class Thoroughness(enum.StrEnum):
     CONCISE = "concise"
     STANDARD = "standard"

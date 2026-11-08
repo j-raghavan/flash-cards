@@ -259,7 +259,10 @@ class InMemoryDraftCardRepository:
 
     async def list_for_job(self, job_id: str) -> list[DraftCardRecord]:
         records = [r for r in self._by_id.values() if r.job_id == job_id]
-        return sorted(records, key=lambda r: r.created_at)
+        return sorted(records, key=lambda r: (r.created_at, r.source_page))
+
+    async def delete(self, record_id: str) -> None:
+        self._by_id.pop(record_id, None)
 
     async def delete_for_job(self, job_id: str) -> None:
         for record_id in [r.id for r in self._by_id.values() if r.job_id == job_id]:
