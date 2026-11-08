@@ -38,6 +38,7 @@ from flashcards.adapters.sql import (
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
+    SqlShareLinkRepository,
     SqlUserRepository,
 )
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
@@ -48,7 +49,7 @@ from flashcards.api.container import (
     build_services,
 )
 from flashcards.domain.ports import LLMProvider
-from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS
+from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
 
@@ -116,6 +117,8 @@ def sql_provider(
                     passages=SqlPassageRepository(session),
                     # Same counter table as page quota, separate daily period keys.
                     ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
+                    share_links=SqlShareLinkRepository(session),
+                    clone_quota=SqlQuotaRepository(session, limit=DEFAULT_DAILY_CLONE_CARDS),
                 )
             )
 

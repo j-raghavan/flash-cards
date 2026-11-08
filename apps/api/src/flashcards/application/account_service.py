@@ -32,9 +32,11 @@ from flashcards.domain.ports import (
     ReviewLogRepository,
     ScheduleRepository,
     SessionRepository,
+    ShareLinkRepository,
     UserRepository,
 )
 from flashcards.domain.scheduling import CardSchedule, ReviewLog
+from flashcards.domain.sharing import ShareLink
 from flashcards.domain.users import User
 
 
@@ -49,6 +51,7 @@ class AccountExport:
     goals: tuple[Goal, ...]
     media: tuple[MediaAsset, ...]
     mock_exams: tuple[MockExam, ...]
+    share_links: tuple[ShareLink, ...]
 
 
 class AccountService:
@@ -71,6 +74,8 @@ class AccountService:
         mock_exams: MockExamRepository,
         passages: PassageRepository,
         ai_calls: QuotaRepository,
+        share_links: ShareLinkRepository,
+        clone_quota: QuotaRepository,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -89,6 +94,8 @@ class AccountService:
         self._mock_exams = mock_exams
         self._passages = passages
         self._ai_calls = ai_calls
+        self._share_links = share_links
+        self._clone_quota = clone_quota
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -113,6 +120,7 @@ class AccountService:
             goals=tuple(await self._goals.list_for_owner(user.id)),
             media=tuple(await self._media.list_for_owner(user.id)),
             mock_exams=tuple(await self._mock_exams.list_for_owner(user.id)),
+            share_links=tuple(await self._share_links.list_for_owner(user.id)),
         )
 
     async def delete(self, *, user: User) -> None:
@@ -137,5 +145,7 @@ class AccountService:
         await self._passages.delete_for_owner(owner_id)
         await self._quotas.delete_for_owner(owner_id)
         await self._ai_calls.delete_for_owner(owner_id)
+        await self._share_links.delete_for_owner(owner_id)
+        await self._clone_quota.delete_for_owner(owner_id)
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)

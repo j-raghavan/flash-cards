@@ -19,6 +19,7 @@ from flashcards.adapters.memory import (
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemorySessionRepository,
+    InMemoryShareLinkRepository,
     InMemoryUserRepository,
 )
 from flashcards.application.account_service import AccountService
@@ -35,6 +36,7 @@ from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
+from flashcards.domain.sharing import ShareLink
 from flashcards.domain.users import User
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
@@ -68,19 +70,21 @@ class _Fixture:
         self.mock_exams = InMemoryMockExamRepository()
         self.passages = InMemoryPassageRepository()
         self.ai_calls = InMemoryQuotaRepository(limit=5)
+        self.share_links = InMemoryShareLinkRepository()
+        self.clone_quota = InMemoryQuotaRepository(limit=100)
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
         library = LibraryService(
             self.decks, self.notes, self.deck_repo, self.note_repo,
             self.card_repo, self.schedule_repo, self.log_repo, self.passages,
-            self.mock_exams,
+            self.mock_exams, self.share_links,
         )
         self.service = AccountService(
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
-            self.passages, self.ai_calls,
+            self.passages, self.ai_calls, self.share_links, self.clone_quota,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -150,6 +154,12 @@ class _Fixture:
         )
         await self.quotas.try_reserve_pages(owner, 1, "2026-11")
         await self.ai_calls.try_reserve_pages(owner, 5, "calls:2026-11-08")
+        await self.share_links.add(
+            ShareLink(
+                id=f"share-{owner}", owner_id=owner, deck_id=deck.id, token_hash=f"h-{owner}",
+                allow_clone=False, created_at=NOW,
+            )
+        )
 
 
 async def test_export_gathers_everything_the_user_owns() -> None:
@@ -166,6 +176,7 @@ async def test_export_gathers_everything_the_user_owns() -> None:
     assert len(export.goals) == 1
     assert [m.id for m in export.media] == ["media-alice"]
     assert [e.id for e in export.mock_exams] == ["exam-alice"]
+    assert [s.id for s in export.share_links] == ["share-alice"]
 
 
 async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> None:
@@ -195,6 +206,8 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.log_repo.list_for_owner(ALICE.id) == []
     assert await fx.media.list_for_owner(ALICE.id) == []
     assert await fx.mock_exams.get("exam-alice") is None
+    assert await fx.share_links.get("share-alice") is None
+    assert await fx.share_links.get("share-bob") is not None
     assert await fx.passages.indexed_files(fx_alice_deck) == set()
     assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset
     assert await fx.ai_calls.try_reserve_pages(ALICE.id, 1, "calls:2026-11-08") is True

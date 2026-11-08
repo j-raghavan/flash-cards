@@ -13,6 +13,7 @@ from flashcards.adapters.memory import (
     InMemoryPassageRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
+    InMemoryShareLinkRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.library_service import LibraryService
@@ -42,6 +43,7 @@ class _Fixture:
         self.log_repo = InMemoryReviewLogRepository()
         self.passage_repo = InMemoryPassageRepository()
         self.exam_repo = InMemoryMockExamRepository()
+        self.share_repo = InMemoryShareLinkRepository()
         clock = FakeClock()
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
@@ -55,6 +57,7 @@ class _Fixture:
             self.log_repo,
             self.passage_repo,
             self.exam_repo,
+            self.share_repo,
         )
 
     async def seed_card(self, card_id: str) -> None:

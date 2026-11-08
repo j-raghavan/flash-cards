@@ -13,6 +13,8 @@ from datetime import datetime
 DEFAULT_MONTHLY_PAGES = 10
 # Synchronous AI calls per user per day (each one is a model request).
 DEFAULT_DAILY_AI_CALLS = 200
+# Cards a user may create by cloning shared decks per day.
+DEFAULT_DAILY_CLONE_CARDS = 50_000
 
 
 class QuotaExceeded(Exception):
@@ -34,3 +36,8 @@ def ai_call_period(now: datetime) -> str:
     The prefix keeps it from ever colliding with a monthly page period.
     """
     return now.strftime("calls:%Y-%m-%d")
+
+
+def clone_period(now: datetime) -> str:
+    """The daily period key for cloned cards, e.g. 'clones:2026-11-08'."""
+    return now.strftime("clones:%Y-%m-%d")

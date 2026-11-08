@@ -65,6 +65,7 @@ def test_export_returns_all_the_users_data(member: TestClient) -> None:
     assert len(body["goals"]) == 1
     assert len(body["media"]) == 1 and body["media"][0]["content_type"] == "image/png"
     assert body["mock_exams"] == []
+    assert body["share_links"] == []
 
 
 def test_export_requires_auth(client: TestClient) -> None:

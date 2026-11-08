@@ -19,6 +19,7 @@ from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
+from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.transcripts import Transcript
 from flashcards.domain.users import User
@@ -135,8 +136,12 @@ class NoteRepository(Protocol):
 
     async def get(self, note_id: str) -> Note | None: ...
 
-    async def list_for_deck(self, deck_id: str) -> list[Note]:
-        """Return the deck's notes, oldest first."""
+    async def list_for_deck(self, deck_id: str, limit: int | None = None) -> list[Note]:
+        """Return the deck's notes, oldest first; at most `limit` when given."""
+        ...
+
+    async def count_for_deck(self, deck_id: str) -> int:
+        """How many notes the deck has, without loading them."""
         ...
 
     async def delete(self, note_id: str) -> None: ...
@@ -401,4 +406,30 @@ class PassageRepository(Protocol):
 
     async def delete_for_owner(self, owner_id: str) -> None:
         """Delete every passage the owner has (account deletion)."""
+        ...
+
+
+class ShareLinkRepository(Protocol):
+    async def add(self, link: ShareLink) -> None: ...
+
+    async def get(self, link_id: str) -> ShareLink | None: ...
+
+    async def get_by_token_hash(self, token_hash: str) -> ShareLink | None: ...
+
+    async def list_for_deck(self, deck_id: str) -> list[ShareLink]:
+        """Return the deck's links, oldest first, revoked ones included."""
+        ...
+
+    async def list_for_owner(self, owner_id: str) -> list[ShareLink]:
+        """Return every link the owner created, oldest first (account export)."""
+        ...
+
+    async def update(self, link: ShareLink) -> None: ...
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        """Delete a deck's links (deck deletion)."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every link the owner created (account deletion)."""
         ...

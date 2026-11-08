@@ -43,6 +43,7 @@ from flashcards.adapters.sql import (
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
+    SqlShareLinkRepository,
     SqlUserRepository,
 )
 from flashcards.adapters.transcripts import NullTranscriptProvider
@@ -54,6 +55,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.invites import InviteStatus, Role
 from flashcards.domain.ports import PasswordHasher
 from flashcards.domain.sessions import Session
+from flashcards.domain.sharing import ShareLink
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 
@@ -85,6 +87,8 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         transcripts=NullTranscriptProvider(),
         passages=SqlPassageRepository(session),
         ai_calls=SqlQuotaRepository(session, limit=200),
+        share_links=SqlShareLinkRepository(session),
+        clone_quota=SqlQuotaRepository(session, limit=50_000),
     )
 
 PASSWORD = "correct-horse-battery"
@@ -476,6 +480,8 @@ async def test_deck_delete_cascades_to_notes_cards_schedule_logs(engine: AsyncEn
         await SqlDeckRepository(s).delete("d1")
     async with sm() as s:
         assert await SqlNoteRepository(s).get("n1") is None
+        # The deck's share links go with it.
+        assert await SqlShareLinkRepository(s).get("share1") is None
         assert await SqlCardRepository(s).get("c1") is None
         assert await SqlScheduleRepository(s).get("c1") is None
 
@@ -531,6 +537,12 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
                 idempotency_key=None,
             )
         )
+        await SqlShareLinkRepository(s).add(
+            ShareLink(
+                id="share1", owner_id="alice", deck_id="d1", token_hash="share-hash",
+                allow_clone=True, created_at=_now(),
+            )
+        )
     async with sm() as s, s.begin():
         decks = DeckService(SqlDeckRepository(s), SystemClock())
         notes = NoteService(decks, SqlNoteRepository(s), SqlCardRepository(s), SystemClock())
@@ -544,6 +556,7 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
             SqlReviewLogRepository(s),
             SqlPassageRepository(s),
             SqlMockExamRepository(s),
+            SqlShareLinkRepository(s),
         )
         await library.delete_deck(owner_id="alice", deck_id="d1")
     async with sm() as s:
