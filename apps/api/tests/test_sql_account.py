@@ -140,3 +140,56 @@ async def test_media_roundtrip(engine: AsyncEngine) -> None:
         assert loaded is not None
         assert loaded.content_type == "image/png" and loaded.data == b"\x89PNG-bytes"
         assert await SqlMediaRepository(s).get("missing") is None
+
+
+async def test_owner_scoped_deletes(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import (
+        SqlMediaRepository,
+        SqlQuotaRepository,
+        SqlReviewLogRepository,
+    )
+    from flashcards.domain.media import MediaAsset
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        media = SqlMediaRepository(s)
+        await media.add(
+            MediaAsset(
+                id="m1", owner_id="alice", content_type="image/png", data=b"x", created_at=NOW
+            )
+        )
+        await media.add(
+            MediaAsset(
+                id="m2", owner_id="bob", content_type="image/png", data=b"y", created_at=NOW
+            )
+        )
+        # A deck+card so the review log's FK is satisfied, then an owner-scoped log.
+        await SqlDeckRepository(s).add(
+            Deck(id="dk", owner_id="alice", name="D", parent_id=None, created_at=NOW)
+        )
+        await SqlCardRepository(s).add(
+            Card(
+                id="ck", owner_id="alice", deck_id="dk", note_id="n", ordinal=0,
+                created_at=NOW, suspended_at=None,
+            )
+        )
+        await SqlReviewLogRepository(s).append(
+            ReviewLog(id="rl", owner_id="alice", card_id="ck", rating=Rating.GOOD, reviewed_at=NOW)
+        )
+        assert await SqlQuotaRepository(s).try_reserve_pages("alice", 2, "2026-11") is True
+
+    async with sm() as s:
+        assert [m.id for m in await SqlMediaRepository(s).list_for_owner("alice")] == ["m1"]
+
+    async with sm() as s, s.begin():
+        await SqlMediaRepository(s).delete_for_owner("alice")
+        await SqlReviewLogRepository(s).delete_for_owner("alice")
+        await SqlQuotaRepository(s).delete_for_owner("alice")
+
+    async with sm() as s:
+        assert await SqlMediaRepository(s).list_for_owner("alice") == []
+        assert await SqlReviewLogRepository(s).list_for_owner("alice") == []
+        # Alice's quota counter is gone, so a fresh reservation succeeds.
+        assert await SqlQuotaRepository(s).try_reserve_pages("alice", 1, "2026-11") is True
+        # Bob's media untouched.
+        assert [m.id for m in await SqlMediaRepository(s).list_for_owner("bob")] == ["m2"]

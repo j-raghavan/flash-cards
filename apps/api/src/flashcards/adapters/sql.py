@@ -319,6 +319,11 @@ class SqlReviewLogRepository:
             delete(ReviewLogRow).where(ReviewLogRow.card_id == card_id)
         )
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(
+            delete(ReviewLogRow).where(ReviewLogRow.owner_id == owner_id)
+        )
+
 
 class SqlAiJobRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -449,6 +454,9 @@ class SqlQuotaRepository:
         )
         return await self._session.scalar(stmt) is not None
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(delete(AiQuotaRow).where(AiQuotaRow.owner_id == owner_id))
+
 
 class SqlGoalRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -490,3 +498,12 @@ class SqlMediaRepository:
     async def get(self, media_id: str) -> MediaAsset | None:
         row = await self._session.get(MediaRow, media_id)
         return media_from_row(row) if row is not None else None
+
+    async def list_for_owner(self, owner_id: str) -> list[MediaAsset]:
+        rows = await self._session.scalars(
+            select(MediaRow).where(MediaRow.owner_id == owner_id).order_by(MediaRow.created_at)
+        )
+        return [media_from_row(row) for row in rows]
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(delete(MediaRow).where(MediaRow.owner_id == owner_id))

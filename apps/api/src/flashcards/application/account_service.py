@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from flashcards.application.library_service import LibraryService
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.ports import (
     AiJobRepository,
@@ -21,8 +22,10 @@ from flashcards.domain.ports import (
     DeckRepository,
     DraftCardRepository,
     GoalRepository,
+    MediaRepository,
     NoteRepository,
     ObjectStore,
+    QuotaRepository,
     ReviewLogRepository,
     ScheduleRepository,
     SessionRepository,
@@ -41,6 +44,7 @@ class AccountExport:
     schedules: tuple[CardSchedule, ...]
     review_logs: tuple[ReviewLog, ...]
     goals: tuple[Goal, ...]
+    media: tuple[MediaAsset, ...]
 
 
 class AccountService:
@@ -58,6 +62,8 @@ class AccountService:
         object_store: ObjectStore,
         sessions: SessionRepository,
         users: UserRepository,
+        media: MediaRepository,
+        quotas: QuotaRepository,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -71,6 +77,8 @@ class AccountService:
         self._object_store = object_store
         self._sessions = sessions
         self._users = users
+        self._media = media
+        self._quotas = quotas
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -93,9 +101,12 @@ class AccountService:
             schedules=tuple(schedules),
             review_logs=tuple(await self._review_logs.list_for_owner(user.id)),
             goals=tuple(await self._goals.list_for_owner(user.id)),
+            media=tuple(await self._media.list_for_owner(user.id)),
         )
 
     async def delete(self, *, user: User) -> None:
+        # In SQL mode the whole request runs in one transaction (sql_provider wraps
+        # it in session.begin()), so this erasure is atomic there.
         owner_id = user.id
         # AI jobs, their drafts (cascade) and their stored source files.
         for job in await self._ai_jobs.list_for_owner(owner_id):
@@ -104,10 +115,13 @@ class AccountService:
             await self._ai_jobs.delete(job.id)
         for goal in await self._goals.list_for_owner(owner_id):
             await self._goals.delete(goal.id)
-        # Delete top-level decks; each subtree takes its nested decks, notes, cards,
-        # schedules and review logs with it.
-        for deck in await self._decks.list_for_owner(owner_id):
-            if deck.parent_id is None:
-                await self._library.delete_deck(owner_id=owner_id, deck_id=deck.id)
+        # Every deck (flat, so a dangling-parent deck is still removed), with its
+        # notes, cards, schedules and review logs.
+        await self._library.delete_owner_library(owner_id)
+        # Any review logs not reached through a deck (export reads them per owner,
+        # so deletion matches), the uploaded media, and the usage counters.
+        await self._review_logs.delete_for_owner(owner_id)
+        await self._media.delete_for_owner(owner_id)
+        await self._quotas.delete_for_owner(owner_id)
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)

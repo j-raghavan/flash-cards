@@ -10,8 +10,10 @@ from flashcards.adapters.memory import (
     InMemoryDeckRepository,
     InMemoryDraftCardRepository,
     InMemoryGoalRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
+    InMemoryQuotaRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemorySessionRepository,
@@ -25,6 +27,7 @@ from flashcards.application.note_service import NoteService
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import new_generation_job
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
@@ -56,6 +59,8 @@ class _Fixture:
         self.store = InMemoryObjectStore()
         self.sessions = InMemorySessionRepository()
         self.users = InMemoryUserRepository()
+        self.media = InMemoryMediaRepository()
+        self.quotas = InMemoryQuotaRepository()
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -66,7 +71,7 @@ class _Fixture:
         self.service = AccountService(
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
-            self.sessions, self.users,
+            self.sessions, self.users, self.media, self.quotas,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -113,6 +118,13 @@ class _Fixture:
         )
         self._job_id = job.id
         self._source = job.source_id
+        await self.media.add(
+            MediaAsset(
+                id=f"media-{owner}", owner_id=owner, content_type="image/png",
+                data=b"\x89PNG", created_at=NOW,
+            )
+        )
+        await self.quotas.try_reserve_pages(owner, 1, "2026-11")
 
 
 async def test_export_gathers_everything_the_user_owns() -> None:
@@ -127,11 +139,13 @@ async def test_export_gathers_everything_the_user_owns() -> None:
     assert len(export.schedules) == 1  # only the reviewed card has one
     assert len(export.review_logs) == 1
     assert len(export.goals) == 1
+    assert [m.id for m in export.media] == ["media-alice"]
 
 
 async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> None:
     fx = _Fixture()
     await fx.seed_full_account(ALICE.id)
+    alice_job, alice_source = fx._job_id, fx._source
     # A nested deck, so deletion walks the subtree (and skips the child in the loop).
     await fx.decks.create(owner_id=ALICE.id, name="child", parent_id=fx._deck_id)
     await fx.sessions.add(
@@ -140,7 +154,7 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
             expires_at=NOW + timedelta(days=1), revoked_at=None,
         )
     )
-    bob_deck = await fx.decks.create(owner_id=BOB, name="Bob's deck")
+    await fx.seed_full_account(BOB)  # Bob's full account must survive Alice's deletion
 
     await fx.service.delete(user=ALICE)
     await fx.users.delete("ghost")  # deleting a missing user is a no-op
@@ -150,8 +164,11 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.decks.list_decks(owner_id=ALICE.id) == []
     assert await fx.goal_repo.list_for_owner(ALICE.id) == []
     assert await fx.ai_jobs.list_for_owner(ALICE.id) == []
-    assert await fx.draft_repo.list_for_job(fx._job_id) == []
-    assert await fx.store.get(fx._source) is None
+    assert await fx.draft_repo.list_for_job(alice_job) == []
+    assert await fx.store.get(alice_source) is None
     assert await fx.log_repo.list_for_owner(ALICE.id) == []
-    # Bob keeps his deck.
-    assert [d.id for d in await fx.decks.list_decks(owner_id=BOB)] == [bob_deck.id]
+    assert await fx.media.list_for_owner(ALICE.id) == []
+    assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset
+    # Bob keeps his deck and his media.
+    assert len(await fx.decks.list_decks(owner_id=BOB)) == 1
+    assert [m.id for m in await fx.media.list_for_owner(BOB)] == ["media-bob"]

@@ -219,6 +219,9 @@ class InMemoryReviewLogRepository:
     async def delete_for_card(self, card_id: str) -> None:
         self._logs = [log for log in self._logs if log.card_id != card_id]
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        self._logs = [log for log in self._logs if log.owner_id != owner_id]
+
 
 class InMemoryObjectStore:
     def __init__(self) -> None:
@@ -315,6 +318,10 @@ class InMemoryQuotaRepository:
         self._used[key] = used + pages
         return True
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for key in [k for k in self._used if k[0] == owner_id]:
+            del self._used[key]
+
 
 class InMemoryGoalRepository:
     def __init__(self) -> None:
@@ -346,3 +353,11 @@ class InMemoryMediaRepository:
 
     async def get(self, media_id: str) -> MediaAsset | None:
         return self._by_id.get(media_id)
+
+    async def list_for_owner(self, owner_id: str) -> list[MediaAsset]:
+        owned = [a for a in self._by_id.values() if a.owner_id == owner_id]
+        return sorted(owned, key=lambda a: a.created_at)
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for media_id in [a.id for a in self._by_id.values() if a.owner_id == owner_id]:
+            del self._by_id[media_id]

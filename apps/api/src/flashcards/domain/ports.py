@@ -204,6 +204,10 @@ class ReviewLogRepository(Protocol):
         """Delete every review log for a card."""
         ...
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every review log owned by the user (account deletion, F-IMP-5)."""
+        ...
+
 
 class DocumentExtractor(Protocol):
     def sniff(self, data: bytes) -> str:
@@ -293,6 +297,10 @@ class QuotaRepository(Protocol):
         """Atomically reserve pages against the owner's limit; True if within it."""
         ...
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete the owner's quota counters (account deletion, F-IMP-5)."""
+        ...
+
 
 class MediaTypeSniffer(Protocol):
     def sniff(self, data: bytes) -> str:
@@ -307,6 +315,14 @@ class MediaRepository(Protocol):
     async def add(self, asset: MediaAsset) -> None: ...
 
     async def get(self, media_id: str) -> MediaAsset | None: ...
+
+    async def list_for_owner(self, owner_id: str) -> list[MediaAsset]:
+        """The owner's media assets, oldest first (for data export)."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every media asset owned by the user (account deletion, F-IMP-5)."""
+        ...
 
 
 class PackageReader(Protocol):

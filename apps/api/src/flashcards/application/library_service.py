@@ -50,6 +50,19 @@ class LibraryService:
             await self._note_repo.delete_for_deck(sub_deck_id)
             await self._deck_repo.delete(sub_deck_id)
 
+    async def delete_owner_library(self, owner_id: str) -> None:
+        """Delete every deck the owner has, with its notes, cards, schedules and logs.
+
+        Flat over all owned decks rather than a root-down walk, so a deck with a
+        dangling or non-rooted parent_id is still removed (account deletion, F-IMP-5).
+        """
+        for deck in await self._deck_repo.list_for_owner(owner_id):
+            for card in await self._card_repo.list_for_deck(deck.id):
+                await self._purge_card(card.id)
+            await self._card_repo.delete_for_deck(deck.id)
+            await self._note_repo.delete_for_deck(deck.id)
+            await self._deck_repo.delete(deck.id)
+
     async def delete_note(self, *, owner_id: str, note_id: str) -> None:
         """Delete a note and the cards, schedules and logs it produced."""
         # Raises NoteNotFound if the note is missing or not the caller's.

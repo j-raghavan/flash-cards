@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import pymupdf
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -12,6 +13,15 @@ from fastapi.testclient import TestClient
 from flashcards.domain.invites import Role
 
 PASSWORD = "correct-horse-battery"
+
+
+def _png() -> bytes:
+    doc = pymupdf.open()
+    page = doc.new_page(width=16, height=16)
+    try:
+        return bytes(page.get_pixmap().tobytes("png"))
+    finally:
+        doc.close()
 
 
 @pytest.fixture
@@ -41,6 +51,7 @@ def test_export_returns_all_the_users_data(member: TestClient) -> None:
             "desired_grade": 0.5,
         },
     )
+    member.post("/media", files={"file": ("x", _png(), "image/png")})
 
     resp = member.get("/account/export")
     assert resp.status_code == 200
@@ -52,6 +63,7 @@ def test_export_returns_all_the_users_data(member: TestClient) -> None:
     assert len(body["schedules"]) == 1  # the reviewed card has a schedule
     assert len(body["review_logs"]) == 1
     assert len(body["goals"]) == 1
+    assert len(body["media"]) == 1 and body["media"][0]["content_type"] == "image/png"
 
 
 def test_export_requires_auth(client: TestClient) -> None:

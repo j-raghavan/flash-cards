@@ -176,6 +176,8 @@ def build_services(repos: Repositories) -> Container:
         repos.object_store,
         repos.sessions,
         repos.users,
+        repos.media,
+        repos.quotas,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     return Container(

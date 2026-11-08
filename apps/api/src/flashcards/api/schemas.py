@@ -384,6 +384,12 @@ class GoalExportOut(BaseModel):
     created_at: datetime
 
 
+class MediaExportOut(BaseModel):
+    id: str
+    content_type: str
+    created_at: datetime  # metadata only; the bytes are fetched from GET /media/{id}
+
+
 class AccountExportOut(BaseModel):
     user: UserExportOut
     decks: list[DeckExportOut]
@@ -392,6 +398,7 @@ class AccountExportOut(BaseModel):
     schedules: list[ScheduleExportOut]
     review_logs: list[ReviewLogExportOut]
     goals: list[GoalExportOut]
+    media: list[MediaExportOut]
 
     @classmethod
     def from_export(cls, export: AccountExport) -> AccountExportOut:
@@ -455,5 +462,9 @@ class AccountExportOut(BaseModel):
                     created_at=g.created_at,
                 )
                 for g in export.goals
+            ],
+            media=[
+                MediaExportOut(id=m.id, content_type=m.content_type, created_at=m.created_at)
+                for m in export.media
             ],
         )
