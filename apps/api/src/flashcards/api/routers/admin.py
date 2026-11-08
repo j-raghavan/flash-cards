@@ -28,7 +28,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 async def create_invite(
     body: InviteCreateRequest,
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> CreatedInviteOut:
     created = await container.admin.create_invite(
         admin_id=admin.user.id,
@@ -48,7 +48,7 @@ async def create_invite(
 @router.get("/invites", response_model=list[InviteOut])
 async def list_invites(
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[InviteOut]:
     now = container.clock.now()
     return [InviteOut.from_invite(inv, now) for inv in await container.invite_repo.list_all()]
@@ -58,7 +58,7 @@ async def list_invites(
 async def revoke_invite(
     invite_id: str,
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     if not await container.admin.revoke_invite(admin_id=admin.user.id, invite_id=invite_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No active invite with that id.")
@@ -70,7 +70,7 @@ async def list_audit_events(
     limit: int = Query(default=50, gt=0, le=200),
     before: datetime | None = Query(default=None),
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[AuditEventOut]:
     events = await container.audit.recent(limit=limit, before=before)
     return [AuditEventOut.from_event(event) for event in events]
@@ -79,7 +79,7 @@ async def list_audit_events(
 @router.get("/users", response_model=list[AdminUserOut])
 async def list_users(
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[AdminUserOut]:
     return [AdminUserOut.from_user(user) for user in await container.admin.list_users()]
 
@@ -88,7 +88,7 @@ async def list_users(
 async def suspend_user(
     user_id: str,
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> AdminUserOut:
     user = await container.admin.suspend_user(admin_id=admin.user.id, user_id=user_id)
     return AdminUserOut.from_user(user)
@@ -98,7 +98,7 @@ async def suspend_user(
 async def unsuspend_user(
     user_id: str,
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> AdminUserOut:
     user = await container.admin.unsuspend_user(admin_id=admin.user.id, user_id=user_id)
     return AdminUserOut.from_user(user)
@@ -109,7 +109,7 @@ async def set_user_role(
     user_id: str,
     body: RoleUpdateRequest,
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> AdminUserOut:
     user = await container.admin.set_role(
         admin_id=admin.user.id, user_id=user_id, role=body.role
@@ -121,7 +121,7 @@ async def set_user_role(
 async def delete_user(
     user_id: str,
     admin: CurrentUser = Depends(require_admin),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     await container.admin.delete_user(admin_id=admin.user.id, user_id=user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

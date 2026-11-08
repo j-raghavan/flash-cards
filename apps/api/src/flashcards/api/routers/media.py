@@ -45,7 +45,7 @@ async def _read_capped(file: UploadFile, limit: int) -> bytes:
 async def upload_media(
     file: UploadFile = File(...),
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> MediaOut:
     data = await _read_capped(file, MAX_UPLOAD_BYTES)
     asset = await container.media.upload(owner_id=caller.user.id, data=data)
@@ -56,7 +56,7 @@ async def upload_media(
 async def get_media(
     media_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     asset = await container.media.get(owner_id=caller.user.id, media_id=media_id)
     return Response(content=asset.data, media_type=asset.content_type, headers=_SERVE_HEADERS)

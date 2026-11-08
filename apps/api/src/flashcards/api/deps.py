@@ -20,9 +20,15 @@ SESSION_COOKIE = "fc_session"
 
 
 async def get_container(request: Request) -> AsyncIterator[Container]:
-    # Resolve the per-request container from the configured provider. In SQL mode
-    # this opens a session+transaction that commits after the response (or rolls
-    # back if the handler raises); in-memory mode yields the shared container.
+    """The per-request container from the configured provider.
+
+    In SQL mode this opens a session and transaction. Every route declares it with
+    `scope="function"`, so the transaction commits (or rolls back if the handler
+    raises) when the handler returns, before the response is sent: background
+    work such as sending an email then sees committed data and can never roll the
+    request back. All declarations must use the same scope, or a request would
+    open two sessions. In-memory mode yields the shared container.
+    """
     async for container in request.app.state.services_provider():
         yield container
 
@@ -77,7 +83,7 @@ _NOT_AUTHENTICATED = HTTPException(
 
 
 async def current_user(
-    request: Request, container: Container = Depends(get_container)
+    request: Request, container: Container = Depends(get_container, scope="function")
 ) -> CurrentUser:
     raw_token = request.cookies.get(SESSION_COOKIE)
     if raw_token is None:

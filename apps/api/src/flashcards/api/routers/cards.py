@@ -24,7 +24,7 @@ async def create_note(
     deck_id: str,
     body: NoteCreateRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[CardOut]:
     _note, cards = await container.notes.create_note(
         owner_id=caller.user.id, deck_id=deck_id, note_type=body.note_type, fields=body.fields
@@ -36,7 +36,7 @@ async def create_note(
 async def list_cards(
     deck_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[CardOut]:
     cards = await container.notes.list_cards(owner_id=caller.user.id, deck_id=deck_id)
     return [CardOut.from_card(card) for card in cards]
@@ -46,7 +46,7 @@ async def list_cards(
 async def deck_stats(
     deck_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> DeckStatsOut:
     stats = await container.reviews.deck_stats(owner_id=caller.user.id, deck_id=deck_id)
     return DeckStatsOut.from_stats(stats)
@@ -56,7 +56,7 @@ async def deck_stats(
 async def get_card(
     card_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> CardDetailOut:
     card = await container.notes.get_card(owner_id=caller.user.id, card_id=card_id)
     note = await container.notes.get_note(owner_id=caller.user.id, note_id=card.note_id)
@@ -67,7 +67,7 @@ async def get_card(
 async def suspend_card(
     card_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> CardOut:
     return CardOut.from_card(
         await container.notes.suspend_card(owner_id=caller.user.id, card_id=card_id)
@@ -78,7 +78,7 @@ async def suspend_card(
 async def unsuspend_card(
     card_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> CardOut:
     return CardOut.from_card(
         await container.notes.unsuspend_card(owner_id=caller.user.id, card_id=card_id)
@@ -89,7 +89,7 @@ async def unsuspend_card(
 async def delete_note(
     note_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     await container.library.delete_note(owner_id=caller.user.id, note_id=note_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -27,7 +27,7 @@ async def create_mock_exam(
     body: MockExamCreateRequest,
     _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> MockExamOut:
     exam = await container.mock_exam.create(
         owner_id=caller.user.id,
@@ -44,7 +44,7 @@ async def submit_mock_exam(
     body: ExamSubmitRequest,
     _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> ExamResultOut:
     result = await container.mock_exam.grade(
         owner_id=caller.user.id,

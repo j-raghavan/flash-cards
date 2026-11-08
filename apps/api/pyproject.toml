@@ -9,7 +9,7 @@ description = "Flash-Cards API"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-only" }
 dependencies = [
-  "fastapi>=0.115",
+  "fastapi>=0.121",  # Depends(..., scope="function")
   "python-multipart>=0.0.9",
   "uvicorn>=0.30",
   "pydantic-settings>=2.4",

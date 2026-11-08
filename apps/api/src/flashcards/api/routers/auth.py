@@ -4,6 +4,7 @@ verification and password reset (F-AUTH-1, F-AUTH-2)."""
 
 from __future__ import annotations
 
+import logging
 import math
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
@@ -36,15 +37,28 @@ from flashcards.domain.ports import Mailer
 from flashcards.domain.user_tokens import InvalidUserToken
 from flashcards.domain.users import EmailAlreadyRegistered, InvalidEmail, WeakPassword
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _INVALID_LINK = "This link is invalid or has expired."
 
 
 def _send_later(tasks: BackgroundTasks, mailer: Mailer, email: OutgoingEmail | None) -> None:
-    """Send after the response, so known and unknown accounts take the same time."""
+    """Send after the response (and after the commit), never failing the request.
+
+    Sending later also keeps a request's timing the same whether or not an email
+    goes out, so it says nothing about whether an account exists.
+    """
     if email is not None:
-        tasks.add_task(mailer.send, email)
+        tasks.add_task(_send_quietly, mailer, email)
+
+
+async def _send_quietly(mailer: Mailer, email: OutgoingEmail) -> None:
+    try:
+        await mailer.send(email)
+    except Exception:  # a mail outage must not surface as a server error
+        logger.exception("could not send email: %s", email.subject)
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED, response_model=UserOut)
@@ -52,7 +66,7 @@ async def signup(
     body: SignupRequest,
     response: Response,
     tasks: BackgroundTasks,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
     settings: Settings = Depends(get_settings),
 ) -> UserOut:
     try:
@@ -78,7 +92,7 @@ async def signup(
 async def login(
     body: LoginRequest,
     response: Response,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
     settings: Settings = Depends(get_settings),
 ) -> UserOut | JSONResponse:
     try:
@@ -111,7 +125,7 @@ async def login(
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     response: Response,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
     settings: Settings = Depends(get_settings),
     caller: CurrentUser = Depends(current_user),
 ) -> Response:
@@ -129,7 +143,7 @@ async def me(caller: CurrentUser = Depends(current_user)) -> UserOut:
 @router.get("/sessions", response_model=list[SessionOut])
 async def list_sessions(
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[SessionOut]:
     return [
         SessionOut.from_session(s, current=s.id == caller.session.id)
@@ -141,7 +155,7 @@ async def list_sessions(
 async def revoke_session(
     session_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     owned = {s.id for s in await container.auth.sessions_for(caller.user.id)}
     if session_id not in owned or not await container.auth.revoke_session(session_id):
@@ -152,7 +166,8 @@ async def revoke_session(
 
 @router.post("/verify-email", status_code=status.HTTP_204_NO_CONTENT)
 async def verify_email(
-    body: TokenRequest, container: Container = Depends(get_container)
+    body: TokenRequest,
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     try:
         await container.account_email.verify_email(body.token)
@@ -165,7 +180,7 @@ async def verify_email(
 async def resend_verification(
     tasks: BackgroundTasks,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     email = await container.account_email.verification_email(caller.user)
     _send_later(tasks, container.mailer, email)
@@ -176,7 +191,7 @@ async def resend_verification(
 async def request_password_reset(
     body: PasswordResetRequest,
     tasks: BackgroundTasks,
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     # Always 202, whether or not the email has an account.
     email = await container.account_email.password_reset_email(body.email)
@@ -186,7 +201,8 @@ async def request_password_reset(
 
 @router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
 async def confirm_password_reset(
-    body: PasswordResetConfirmRequest, container: Container = Depends(get_container)
+    body: PasswordResetConfirmRequest,
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     try:
         await container.account_email.reset_password(body.token, body.password)
