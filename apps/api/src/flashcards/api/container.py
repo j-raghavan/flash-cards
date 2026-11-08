@@ -9,12 +9,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.memory import (
+    InMemoryAiJobRepository,
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryDraftCardRepository,
     InMemoryInviteRepository,
+    InMemoryJobQueue,
     InMemoryNoteRepository,
+    InMemoryObjectStore,
+    InMemoryQuotaRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemorySessionRepository,
@@ -24,18 +30,26 @@ from flashcards.adapters.memory import (
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.application.auth_service import AuthService
 from flashcards.application.deck_service import DeckService
+from flashcards.application.draft_review_service import DraftReviewService
+from flashcards.application.generation_request_service import GenerationRequestService
 from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.ports import (
+    AiJobRepository,
     CardRepository,
     Clock,
     DeckRepository,
+    DocumentExtractor,
+    DraftCardRepository,
     InviteRepository,
+    JobQueue,
     NoteRepository,
+    ObjectStore,
     PasswordHasher,
+    QuotaRepository,
     ReviewLogRepository,
     Scheduler,
     ScheduleRepository,
@@ -57,6 +71,12 @@ class Repositories:
     cards: CardRepository
     schedules: ScheduleRepository
     review_logs: ReviewLogRepository
+    ai_jobs: AiJobRepository
+    draft_cards: DraftCardRepository
+    object_store: ObjectStore
+    quotas: QuotaRepository
+    extractor: DocumentExtractor
+    job_queue: JobQueue
     dummy_hash: str | None = None
 
 
@@ -72,6 +92,8 @@ class Container:
     notes: NoteService
     reviews: ReviewService
     library: LibraryService
+    generation: GenerationRequestService
+    draft_review: DraftReviewService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -93,6 +115,16 @@ def build_services(repos: Repositories) -> Container:
         repos.schedules,
         repos.review_logs,
     )
+    generation = GenerationRequestService(
+        decks,
+        repos.extractor,
+        repos.object_store,
+        repos.quotas,
+        repos.ai_jobs,
+        repos.job_queue,
+        repos.clock,
+    )
+    draft_review = DraftReviewService(repos.ai_jobs, repos.draft_cards, notes)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -104,6 +136,8 @@ def build_services(repos: Repositories) -> Container:
         notes=notes,
         reviews=reviews,
         library=library,
+        generation=generation,
+        draft_review=draft_review,
     )
 
 
@@ -122,5 +156,11 @@ def build_container() -> Container:
             cards=InMemoryCardRepository(),
             schedules=InMemoryScheduleRepository(),
             review_logs=InMemoryReviewLogRepository(),
+            ai_jobs=InMemoryAiJobRepository(),
+            draft_cards=InMemoryDraftCardRepository(),
+            object_store=InMemoryObjectStore(),
+            quotas=InMemoryQuotaRepository(),
+            extractor=PyMuPDFExtractor(),
+            job_queue=InMemoryJobQueue(),
         )
     )

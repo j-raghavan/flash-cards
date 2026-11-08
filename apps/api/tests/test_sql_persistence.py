@@ -20,14 +20,19 @@ from flashcards.adapters.db import (
     create_engine,
     create_sessionmaker,
 )
+from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
-from flashcards.adapters.memory import SystemClock
+from flashcards.adapters.memory import InMemoryJobQueue, SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
+    SqlAiJobRepository,
     SqlCardRepository,
     SqlDeckRepository,
+    SqlDraftCardRepository,
     SqlInviteRepository,
     SqlNoteRepository,
+    SqlObjectStore,
+    SqlQuotaRepository,
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
@@ -57,6 +62,12 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         cards=SqlCardRepository(session),
         schedules=SqlScheduleRepository(session),
         review_logs=SqlReviewLogRepository(session),
+        ai_jobs=SqlAiJobRepository(session),
+        draft_cards=SqlDraftCardRepository(session),
+        object_store=SqlObjectStore(session),
+        quotas=SqlQuotaRepository(session),
+        extractor=PyMuPDFExtractor(),
+        job_queue=InMemoryJobQueue(),
     )
 
 PASSWORD = "correct-horse-battery"
