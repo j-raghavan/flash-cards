@@ -71,6 +71,7 @@ class _Fixture:
         self.passages = InMemoryPassageRepository()
         self.ai_calls = InMemoryQuotaRepository(limit=5)
         self.share_links = InMemoryShareLinkRepository()
+        self.clone_quota = InMemoryQuotaRepository(limit=100)
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -83,7 +84,7 @@ class _Fixture:
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
-            self.passages, self.ai_calls, self.share_links,
+            self.passages, self.ai_calls, self.share_links, self.clone_quota,
         )
 
     async def seed_full_account(self, owner: str) -> None:

@@ -87,10 +87,12 @@ def _subtree_ids(root_id: str, decks: list[Deck]) -> list[str]:
     children: dict[str | None, list[str]] = {}
     for deck in decks:
         children.setdefault(deck.parent_id, []).append(deck.id)
+    # Pre-order: every parent precedes its children, and siblings keep the order
+    # the repository lists them in (oldest first), so copies keep the same order.
     ordered: list[str] = []
     stack = [root_id]
     while stack:
         node_id = stack.pop()
         ordered.append(node_id)
-        stack.extend(children.get(node_id, []))
+        stack.extend(reversed(children.get(node_id, [])))
     return ordered

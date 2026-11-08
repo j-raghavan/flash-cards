@@ -60,9 +60,13 @@ def test_share_preview_clone_flow(app: FastAPI) -> None:
     recipient = _member(app, "friend@example.com")
     preview = recipient.get(f"/shared/{token}")
     assert preview.status_code == 200
-    assert preview.json()["name"] == "Spanish"
-    assert preview.json()["notes"][0]["fields"] == {"front": "hola", "back": "hello"}
-    assert "owner" not in str(preview.json())
+    shown = preview.json()
+    # Exactly these keys: nothing identifies the owner or exposes internal ids.
+    assert set(shown) == {"name", "decks", "deck_count", "notes", "note_count", "allow_clone"}
+    assert shown["decks"] == [{"name": "Spanish", "depth": 0}]
+    assert shown["notes"] == [
+        {"deck_index": 0, "note_type": "basic", "fields": {"front": "hola", "back": "hello"}}
+    ]
 
     clone = recipient.post(f"/shared/{token}/clone")
     assert clone.status_code == 201
@@ -84,6 +88,7 @@ def test_toggle_and_revoke(app: FastAPI) -> None:
 
     revoked = owner.post(f"/shares/{share_id}/revoke")
     assert revoked.status_code == 200 and revoked.json()["revoked_at"] is not None
+    assert owner.patch(f"/shares/{share_id}", json={"allow_clone": False}).status_code == 404
     assert recipient.get(f"/shared/{token}").status_code == 404
     assert recipient.post(f"/shared/{token}/clone").status_code == 404
 
@@ -119,3 +124,16 @@ def test_oversized_clone_is_413(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -
     deck_id = _deck_with_note(owner)
     token = owner.post(f"/decks/{deck_id}/shares", json={"allow_clone": True}).json()["token"]
     assert owner.post(f"/shared/{token}/clone").status_code == 413
+
+
+def test_daily_clone_limit_is_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Wire a one-card daily allowance through the real container.
+    monkeypatch.setattr("flashcards.api.container.DEFAULT_DAILY_CLONE_CARDS", 1)
+    app = create_app(Settings(environment="test", session_cookie_secure=False))
+    owner = _member(app, "owner@example.com")
+    deck_id = _deck_with_note(owner)  # one basic note: one card
+    token = owner.post(f"/decks/{deck_id}/shares", json={"allow_clone": True}).json()["token"]
+    assert owner.post(f"/shared/{token}/clone").status_code == 201
+    second = owner.post(f"/shared/{token}/clone")
+    assert second.status_code == 429
+    assert second.json()["detail"] == "Daily clone limit reached."

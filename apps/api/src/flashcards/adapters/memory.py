@@ -150,9 +150,13 @@ class InMemoryNoteRepository:
     async def get(self, note_id: str) -> Note | None:
         return self._by_id.get(note_id)
 
-    async def list_for_deck(self, deck_id: str) -> list[Note]:
+    async def list_for_deck(self, deck_id: str, limit: int | None = None) -> list[Note]:
         notes = [note for note in self._by_id.values() if note.deck_id == deck_id]
-        return sorted(notes, key=lambda note: note.created_at)
+        ordered = sorted(notes, key=lambda note: note.created_at)
+        return ordered if limit is None else ordered[:limit]
+
+    async def count_for_deck(self, deck_id: str) -> int:
+        return sum(1 for note in self._by_id.values() if note.deck_id == deck_id)
 
     async def delete(self, note_id: str) -> None:
         self._by_id.pop(note_id, None)

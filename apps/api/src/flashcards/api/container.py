@@ -88,7 +88,7 @@ from flashcards.domain.ports import (
     TranscriptProvider,
     UserRepository,
 )
-from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS
+from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
 
 
@@ -121,6 +121,7 @@ class Repositories:
     passages: PassageRepository
     ai_calls: QuotaRepository
     share_links: ShareLinkRepository
+    clone_quota: QuotaRepository
     dummy_hash: str | None = None
 
 
@@ -214,6 +215,7 @@ def build_services(repos: Repositories) -> Container:
         repos.passages,
         repos.ai_calls,
         repos.share_links,
+        repos.clone_quota,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -246,7 +248,16 @@ def build_services(repos: Repositories) -> Container:
         repos.llm,
         ai_budget,
     )
-    sharing = SharingService(decks, notes, repos.notes, repos.share_links, repos.clock)
+    sharing = SharingService(
+        decks,
+        notes,
+        repos.notes,
+        repos.cards,
+        repos.share_links,
+        repos.users,
+        repos.clone_quota,
+        repos.clock,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -315,5 +326,6 @@ def build_container(
             passages=InMemoryPassageRepository(),
             ai_calls=InMemoryQuotaRepository(limit=DEFAULT_DAILY_AI_CALLS),
             share_links=InMemoryShareLinkRepository(),
+            clone_quota=InMemoryQuotaRepository(limit=DEFAULT_DAILY_CLONE_CARDS),
         )
     )

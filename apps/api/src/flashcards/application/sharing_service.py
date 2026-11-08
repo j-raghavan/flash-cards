@@ -4,7 +4,9 @@
 Link management is owner-scoped. Preview and clone are open to any signed-in
 account holding an active token; neither reveals who owns the deck. A clone
 re-creates decks and notes for the caller, so cards are derived again and no
-schedule or review history is copied.
+schedule or review history is copied. Both are bounded: a preview is a small
+sample, and a clone is checked against its caps and the caller's daily allowance
+before anything is written.
 """
 
 from __future__ import annotations
@@ -17,15 +19,23 @@ from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
 from flashcards.domain.decks import Deck, DeckNotFound
 from flashcards.domain.invites import hash_token
-from flashcards.domain.notes import Note
+from flashcards.domain.notes import Note, card_ordinals
 from flashcards.domain.ports import (
+    CardRepository,
     Clock,
     NoteRepository,
+    QuotaRepository,
     ShareLinkRepository,
+    UserRepository,
 )
+from flashcards.domain.quotas import clone_period
 from flashcards.domain.sharing import (
+    MAX_CLONE_CARDS,
+    MAX_CLONE_DECKS,
     MAX_CLONE_NOTES,
+    MAX_PREVIEW_DECKS,
     MAX_PREVIEW_NOTES,
+    CloneLimitReached,
     CloneNotAllowed,
     CloneTooLarge,
     SharedDeckNode,
@@ -33,7 +43,9 @@ from flashcards.domain.sharing import (
     SharedNote,
     ShareLink,
     ShareNotFound,
+    trim_fields,
 )
+from flashcards.domain.users import UserStatus
 
 TOKEN_BYTES = 32
 
@@ -47,7 +59,7 @@ class CreatedShareLink:
 @dataclass(frozen=True, slots=True)
 class _TreeDeck:
     deck: Deck
-    path: tuple[str, ...]
+    depth: int
 
 
 class SharingService:
@@ -56,13 +68,19 @@ class SharingService:
         decks: DeckService,
         notes: NoteService,
         note_repo: NoteRepository,
+        card_repo: CardRepository,
         links: ShareLinkRepository,
+        users: UserRepository,
+        clone_quota: QuotaRepository,
         clock: Clock,
     ) -> None:
         self._decks = decks
         self._notes = notes
         self._note_repo = note_repo
+        self._card_repo = card_repo
         self._links = links
+        self._users = users
+        self._clone_quota = clone_quota  # its limit is the daily allowance, in cards
         self._clock = clock
 
     async def create(
@@ -87,7 +105,10 @@ class SharingService:
         return await self._links.list_for_deck(deck_id)
 
     async def set_allow_clone(self, *, owner_id: str, link_id: str, allow: bool) -> ShareLink:
-        updated = (await self._owned(owner_id, link_id)).with_allow_clone(allow)
+        link = await self._owned(owner_id, link_id)
+        if not link.is_active:
+            raise ShareNotFound(link_id)  # a revoked link cannot be changed
+        updated = link.with_allow_clone(allow)
         await self._links.update(updated)
         return updated
 
@@ -99,21 +120,25 @@ class SharingService:
     async def preview(self, *, token: str) -> SharedDeckPreview:
         link = await self._active(token)
         tree = await self._tree(link)
+        shown = tree[:MAX_PREVIEW_DECKS]
+        note_count = sum([await self._note_repo.count_for_deck(node.deck.id) for node in tree])
         notes: list[SharedNote] = []
-        count = 0
-        for node in tree:
-            for note in await self._note_repo.list_for_deck(node.deck.id):
-                count += 1
-                if len(notes) < MAX_PREVIEW_NOTES:
-                    shared = SharedNote(
-                        deck_path=node.path, note_type=note.note_type, fields=note.fields
+        for index, node in enumerate(shown):
+            remaining = MAX_PREVIEW_NOTES - len(notes)
+            if remaining <= 0:
+                break
+            for note in await self._note_repo.list_for_deck(node.deck.id, limit=remaining):
+                notes.append(
+                    SharedNote(
+                        deck_index=index, note_type=note.note_type, fields=trim_fields(note.fields)
                     )
-                    notes.append(shared)
+                )
         return SharedDeckPreview(
             name=tree[0].deck.name,
-            decks=tuple(SharedDeckNode(path=node.path) for node in tree),
+            decks=tuple(SharedDeckNode(name=node.deck.name, depth=node.depth) for node in shown),
+            deck_count=len(tree),
             notes=tuple(notes),
-            note_count=count,
+            note_count=note_count,
             allow_clone=link.allow_clone,
         )
 
@@ -122,11 +147,26 @@ class SharingService:
         if not link.allow_clone:
             raise CloneNotAllowed(link.id)
         tree = await self._tree(link)
+        # Bound the work by counting before loading anything heavy.
+        if len(tree) > MAX_CLONE_DECKS:
+            raise CloneTooLarge(link.id)
+        if sum([await self._note_repo.count_for_deck(n.deck.id) for n in tree]) > MAX_CLONE_NOTES:
+            raise CloneTooLarge(link.id)
         notes_by_deck: dict[str, list[Note]] = {
             node.deck.id: await self._note_repo.list_for_deck(node.deck.id) for node in tree
         }
-        if sum(len(notes) for notes in notes_by_deck.values()) > MAX_CLONE_NOTES:
+        # Validate every note and count the cards it will make before writing, so a
+        # clone either happens in full or not at all, in every storage mode.
+        card_total = sum(
+            len(card_ordinals(note.note_type, note.fields))
+            for notes in notes_by_deck.values()
+            for note in notes
+        )
+        if card_total > MAX_CLONE_CARDS:
             raise CloneTooLarge(link.id)
+        period = clone_period(self._clock.now())
+        if not await self._clone_quota.try_reserve_pages(owner_id, card_total, period):
+            raise CloneLimitReached(owner_id)
         # Parents come before children in the tree, so each new parent exists first.
         new_ids: dict[str, str] = {}
         for node in tree:
@@ -155,19 +195,23 @@ class SharingService:
         link = await self._links.get_by_token_hash(hash_token(token))
         if link is None or not link.is_active:
             raise ShareNotFound("token")
+        owner = await self._users.get(link.owner_id)
+        # A suspended (or deleted) owner's links stop serving.
+        if owner is None or owner.status() is UserStatus.SUSPENDED:
+            raise ShareNotFound("token")
         return link
 
     async def _tree(self, link: ShareLink) -> list[_TreeDeck]:
-        """The shared deck and its descendants, parents first, with name paths."""
+        """The shared deck and its descendants in pre-order, parents first."""
         try:
             ids = await self._decks.subtree_ids(owner_id=link.owner_id, deck_id=link.deck_id)
         except DeckNotFound as exc:  # pragma: no cover - links are deleted with their deck
             raise ShareNotFound(link.id) from exc
+        depths: dict[str, int] = {}
         tree: list[_TreeDeck] = []
-        paths: dict[str, tuple[str, ...]] = {}
         for deck_id in ids:
             deck = await self._decks.get(owner_id=link.owner_id, deck_id=deck_id)
-            parent_path = paths.get(deck.parent_id or "", ()) if deck_id != link.deck_id else ()
-            paths[deck_id] = (*parent_path, deck.name)
-            tree.append(_TreeDeck(deck=deck, path=paths[deck_id]))
+            depth = 0 if deck_id == link.deck_id else depths[deck.parent_id or ""] + 1
+            depths[deck_id] = depth
+            tree.append(_TreeDeck(deck=deck, depth=depth))
         return tree

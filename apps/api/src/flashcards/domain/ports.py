@@ -136,8 +136,12 @@ class NoteRepository(Protocol):
 
     async def get(self, note_id: str) -> Note | None: ...
 
-    async def list_for_deck(self, deck_id: str) -> list[Note]:
-        """Return the deck's notes, oldest first."""
+    async def list_for_deck(self, deck_id: str, limit: int | None = None) -> list[Note]:
+        """Return the deck's notes, oldest first; at most `limit` when given."""
+        ...
+
+    async def count_for_deck(self, deck_id: str) -> int:
+        """How many notes the deck has, without loading them."""
         ...
 
     async def delete(self, note_id: str) -> None: ...

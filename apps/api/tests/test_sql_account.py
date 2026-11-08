@@ -81,6 +81,9 @@ async def test_note_list_for_deck_and_review_log_list_for_owner(engine: AsyncEng
     async with sm() as s:
         assert [n.id for n in await SqlNoteRepository(s).list_for_deck("d1")] == ["n1"]
         assert await SqlNoteRepository(s).list_for_deck("missing") == []
+        assert await SqlNoteRepository(s).list_for_deck("d1", limit=0) == []
+        assert await SqlNoteRepository(s).count_for_deck("d1") == 1
+        assert await SqlNoteRepository(s).count_for_deck("missing") == 0
         # Oldest first, and scoped to the owner.
         owner_logs = await SqlReviewLogRepository(s).list_for_owner("alice")
         assert [log.id for log in owner_logs] == ["r1", "r2"]

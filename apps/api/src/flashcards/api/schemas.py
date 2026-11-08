@@ -253,15 +253,21 @@ class CreatedShareLinkOut(ShareLinkOut):
     token: str
 
 
+class SharedDeckNodeOut(BaseModel):
+    name: str
+    depth: int
+
+
 class SharedNoteOut(BaseModel):
-    deck_path: list[str]
+    deck_index: int
     note_type: NoteType
     fields: dict[str, str]
 
 
 class SharedDeckOut(BaseModel):
     name: str
-    decks: list[list[str]]
+    decks: list[SharedDeckNodeOut]
+    deck_count: int
     notes: list[SharedNoteOut]
     note_count: int
     allow_clone: bool
@@ -270,11 +276,10 @@ class SharedDeckOut(BaseModel):
     def from_preview(cls, preview: SharedDeckPreview) -> SharedDeckOut:
         return cls(
             name=preview.name,
-            decks=[list(node.path) for node in preview.decks],
+            decks=[SharedDeckNodeOut(name=d.name, depth=d.depth) for d in preview.decks],
+            deck_count=preview.deck_count,
             notes=[
-                SharedNoteOut(
-                    deck_path=list(n.deck_path), note_type=n.note_type, fields=dict(n.fields)
-                )
+                SharedNoteOut(deck_index=n.deck_index, note_type=n.note_type, fields=dict(n.fields))
                 for n in preview.notes
             ],
             note_count=preview.note_count,

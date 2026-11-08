@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import CursorResult, Result, delete, select, update
+from sqlalchemy import CursorResult, Result, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -234,11 +234,18 @@ class SqlNoteRepository:
         row = await self._session.get(NoteRow, note_id)
         return note_from_row(row) if row is not None else None
 
-    async def list_for_deck(self, deck_id: str) -> list[Note]:
-        rows = await self._session.scalars(
-            select(NoteRow).where(NoteRow.deck_id == deck_id).order_by(NoteRow.created_at)
-        )
+    async def list_for_deck(self, deck_id: str, limit: int | None = None) -> list[Note]:
+        query = select(NoteRow).where(NoteRow.deck_id == deck_id).order_by(NoteRow.created_at)
+        if limit is not None:
+            query = query.limit(limit)
+        rows = await self._session.scalars(query)
         return [note_from_row(row) for row in rows]
+
+    async def count_for_deck(self, deck_id: str) -> int:
+        count = await self._session.scalar(
+            select(func.count()).select_from(NoteRow).where(NoteRow.deck_id == deck_id)
+        )
+        return int(count or 0)
 
     async def delete(self, note_id: str) -> None:
         row = await self._session.get(NoteRow, note_id)

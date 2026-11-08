@@ -13,8 +13,15 @@ from datetime import datetime
 
 from flashcards.domain.notes import Fields, NoteType
 
+# A preview is a bounded sample: a few hundred decks and notes, field text trimmed.
+MAX_PREVIEW_DECKS = 200
 MAX_PREVIEW_NOTES = 200
+MAX_PREVIEW_FIELD_CHARS = 500
+# A clone is bounded before anything is written. Cards are capped as well as notes,
+# since one cloze note can yield many cards.
+MAX_CLONE_DECKS = 500
 MAX_CLONE_NOTES = 20_000
+MAX_CLONE_CARDS = 20_000
 
 
 class ShareNotFound(Exception):
@@ -26,7 +33,11 @@ class CloneNotAllowed(Exception):
 
 
 class CloneTooLarge(Exception):
-    """The shared deck has more notes than a clone may copy."""
+    """The shared deck has more decks, notes or cards than a clone may copy."""
+
+
+class CloneLimitReached(Exception):
+    """The caller has used today's clone allowance."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,22 +64,32 @@ class ShareLink:
 
 @dataclass(frozen=True, slots=True)
 class SharedDeckNode:
-    """One deck of the shared tree; `path` is its name path from the shared root."""
+    """One deck of the shared tree, in pre-order; depth 0 is the shared deck itself."""
 
-    path: tuple[str, ...]
+    name: str
+    depth: int
 
 
 @dataclass(frozen=True, slots=True)
 class SharedNote:
-    deck_path: tuple[str, ...]
+    deck_index: int  # position of its deck in SharedDeckPreview.decks
     note_type: NoteType
-    fields: Fields
+    fields: Fields  # each value trimmed to MAX_PREVIEW_FIELD_CHARS
 
 
 @dataclass(frozen=True, slots=True)
 class SharedDeckPreview:
     name: str
-    decks: tuple[SharedDeckNode, ...]
+    decks: tuple[SharedDeckNode, ...]  # at most MAX_PREVIEW_DECKS
+    deck_count: int
     notes: tuple[SharedNote, ...]  # at most MAX_PREVIEW_NOTES
     note_count: int
     allow_clone: bool
+
+
+def trim_fields(fields: Fields, limit: int = MAX_PREVIEW_FIELD_CHARS) -> Fields:
+    """Field values cut to `limit` characters, marked with an ellipsis when cut."""
+    return tuple(
+        (name, value if len(value) <= limit else value[:limit] + "\u2026")
+        for name, value in fields
+    )

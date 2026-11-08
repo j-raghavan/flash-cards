@@ -43,7 +43,12 @@ from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
-from flashcards.domain.sharing import CloneNotAllowed, CloneTooLarge, ShareNotFound
+from flashcards.domain.sharing import (
+    CloneLimitReached,
+    CloneNotAllowed,
+    CloneTooLarge,
+    ShareNotFound,
+)
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 from flashcards.domain.summary import SummaryLocked
 from flashcards.domain.transcripts import (
@@ -129,6 +134,9 @@ def _register_error_handlers(app: FastAPI) -> None:
             status_code=413, content={"detail": "The shared deck is too large to clone."}
         )
 
+    async def clone_limit(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=429, content={"detail": "Daily clone limit reached."})
+
     async def exam_closed(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
@@ -185,6 +193,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ExamClosed, exam_closed)
     app.add_exception_handler(CloneNotAllowed, clone_not_allowed)
     app.add_exception_handler(CloneTooLarge, clone_too_large)
+    app.add_exception_handler(CloneLimitReached, clone_limit)
     app.add_exception_handler(AiCallLimitReached, ai_call_limit)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
