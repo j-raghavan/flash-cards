@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response, status
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
 from flashcards.api.schemas import (
+    BrowserPageOut,
+    BrowserRowOut,
     CardDetailOut,
     CardOut,
     DeckStatsOut,
@@ -15,6 +19,15 @@ from flashcards.api.schemas import (
     NoteOut,
     NoteUpdateRequest,
 )
+from flashcards.domain.browser import (
+    MAX_PAGE,
+    MAX_QUERY_LENGTH,
+    BrowserQuery,
+    CardState,
+    SortKey,
+)
+from flashcards.domain.notes import MAX_FLAG
+from flashcards.domain.tags import MAX_TAG_LENGTH
 
 router = APIRouter(tags=["cards"])
 
@@ -56,6 +69,43 @@ async def deck_stats(
 ) -> DeckStatsOut:
     stats = await container.reviews.deck_stats(owner_id=caller.user.id, deck_id=deck_id)
     return DeckStatsOut.from_stats(stats)
+
+
+@router.get("/cards", response_model=BrowserPageOut)
+async def browse_cards(
+    deck_id: str | None = Query(default=None, description="Limit to this deck."),
+    include_subdecks: bool = Query(default=True),
+    state: list[CardState] = Query(default_factory=list),
+    tag: str | None = Query(default=None, max_length=MAX_TAG_LENGTH),
+    flag: int | None = Query(default=None, ge=0, le=MAX_FLAG),
+    min_proficiency: int = Query(default=0, ge=0, le=100),
+    max_proficiency: int = Query(default=100, ge=0, le=100),
+    q: str | None = Query(default=None, max_length=MAX_QUERY_LENGTH),
+    sort: SortKey = Query(default=SortKey.CREATED),
+    order: Literal["asc", "desc"] = Query(default="asc"),
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE),
+    offset: int = Query(default=0, ge=0),
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> BrowserPageOut:
+    query = BrowserQuery(
+        states=frozenset(state),
+        tag=tag,
+        flag=flag,
+        min_proficiency=min_proficiency,
+        max_proficiency=max_proficiency,
+        text=q or None,
+        sort=sort,
+        descending=order == "desc",
+        limit=limit,
+        offset=offset,
+    )
+    page = await container.card_browser.search(
+        owner_id=caller.user.id, query=query, deck_id=deck_id, include_subdecks=include_subdecks
+    )
+    return BrowserPageOut(
+        total=page.total, cards=[BrowserRowOut.from_row(row) for row in page.rows]
+    )
 
 
 @router.get("/cards/{card_id}", response_model=CardDetailOut)

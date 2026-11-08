@@ -48,6 +48,7 @@ from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import AuthService
+from flashcards.application.card_browser_service import CardBrowserService
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.chat_service import ChatService
 from flashcards.application.deck_service import DeckService
@@ -155,6 +156,7 @@ class Container:
     notes: NoteService
     reviews: ReviewService
     library: LibraryService
+    card_browser: CardBrowserService
     generation: GenerationRequestService
     draft_review: DraftReviewService
     card_generation: CardGenerationService
@@ -317,6 +319,9 @@ def build_services(repos: Repositories) -> Container:
         notes=notes,
         reviews=reviews,
         library=library,
+        card_browser=CardBrowserService(
+            decks, repos.notes, repos.cards, repos.schedules, repos.clock
+        ),
         generation=generation,
         draft_review=draft_review,
         card_generation=card_generation,

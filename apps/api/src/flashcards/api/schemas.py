@@ -16,6 +16,7 @@ from flashcards.application.account_service import AccountExport
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.audit import AuditEvent
+from flashcards.domain.browser import BrowserRow, CardState
 from flashcards.domain.chat import ChatAnswer
 from flashcards.domain.decks import Deck
 from flashcards.domain.evaluation import AnswerEvaluation
@@ -195,6 +196,45 @@ class CardDetailOut(CardOut):
             fields=dict(note.fields),
             tags=list(note.tags),
         )
+
+
+class BrowserRowOut(BaseModel):
+    card_id: str
+    note_id: str
+    deck_id: str
+    deck_name: str
+    ordinal: int
+    note_type: NoteType
+    preview: str
+    tags: list[str]
+    flag: int
+    state: CardState
+    due_at: datetime | None
+    proficiency: int
+    created_at: datetime
+
+    @classmethod
+    def from_row(cls, row: BrowserRow) -> BrowserRowOut:
+        return cls(
+            card_id=row.card_id,
+            note_id=row.note_id,
+            deck_id=row.deck_id,
+            deck_name=row.deck_name,
+            ordinal=row.ordinal,
+            note_type=row.note_type,
+            preview=row.preview,
+            tags=list(row.tags),
+            flag=row.flag,
+            state=row.state,
+            due_at=row.due_at,
+            proficiency=row.proficiency,
+            created_at=row.created_at,
+        )
+
+
+class BrowserPageOut(BaseModel):
+    total: int
+    cards: list[BrowserRowOut]
 
 
 class NoteOut(BaseModel):
