@@ -181,6 +181,20 @@ async def test_youtube_with_a_fetcher_enqueues_a_timestamped_job() -> None:
     assert llm.requests[0].documents[0].data == b"[00:00:00 - 00:01:05]\nIntro. Main point."
 
 
+def test_youtube_with_a_fetcher_is_202_over_http(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    container: Container = app.state.container
+    monkeypatch.setattr(container.transcript_import, "_transcripts", _FakeTranscripts())
+    client = _member(app)
+    resp = client.post(
+        "/ai/generate/youtube",
+        json={"deck_id": _deck(client), "url": f"https://youtu.be/{VID}"},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == JobStatus.QUEUED.value
+
+
 async def test_youtube_for_someone_elses_deck_never_fetches() -> None:
     transcripts = _FakeTranscripts()
     container = build_container(llm=_FakeLLM(), transcripts=transcripts)
