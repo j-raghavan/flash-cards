@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 # Testcontainers' Ryuk reaper fails to start under some Docker Desktop setups;
 # the container context managers clean up their own containers, so disable it.
@@ -12,12 +12,20 @@ os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from testcontainers.postgres import PostgresContainer
 
 from flashcards.api.app import create_app
 from flashcards.config import Settings
 from flashcards.domain.invites import Role
 
 PASSWORD = "correct-horse-battery"
+
+
+@pytest.fixture(scope="session")
+def pg_url() -> Iterator[str]:
+    """A throwaway Postgres for the SQL integration tests (needs Docker)."""
+    with PostgresContainer("postgres:16-alpine", driver="asyncpg") as pg:
+        yield pg.get_connection_url()
 
 
 @pytest.fixture

@@ -7,11 +7,10 @@ These require Docker: a throwaway Postgres container is started per test session
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 
 import pytest
 from fastapi.testclient import TestClient
-from testcontainers.postgres import PostgresContainer
 
 from flashcards.adapters.db import (
     Base,
@@ -34,12 +33,6 @@ from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 PASSWORD = "correct-horse-battery"
-
-
-@pytest.fixture(scope="session")
-def pg_url() -> Iterator[str]:
-    with PostgresContainer("postgres:16-alpine", driver="asyncpg") as pg:
-        yield pg.get_connection_url()
 
 
 @pytest.fixture
