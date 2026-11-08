@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.decks import Deck
+from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.notes import Card, Note
@@ -289,3 +290,24 @@ class InMemoryQuotaRepository:
             return False
         self._used[key] = used + pages
         return True
+
+
+class InMemoryGoalRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Goal] = {}
+
+    async def add(self, goal: Goal) -> None:
+        self._by_id[goal.id] = goal
+
+    async def get(self, goal_id: str) -> Goal | None:
+        return self._by_id.get(goal_id)
+
+    async def list_for_owner(self, owner_id: str) -> list[Goal]:
+        owned = [g for g in self._by_id.values() if g.owner_id == owner_id]
+        return sorted(owned, key=lambda g: g.created_at, reverse=True)
+
+    async def update(self, goal: Goal) -> None:
+        self._by_id[goal.id] = goal
+
+    async def delete(self, goal_id: str) -> None:
+        self._by_id.pop(goal_id, None)

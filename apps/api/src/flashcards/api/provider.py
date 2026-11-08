@@ -25,6 +25,7 @@ from flashcards.adapters.sql import (
     SqlCardRepository,
     SqlDeckRepository,
     SqlDraftCardRepository,
+    SqlGoalRepository,
     SqlInviteRepository,
     SqlNoteRepository,
     SqlObjectStore,
@@ -96,6 +97,7 @@ def sql_provider(
                     extractor=extractor,
                     job_queue=job_queue,
                     llm=provider_llm,
+                    goals=SqlGoalRepository(session),
                 )
             )
 

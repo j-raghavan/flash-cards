@@ -47,6 +47,39 @@ class CardSchedule:
 
 MATURE_DAYS = 21
 
+# FSRS v6 forgetting curve. The constants match the fsrs library's default
+# parameters (parameters[20] = 0.1542), so a retention forecast computed here
+# agrees with how the Scheduler port actually schedules cards. A scheduler
+# configured with custom parameters would need the decay that matches it.
+FSRS_DECAY = -0.1542
+_FORGET_FACTOR: float = 0.9 ** (1 / FSRS_DECAY) - 1
+
+
+def retrievability(stability: float, elapsed_days: float) -> float:
+    """Predicted probability of recall after elapsed_days, given a memory's stability.
+
+    The FSRS v6 forgetting curve R(t) = (1 + FACTOR * t / S) ** DECAY, clamped to
+    [0, 1]. Before the memory is due (t <= 0) retention is full.
+    """
+    if stability <= 0:
+        raise ValueError("stability must be positive")
+    if elapsed_days <= 0:
+        return 1.0
+    curve = float((1 + _FORGET_FACTOR * elapsed_days / stability) ** FSRS_DECAY)
+    return max(0.0, min(1.0, curve))
+
+
+def interval_for_retention(stability: float, target_retention: float) -> float:
+    """Days until retrievability decays to target_retention (the review interval).
+
+    The inverse of retrievability: t = (S / FACTOR) * (target ** (1 / DECAY) - 1).
+    """
+    if stability <= 0:
+        raise ValueError("stability must be positive")
+    if not 0.0 < target_retention < 1.0:
+        raise ValueError("target_retention must be in (0, 1)")
+    return float((stability / _FORGET_FACTOR) * (target_retention ** (1 / FSRS_DECAY) - 1))
+
 
 @dataclass(frozen=True, slots=True)
 class DeckStats:

@@ -30,6 +30,7 @@ APP_TABLES = {
     "draft_cards",
     "ai_blobs",
     "ai_quota",
+    "goals",
 }
 
 

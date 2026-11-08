@@ -30,6 +30,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.decks import Deck
+from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus, JobType
 from flashcards.domain.notes import Card, Note, NoteType
@@ -439,6 +440,42 @@ def draft_from_row(row: DraftCardRow) -> DraftCardRecord:
         note_type=NoteType(row.note_type),
         fields=tuple(row.fields.items()),
         source_page=row.source_page,
+        created_at=row.created_at,
+    )
+
+
+class GoalRow(Base):
+    __tablename__ = "goals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String)
+    deck_ids: Mapped[list[str]] = mapped_column(JSON)
+    exam_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    target_retention: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+def goal_to_row(goal: Goal) -> GoalRow:
+    return GoalRow(
+        id=goal.id,
+        owner_id=goal.owner_id,
+        name=goal.name,
+        deck_ids=list(goal.deck_ids),
+        exam_date=goal.exam_date,
+        target_retention=goal.target_retention,
+        created_at=goal.created_at,
+    )
+
+
+def goal_from_row(row: GoalRow) -> Goal:
+    return Goal(
+        id=row.id,
+        owner_id=row.owner_id,
+        name=row.name,
+        deck_ids=tuple(row.deck_ids),
+        exam_date=row.exam_date,
+        target_retention=row.target_retention,
         created_at=row.created_at,
     )
 

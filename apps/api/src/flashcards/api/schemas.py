@@ -14,9 +14,11 @@ from pydantic import BaseModel, Field
 
 from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.decks import Deck
+from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.planner import StudyPlan
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
@@ -251,3 +253,61 @@ class DraftOut(BaseModel):
 
 class ApproveDraftsRequest(BaseModel):
     draft_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class GoalCreateRequest(BaseModel):
+    name: str
+    deck_ids: list[str] = Field(min_length=1)
+    exam_date: datetime
+    desired_grade: float = Field(ge=0.0, le=1.0)
+
+
+class GoalUpdateRequest(BaseModel):
+    name: str | None = None
+    deck_ids: list[str] | None = Field(default=None, min_length=1)
+    exam_date: datetime | None = None
+    desired_grade: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class GoalOut(BaseModel):
+    id: str
+    name: str
+    deck_ids: list[str]
+    exam_date: datetime
+    target_retention: float
+    created_at: datetime
+
+    @classmethod
+    def from_goal(cls, goal: Goal) -> GoalOut:
+        return cls(
+            id=goal.id,
+            name=goal.name,
+            deck_ids=list(goal.deck_ids),
+            exam_date=goal.exam_date,
+            target_retention=goal.target_retention,
+            created_at=goal.created_at,
+        )
+
+
+class StudyPlanOut(BaseModel):
+    days_until_exam: int
+    total_cards: int
+    new_cards: int
+    scheduled_cards: int
+    new_per_day: int
+    reviews_per_day: int
+    readiness: float
+    on_track: bool
+
+    @classmethod
+    def from_plan(cls, plan: StudyPlan) -> StudyPlanOut:
+        return cls(
+            days_until_exam=plan.days_until_exam,
+            total_cards=plan.total_cards,
+            new_cards=plan.new_cards,
+            scheduled_cards=plan.scheduled_cards,
+            new_per_day=plan.new_per_day,
+            reviews_per_day=plan.reviews_per_day,
+            readiness=plan.readiness,
+            on_track=plan.on_track,
+        )
