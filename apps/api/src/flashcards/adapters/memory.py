@@ -15,6 +15,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -79,6 +80,11 @@ class InMemoryUserRepository:
         user_id = self._email_to_id.get(email)
         return self._by_id.get(user_id) if user_id is not None else None
 
+    async def delete(self, user_id: str) -> None:
+        user = self._by_id.pop(user_id, None)
+        if user is not None:
+            self._email_to_id.pop(user.email, None)
+
 
 class InMemorySessionRepository:
     def __init__(self) -> None:
@@ -103,6 +109,10 @@ class InMemorySessionRepository:
             return False
         self._by_id[session_id] = session.with_revoked(now)
         return True
+
+    async def delete_for_user(self, user_id: str) -> None:
+        for session_id in [s.id for s in self._by_id.values() if s.user_id == user_id]:
+            del self._by_id[session_id]
 
 
 class InMemoryDeckRepository:
@@ -135,6 +145,10 @@ class InMemoryNoteRepository:
 
     async def get(self, note_id: str) -> Note | None:
         return self._by_id.get(note_id)
+
+    async def list_for_deck(self, deck_id: str) -> list[Note]:
+        notes = [note for note in self._by_id.values() if note.deck_id == deck_id]
+        return sorted(notes, key=lambda note: note.created_at)
 
     async def delete(self, note_id: str) -> None:
         self._by_id.pop(note_id, None)
@@ -198,8 +212,15 @@ class InMemoryReviewLogRepository:
             raise DuplicateReview(log.idempotency_key)
         self._logs.append(log)
 
+    async def list_for_owner(self, owner_id: str) -> list[ReviewLog]:
+        owned = [log for log in self._logs if log.owner_id == owner_id]
+        return sorted(owned, key=lambda log: log.reviewed_at)
+
     async def delete_for_card(self, card_id: str) -> None:
         self._logs = [log for log in self._logs if log.card_id != card_id]
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        self._logs = [log for log in self._logs if log.owner_id != owner_id]
 
 
 class InMemoryObjectStore:
@@ -247,6 +268,12 @@ class InMemoryAiJobRepository:
     async def list_running(self) -> list[AiJob]:
         return [j for j in self._by_id.values() if j.status is JobStatus.RUNNING]
 
+    async def list_for_owner(self, owner_id: str) -> list[AiJob]:
+        return [j for j in self._by_id.values() if j.owner_id == owner_id]
+
+    async def delete(self, job_id: str) -> None:
+        self._by_id.pop(job_id, None)
+
 
 class InMemoryDraftCardRepository:
     def __init__(self) -> None:
@@ -291,6 +318,10 @@ class InMemoryQuotaRepository:
         self._used[key] = used + pages
         return True
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for key in [k for k in self._used if k[0] == owner_id]:
+            del self._used[key]
+
 
 class InMemoryGoalRepository:
     def __init__(self) -> None:
@@ -311,3 +342,22 @@ class InMemoryGoalRepository:
 
     async def delete(self, goal_id: str) -> None:
         self._by_id.pop(goal_id, None)
+
+
+class InMemoryMediaRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, MediaAsset] = {}
+
+    async def add(self, asset: MediaAsset) -> None:
+        self._by_id[asset.id] = asset
+
+    async def get(self, media_id: str) -> MediaAsset | None:
+        return self._by_id.get(media_id)
+
+    async def list_for_owner(self, owner_id: str) -> list[MediaAsset]:
+        owned = [a for a in self._by_id.values() if a.owner_id == owner_id]
+        return sorted(owned, key=lambda a: a.created_at)
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for media_id in [a.id for a in self._by_id.values() if a.owner_id == owner_id]:
+            del self._by_id[media_id]

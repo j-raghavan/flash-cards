@@ -26,6 +26,7 @@ from flashcards.adapters.db import (
     DraftCardRow,
     GoalRow,
     InviteRow,
+    MediaRow,
     NoteRow,
     ReviewLogRow,
     SessionRow,
@@ -42,8 +43,11 @@ from flashcards.adapters.db import (
     goal_to_row,
     invite_from_row,
     invite_to_row,
+    media_from_row,
+    media_to_row,
     note_from_row,
     note_to_row,
+    review_log_from_row,
     review_log_to_row,
     schedule_from_row,
     schedule_to_row,
@@ -57,6 +61,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -139,6 +144,9 @@ class SqlUserRepository:
         row = await self._session.scalar(select(UserRow).where(UserRow.email == email))
         return user_from_row(row) if row is not None else None
 
+    async def delete(self, user_id: str) -> None:
+        await self._session.execute(delete(UserRow).where(UserRow.id == user_id))
+
 
 class SqlSessionRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -169,6 +177,9 @@ class SqlSessionRepository:
             .values(revoked_at=now)
         )
         return _changed_one(result)
+
+    async def delete_for_user(self, user_id: str) -> None:
+        await self._session.execute(delete(SessionRow).where(SessionRow.user_id == user_id))
 
 
 class SqlDeckRepository:
@@ -211,6 +222,12 @@ class SqlNoteRepository:
     async def get(self, note_id: str) -> Note | None:
         row = await self._session.get(NoteRow, note_id)
         return note_from_row(row) if row is not None else None
+
+    async def list_for_deck(self, deck_id: str) -> list[Note]:
+        rows = await self._session.scalars(
+            select(NoteRow).where(NoteRow.deck_id == deck_id).order_by(NoteRow.created_at)
+        )
+        return [note_from_row(row) for row in rows]
 
     async def delete(self, note_id: str) -> None:
         row = await self._session.get(NoteRow, note_id)
@@ -275,6 +292,14 @@ class SqlReviewLogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def list_for_owner(self, owner_id: str) -> list[ReviewLog]:
+        rows = await self._session.scalars(
+            select(ReviewLogRow)
+            .where(ReviewLogRow.owner_id == owner_id)
+            .order_by(ReviewLogRow.reviewed_at)
+        )
+        return [review_log_from_row(row) for row in rows]
+
     async def append(self, log: ReviewLog) -> None:
         if log.idempotency_key is None:
             self._session.add(review_log_to_row(log))
@@ -292,6 +317,11 @@ class SqlReviewLogRepository:
     async def delete_for_card(self, card_id: str) -> None:
         await self._session.execute(
             delete(ReviewLogRow).where(ReviewLogRow.card_id == card_id)
+        )
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(
+            delete(ReviewLogRow).where(ReviewLogRow.owner_id == owner_id)
         )
 
 
@@ -339,6 +369,15 @@ class SqlAiJobRepository:
             select(AiJobRow).where(AiJobRow.status == JobStatus.RUNNING.value)
         )
         return [aijob_from_row(row) for row in rows]
+
+    async def list_for_owner(self, owner_id: str) -> list[AiJob]:
+        rows = await self._session.scalars(
+            select(AiJobRow).where(AiJobRow.owner_id == owner_id)
+        )
+        return [aijob_from_row(row) for row in rows]
+
+    async def delete(self, job_id: str) -> None:
+        await self._session.execute(delete(AiJobRow).where(AiJobRow.id == job_id))
 
 
 class SqlDraftCardRepository:
@@ -415,6 +454,9 @@ class SqlQuotaRepository:
         )
         return await self._session.scalar(stmt) is not None
 
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(delete(AiQuotaRow).where(AiQuotaRow.owner_id == owner_id))
+
 
 class SqlGoalRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -443,3 +485,25 @@ class SqlGoalRepository:
         if row is not None:
             await self._session.delete(row)
             await self._session.flush()
+
+
+class SqlMediaRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, asset: MediaAsset) -> None:
+        self._session.add(media_to_row(asset))
+        await self._session.flush()
+
+    async def get(self, media_id: str) -> MediaAsset | None:
+        row = await self._session.get(MediaRow, media_id)
+        return media_from_row(row) if row is not None else None
+
+    async def list_for_owner(self, owner_id: str) -> list[MediaAsset]:
+        rows = await self._session.scalars(
+            select(MediaRow).where(MediaRow.owner_id == owner_id).order_by(MediaRow.created_at)
+        )
+        return [media_from_row(row) for row in rows]
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(delete(MediaRow).where(MediaRow.owner_id == owner_id))

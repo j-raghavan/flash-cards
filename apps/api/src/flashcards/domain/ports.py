@@ -8,10 +8,12 @@ from datetime import datetime
 from typing import Protocol
 
 from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
+from flashcards.domain.anki import AnkiPackage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
@@ -61,6 +63,10 @@ class UserRepository(Protocol):
 
     async def get_by_email(self, email: str) -> User | None: ...
 
+    async def delete(self, user_id: str) -> None:
+        """Delete the user row (account deletion, F-IMP-5)."""
+        ...
+
 
 class SessionRepository(Protocol):
     async def add(self, session: Session) -> None: ...
@@ -73,6 +79,10 @@ class SessionRepository(Protocol):
 
     async def revoke(self, session_id: str, now: datetime) -> bool:
         """Mark an active session revoked; return whether it changed."""
+        ...
+
+    async def delete_for_user(self, user_id: str) -> None:
+        """Delete every session for a user (account deletion, F-IMP-5)."""
         ...
 
 
@@ -121,6 +131,10 @@ class NoteRepository(Protocol):
     async def add(self, note: Note) -> None: ...
 
     async def get(self, note_id: str) -> Note | None: ...
+
+    async def list_for_deck(self, deck_id: str) -> list[Note]:
+        """Return the deck's notes, oldest first."""
+        ...
 
     async def delete(self, note_id: str) -> None: ...
 
@@ -182,8 +196,16 @@ class ReviewLogRepository(Protocol):
         """
         ...
 
+    async def list_for_owner(self, owner_id: str) -> list[ReviewLog]:
+        """Return the owner's review logs, oldest first (for data export)."""
+        ...
+
     async def delete_for_card(self, card_id: str) -> None:
         """Delete every review log for a card."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every review log owned by the user (account deletion, F-IMP-5)."""
         ...
 
 
@@ -241,6 +263,14 @@ class AiJobRepository(Protocol):
         """Jobs left RUNNING (e.g. by a crash), for boot-time requeue."""
         ...
 
+    async def list_for_owner(self, owner_id: str) -> list[AiJob]:
+        """The owner's jobs (for account deletion, F-IMP-5)."""
+        ...
+
+    async def delete(self, job_id: str) -> None:
+        """Delete a job (its drafts cascade); used by account deletion."""
+        ...
+
 
 class DraftCardRepository(Protocol):
     async def add(self, record: DraftCardRecord) -> None: ...
@@ -265,6 +295,43 @@ class JobQueue(Protocol):
 class QuotaRepository(Protocol):
     async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
         """Atomically reserve pages against the owner's limit; True if within it."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete the owner's quota counters (account deletion, F-IMP-5)."""
+        ...
+
+
+class MediaTypeSniffer(Protocol):
+    def sniff(self, data: bytes) -> str:
+        """Return the media content type from the bytes, or raise UnsupportedMedia.
+
+        The declared Content-Type and filename are never trusted.
+        """
+        ...
+
+
+class MediaRepository(Protocol):
+    async def add(self, asset: MediaAsset) -> None: ...
+
+    async def get(self, media_id: str) -> MediaAsset | None: ...
+
+    async def list_for_owner(self, owner_id: str) -> list[MediaAsset]:
+        """The owner's media assets, oldest first (for data export)."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every media asset owned by the user (account deletion, F-IMP-5)."""
+        ...
+
+
+class PackageReader(Protocol):
+    def read(self, data: bytes) -> AnkiPackage:
+        """Parse an .apkg into an AnkiPackage, or raise flashcards.domain.anki errors.
+
+        The archive is untrusted: implementations guard against path traversal and
+        zip bombs and never execute embedded content (NF-SEC-2).
+        """
         ...
 
 

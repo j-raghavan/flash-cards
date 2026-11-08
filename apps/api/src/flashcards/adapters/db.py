@@ -33,8 +33,9 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus, JobType
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note, NoteType
-from flashcards.domain.scheduling import CardSchedule, ReviewLog, ScheduleState
+from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
 
@@ -330,6 +331,17 @@ def review_log_to_row(log: ReviewLog) -> ReviewLogRow:
     )
 
 
+def review_log_from_row(row: ReviewLogRow) -> ReviewLog:
+    return ReviewLog(
+        id=row.id,
+        owner_id=row.owner_id,
+        card_id=row.card_id,
+        rating=Rating(row.rating),
+        reviewed_at=row.reviewed_at,
+        idempotency_key=row.idempotency_key,
+    )
+
+
 class AiJobRow(Base):
     __tablename__ = "ai_jobs"
 
@@ -476,6 +488,36 @@ def goal_from_row(row: GoalRow) -> Goal:
         deck_ids=tuple(row.deck_ids),
         exam_date=row.exam_date,
         target_retention=row.target_retention,
+        created_at=row.created_at,
+    )
+
+
+class MediaRow(Base):
+    __tablename__ = "media_assets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    content_type: Mapped[str] = mapped_column(String)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+def media_to_row(asset: MediaAsset) -> MediaRow:
+    return MediaRow(
+        id=asset.id,
+        owner_id=asset.owner_id,
+        content_type=asset.content_type,
+        data=asset.data,
+        created_at=asset.created_at,
+    )
+
+
+def media_from_row(row: MediaRow) -> MediaAsset:
+    return MediaAsset(
+        id=row.id,
+        owner_id=row.owner_id,
+        content_type=row.content_type,
+        data=row.data,
         created_at=row.created_at,
     )
 

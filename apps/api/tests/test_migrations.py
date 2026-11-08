@@ -31,6 +31,7 @@ APP_TABLES = {
     "ai_blobs",
     "ai_quota",
     "goals",
+    "media_assets",
 }
 
 
