@@ -8,6 +8,7 @@ The grade is advisory: it does not touch scheduling, which stays with review.
 
 from __future__ import annotations
 
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_prompts import evaluation_prompt
 from flashcards.application.note_service import NoteService
 from flashcards.domain.ai import LlmDocument, StructuredRequest
@@ -22,9 +23,10 @@ from flashcards.domain.ports import LLMProvider
 
 
 class EvaluationService:
-    def __init__(self, notes: NoteService, llm: LLMProvider) -> None:
+    def __init__(self, notes: NoteService, llm: LLMProvider, budget: AiCallBudget) -> None:
         self._notes = notes
         self._llm = llm
+        self._budget = budget
 
     async def evaluate(
         self, *, owner_id: str, card_id: str, answer: str
@@ -43,6 +45,7 @@ class EvaluationService:
             schema=EVALUATION_SCHEMA,
             max_output_tokens=EVALUATION_MAX_OUTPUT_TOKENS,
         )
+        await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
         return parse_evaluation(result.data)
 

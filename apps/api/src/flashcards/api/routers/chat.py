@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from flashcards.api.container import Container
-from flashcards.api.deps import CurrentUser, current_user, get_container
+from flashcards.api.deps import CurrentUser, ai_slot, current_user, get_container
 from flashcards.api.schemas import ChatAnswerOut, ChatRequest
 
 router = APIRouter(tags=["chat"])
@@ -16,6 +16,7 @@ router = APIRouter(tags=["chat"])
 async def ask_deck(
     deck_id: str,
     body: ChatRequest,
+    _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> ChatAnswerOut:

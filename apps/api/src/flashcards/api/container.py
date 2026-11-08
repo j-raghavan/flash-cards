@@ -37,6 +37,7 @@ from flashcards.adapters.memory import (
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.application.account_service import AccountService
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.auth_service import AuthService
 from flashcards.application.card_generation_service import CardGenerationService
@@ -84,6 +85,7 @@ from flashcards.domain.ports import (
     TranscriptProvider,
     UserRepository,
 )
+from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
 
 
@@ -114,6 +116,7 @@ class Repositories:
     mock_exams: MockExamRepository
     transcripts: TranscriptProvider
     passages: PassageRepository
+    ai_calls: QuotaRepository
     dummy_hash: str | None = None
 
 
@@ -203,11 +206,18 @@ def build_services(repos: Repositories) -> Container:
         repos.quotas,
         repos.mock_exams,
         repos.passages,
+        repos.ai_calls,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
-    evaluation = EvaluationService(notes, repos.llm)
+    ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
+    evaluation = EvaluationService(notes, repos.llm, ai_budget)
     summary = SummaryService(
-        decks, repos.notes, repos.cards, repos.llm, unlock_cards=DEFAULT_SUMMARY_UNLOCK_CARDS
+        decks,
+        repos.notes,
+        repos.cards,
+        repos.llm,
+        ai_budget,
+        unlock_cards=DEFAULT_SUMMARY_UNLOCK_CARDS,
     )
     mock_exam = MockExamService(
         decks,
@@ -215,6 +225,7 @@ def build_services(repos: Repositories) -> Container:
         repos.cards,
         repos.mock_exams,
         repos.llm,
+        ai_budget,
         repos.clock,
         unlock_cards=DEFAULT_MOCK_EXAM_UNLOCK_CARDS,
     )
@@ -226,6 +237,7 @@ def build_services(repos: Repositories) -> Container:
         repos.extractor,
         repos.passages,
         repos.llm,
+        ai_budget,
     )
     return Container(
         clock=repos.clock,
@@ -292,5 +304,6 @@ def build_container(
             mock_exams=InMemoryMockExamRepository(),
             transcripts=transcripts or NullTranscriptProvider(),
             passages=InMemoryPassageRepository(),
+            ai_calls=InMemoryQuotaRepository(limit=DEFAULT_DAILY_AI_CALLS),
         )
     )

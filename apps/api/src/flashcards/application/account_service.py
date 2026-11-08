@@ -70,6 +70,7 @@ class AccountService:
         quotas: QuotaRepository,
         mock_exams: MockExamRepository,
         passages: PassageRepository,
+        ai_calls: QuotaRepository,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -87,6 +88,7 @@ class AccountService:
         self._quotas = quotas
         self._mock_exams = mock_exams
         self._passages = passages
+        self._ai_calls = ai_calls
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -134,5 +136,6 @@ class AccountService:
         await self._mock_exams.delete_for_owner(owner_id)
         await self._passages.delete_for_owner(owner_id)
         await self._quotas.delete_for_owner(owner_id)
+        await self._ai_calls.delete_for_owner(owner_id)
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)

@@ -13,7 +13,9 @@ from flashcards.adapters.memory import (
     InMemoryDeckRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
+    InMemoryQuotaRepository,
 )
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.deck_service import DeckService
 from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
@@ -152,8 +154,9 @@ def _service(
     exams_repo = InMemoryMockExamRepository()
     decks = DeckService(decks_repo, clock)
     notes = NoteService(decks, notes_repo, cards_repo, clock)
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock)
     service = MockExamService(
-        decks, notes_repo, cards_repo, exams_repo, llm, clock, unlock_cards=unlock_cards
+        decks, notes_repo, cards_repo, exams_repo, llm, budget, clock, unlock_cards=unlock_cards
     )
     return service, decks, notes
 
@@ -356,8 +359,9 @@ async def test_a_concurrent_submission_wins() -> None:
     )
     decks = DeckService(decks_repo, clock)
     exams = _LosesTheRace()
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock)
     service = MockExamService(
-        decks, notes_repo, cards_repo, exams, _ScriptedLLM([]), clock, unlock_cards=1
+        decks, notes_repo, cards_repo, exams, _ScriptedLLM([]), budget, clock, unlock_cards=1
     )
     await exams.add(_exam())
     with pytest.raises(ExamClosed, match="already submitted"):

@@ -9,8 +9,10 @@ from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
     InMemoryNoteRepository,
+    InMemoryQuotaRepository,
     SystemClock,
 )
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
 from flashcards.application.summary_service import SummaryService
@@ -71,7 +73,10 @@ def _service(
     cards_repo = InMemoryCardRepository()
     decks = DeckService(decks_repo, clock)
     notes = NoteService(decks, notes_repo, cards_repo, clock)
-    service = SummaryService(decks, notes_repo, cards_repo, llm, unlock_cards=unlock_cards)
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock)
+    service = SummaryService(
+        decks, notes_repo, cards_repo, llm, budget, unlock_cards=unlock_cards
+    )
     return service, decks, notes
 
 

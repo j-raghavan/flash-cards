@@ -32,3 +32,7 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "local-model"
+    # Synchronous AI requests (grading, summaries, mock exams, chat) running at once.
+    # Keep it below the database pool size: each holds a connection while it waits
+    # on the model.
+    max_concurrent_ai_calls: int = 4

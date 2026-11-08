@@ -67,6 +67,7 @@ class _Fixture:
         self.quotas = InMemoryQuotaRepository()
         self.mock_exams = InMemoryMockExamRepository()
         self.passages = InMemoryPassageRepository()
+        self.ai_calls = InMemoryQuotaRepository(limit=5)
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -79,7 +80,7 @@ class _Fixture:
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
-            self.passages,
+            self.passages, self.ai_calls,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -148,6 +149,7 @@ class _Fixture:
             ]
         )
         await self.quotas.try_reserve_pages(owner, 1, "2026-11")
+        await self.ai_calls.try_reserve_pages(owner, 5, "calls:2026-11-08")
 
 
 async def test_export_gathers_everything_the_user_owns() -> None:
@@ -195,6 +197,7 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.mock_exams.get("exam-alice") is None
     assert await fx.passages.indexed_files(fx_alice_deck) == set()
     assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset
+    assert await fx.ai_calls.try_reserve_pages(ALICE.id, 1, "calls:2026-11-08") is True
     # Bob keeps his deck, his media and his mock exam.
     assert len(await fx.decks.list_decks(owner_id=BOB)) == 1
     assert [m.id for m in await fx.media.list_for_owner(BOB)] == ["media-bob"]

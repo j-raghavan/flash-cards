@@ -48,6 +48,7 @@ from flashcards.api.container import (
     build_services,
 )
 from flashcards.domain.ports import LLMProvider
+from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
 
@@ -113,6 +114,8 @@ def sql_provider(
                     mock_exams=SqlMockExamRepository(session),
                     transcripts=transcripts,
                     passages=SqlPassageRepository(session),
+                    # Same counter table as page quota, separate daily period keys.
+                    ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
                 )
             )
 

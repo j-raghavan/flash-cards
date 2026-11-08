@@ -84,6 +84,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         mock_exams=SqlMockExamRepository(session),
         transcripts=NullTranscriptProvider(),
         passages=SqlPassageRepository(session),
+        ai_calls=SqlQuotaRepository(session, limit=200),
     )
 
 PASSWORD = "correct-horse-battery"

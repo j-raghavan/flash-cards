@@ -8,6 +8,7 @@ sent to the model as a data document, never concatenated into the instructions
 
 from __future__ import annotations
 
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_prompts import summary_prompt
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.ai import LlmDocument, StructuredRequest
@@ -30,6 +31,7 @@ class SummaryService:
         notes: NoteRepository,
         cards: CardRepository,
         llm: LLMProvider,
+        budget: AiCallBudget,
         *,
         unlock_cards: int,
     ) -> None:
@@ -37,6 +39,7 @@ class SummaryService:
         self._notes = notes
         self._cards = cards
         self._llm = llm
+        self._budget = budget
         self._unlock_cards = unlock_cards
 
     async def summarize(self, *, owner_id: str, deck_id: str) -> DeckSummary:
@@ -54,6 +57,7 @@ class SummaryService:
             schema=SUMMARY_SCHEMA,
             max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
         )
+        await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
         return parse_summary(result.data)
 

@@ -13,6 +13,7 @@ import json
 import uuid
 from collections.abc import Mapping
 
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_prompts import exam_grading_prompt, exam_prompt
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.ai import LlmDocument, StructuredRequest
@@ -54,6 +55,7 @@ class MockExamService:
         cards: CardRepository,
         exams: MockExamRepository,
         llm: LLMProvider,
+        budget: AiCallBudget,
         clock: Clock,
         *,
         unlock_cards: int,
@@ -63,6 +65,7 @@ class MockExamService:
         self._cards = cards
         self._exams = exams
         self._llm = llm
+        self._budget = budget
         self._clock = clock
         self._unlock_cards = unlock_cards
 
@@ -89,6 +92,7 @@ class MockExamService:
             schema=EXAM_SCHEMA,
             max_output_tokens=EXAM_MAX_OUTPUT_TOKENS,
         )
+        await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
         questions = tuple(
             ExamQuestion(id=str(uuid.uuid4()), prompt=prompt, reference=answer, topic=topic)
@@ -141,6 +145,7 @@ class MockExamService:
             schema=GRADE_SCHEMA,
             max_output_tokens=GRADE_MAX_OUTPUT_TOKENS,
         )
+        await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
         return grade_exam(exam, scores_for_answered(exam, answered, parse_grades(result.data)))
 

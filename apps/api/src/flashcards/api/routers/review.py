@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from flashcards.api.container import Container
-from flashcards.api.deps import CurrentUser, current_user, get_container
+from flashcards.api.deps import CurrentUser, ai_slot, current_user, get_container
 from flashcards.api.schemas import (
     CardOut,
     CardScheduleOut,
@@ -51,6 +51,7 @@ async def submit_review(
 async def evaluate_answer(
     card_id: str,
     body: EvaluateRequest,
+    _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> EvaluationOut:

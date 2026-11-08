@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, status
 
 from flashcards.api.container import Container
-from flashcards.api.deps import CurrentUser, current_user, get_container
+from flashcards.api.deps import CurrentUser, ai_slot, current_user, get_container
 from flashcards.api.schemas import (
     ExamResultOut,
     ExamSubmitRequest,
@@ -25,6 +25,7 @@ router = APIRouter(tags=["mock-exam"])
 async def create_mock_exam(
     deck_id: str,
     body: MockExamCreateRequest,
+    _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> MockExamOut:
@@ -41,6 +42,7 @@ async def create_mock_exam(
 async def submit_mock_exam(
     exam_id: str,
     body: ExamSubmitRequest,
+    _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> ExamResultOut:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -24,6 +25,37 @@ async def get_container(request: Request) -> AsyncIterator[Container]:
     # back if the handler raises); in-memory mode yields the shared container.
     async for container in request.app.state.services_provider():
         yield container
+
+
+# How long a synchronous AI request waits for a free slot before giving up.
+AI_SLOT_WAIT_SECONDS = 30.0
+
+
+async def ai_slot(request: Request) -> AsyncIterator[None]:
+    """Bound concurrent synchronous AI requests.
+
+    Declare this dependency BEFORE anything that opens the database session: a model
+    call can take a minute or more while the request holds its DB connection, so
+    without a bound a burst of AI requests could take every pooled connection and
+    stall the rest of the API. Waiting requests hold no connection.
+    """
+    state = request.app.state
+    slots: asyncio.Semaphore | None = getattr(state, "ai_slots", None)
+    if slots is None:
+        # Created lazily, inside the running event loop that will use it.
+        slots = asyncio.Semaphore(request.app.state.settings.max_concurrent_ai_calls)
+        state.ai_slots = slots
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=AI_SLOT_WAIT_SECONDS)
+    except TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI is busy right now; try again shortly.",
+        ) from None
+    try:
+        yield
+    finally:
+        slots.release()
 
 
 def get_settings(request: Request) -> Settings:

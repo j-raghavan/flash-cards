@@ -40,7 +40,7 @@ from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMed
 from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
-from flashcards.domain.quotas import QuotaExceeded
+from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 from flashcards.domain.summary import SummaryLocked
 from flashcards.domain.transcripts import (
@@ -111,6 +111,11 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def invalid_transcript(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
+    async def ai_call_limit(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=429, content={"detail": "Daily AI request limit reached."}
+        )
+
     async def exam_closed(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
@@ -155,6 +160,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidTranscript, invalid_transcript)
     app.add_exception_handler(NoChatSources, no_chat_sources)
     app.add_exception_handler(ExamClosed, exam_closed)
+    app.add_exception_handler(AiCallLimitReached, ai_call_limit)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
     # Catches InvalidEvaluation, InvalidSummary and InvalidExam too (all LlmError).

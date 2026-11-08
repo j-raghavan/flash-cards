@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import uuid
 
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_prompts import chat_prompt
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.ai import LlmDocument, StructuredRequest
@@ -50,6 +51,7 @@ class ChatService:
         extractor: DocumentExtractor,
         passages: PassageRepository,
         llm: LLMProvider,
+        budget: AiCallBudget,
         *,
         max_pages: int = 20,
     ) -> None:
@@ -59,6 +61,7 @@ class ChatService:
         self._extractor = extractor
         self._passages = passages
         self._llm = llm
+        self._budget = budget
         self._max_pages = max_pages
 
     async def ask(self, *, owner_id: str, deck_id: str, question: str) -> ChatAnswer:
@@ -83,6 +86,7 @@ class ChatService:
             schema=CHAT_SCHEMA,
             max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
         )
+        await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
         return parse_chat_answer(result.data, top)
 
