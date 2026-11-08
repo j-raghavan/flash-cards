@@ -133,3 +133,20 @@ def test_the_slot_is_released_after_each_request() -> None:
     card_id = _card(client)
     for _ in range(3):  # would hang and 503 if the single slot leaked
         assert client.post(f"/cards/{card_id}/evaluate", json={"answer": "4"}).status_code == 200
+
+
+class _ClosingLLM(_FakeLLM):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_the_provider_is_closed_on_shutdown() -> None:
+    llm = _ClosingLLM()
+    app = create_app(Settings(environment="test", session_cookie_secure=False), llm=llm)
+    with TestClient(app):  # runs the lifespan
+        assert llm.closed is False
+    assert llm.closed is True

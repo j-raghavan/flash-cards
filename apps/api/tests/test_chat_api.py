@@ -13,6 +13,7 @@ from flashcards.api.container import Container
 from flashcards.config import Settings
 from flashcards.domain.ai import StructuredRequest, StructuredResult, TokenUsage
 from flashcards.domain.invites import Role
+from flashcards.domain.ports import LLMProvider
 
 PASSWORD = "correct-horse-battery"
 
@@ -26,7 +27,7 @@ class _FakeLLM:
         )
 
 
-def _app(llm: _FakeLLM | None = None) -> FastAPI:
+def _app(llm: LLMProvider | None = None) -> FastAPI:
     settings = Settings(environment="test", session_cookie_secure=False)
     return create_app(settings, llm=llm) if llm is not None else create_app(settings)
 
@@ -96,3 +97,21 @@ def test_chat_without_a_backend_is_503() -> None:
     client = _member(_app())  # default app wires NullLLMProvider
     deck_id = _deck_with_source(client)
     assert client.post(f"/decks/{deck_id}/chat", json={"question": "ATP?"}).status_code == 503
+
+
+class _BadLLM:
+    async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
+        return StructuredResult(data={"answer": ""}, usage=TokenUsage(1, 1), model="fake")
+
+
+def test_chat_malformed_model_output_is_502() -> None:
+    client = _member(_app(_BadLLM()))
+    deck_id = _deck_with_source(client)
+    assert client.post(f"/decks/{deck_id}/chat", json={"question": "ATP?"}).status_code == 502
+
+
+def test_chat_rejects_an_overlong_question() -> None:
+    client = _member(_app(_FakeLLM()))
+    deck_id = _deck_with_source(client)
+    resp = client.post(f"/decks/{deck_id}/chat", json={"question": "q" * 2_001})
+    assert resp.status_code == 422

@@ -167,3 +167,10 @@ def test_mock_exam_without_a_backend_is_503() -> None:
     deck_id = _deck(client)
     _add_twenty_cards(client, deck_id)
     assert client.post(f"/decks/{deck_id}/mock-exam", json={}).status_code == 503
+
+
+def test_mock_exam_malformed_model_output_is_502() -> None:
+    client = _member(_app(_ScriptedLLM([{"questions": []}])))
+    deck_id = _deck(client)
+    _add_twenty_cards(client, deck_id)
+    assert client.post(f"/decks/{deck_id}/mock-exam", json={}).status_code == 502

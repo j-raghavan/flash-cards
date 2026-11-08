@@ -7,6 +7,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Protocol, runtime_checkable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -29,7 +30,7 @@ from flashcards.api.routers import (
     review,
 )
 from flashcards.config import Settings
-from flashcards.domain.ai import DraftNotFound, LlmError
+from flashcards.domain.ai import DraftNotFound, InvalidModelOutput, LlmError
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
 from flashcards.domain.chat import NoChatSources
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
@@ -125,11 +126,20 @@ def _register_error_handlers(app: FastAPI) -> None:
             content={"detail": "This deck has no source documents with text to chat with."},
         )
 
-    async def ai_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
+    async def ai_unavailable(_request: Request, exc: Exception) -> JSONResponse:
         # A synchronous AI call failed or is not configured (the async generation
         # worker captures its own errors onto the job and never reaches here).
+        logger.warning("AI call failed: %s", exc, exc_info=exc)
         return JSONResponse(
             status_code=503, content={"detail": "AI is unavailable right now."}
+        )
+
+    async def ai_bad_output(_request: Request, exc: Exception) -> JSONResponse:
+        # The provider answered but the output failed the domain's schema.
+        logger.warning("AI returned unusable output: %s", exc, exc_info=exc)
+        return JSONResponse(
+            status_code=502,
+            content={"detail": "The AI returned an unusable answer; try again."},
         )
 
     not_found_errors = (
@@ -163,7 +173,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AiCallLimitReached, ai_call_limit)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
-    # Catches InvalidEvaluation, InvalidSummary and InvalidExam too (all LlmError).
+    # The more specific handler wins: malformed output is 502, anything else 503.
+    app.add_exception_handler(InvalidModelOutput, ai_bad_output)
     app.add_exception_handler(LlmError, ai_unavailable)
 
 
@@ -189,6 +200,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         job_queue.start(process)
         yield
         await job_queue.stop()
+        if isinstance(configured_llm, Closeable):
+            await configured_llm.aclose()
         if engine is not None:
             await engine.dispose()
 
@@ -239,7 +252,12 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
                 base_url=settings.openai_base_url,
                 model=settings.openai_model,
                 api_key=settings.openai_api_key,
+                timeout_seconds=settings.openai_timeout_seconds,
             )
+        logger.warning(
+            "llm_provider is openai_compatible but openai_base_url is not set; "
+            "AI requests will be refused."
+        )
         return NullLLMProvider()
     if settings.anthropic_api_key:
         from flashcards.adapters.anthropic_llm import AnthropicLLMProvider
@@ -247,7 +265,15 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
         return AnthropicLLMProvider(
             api_key=settings.anthropic_api_key, model=settings.anthropic_model
         )
+    logger.warning("No AI backend is configured; AI requests will be refused.")
     return NullLLMProvider()
+
+
+@runtime_checkable
+class Closeable(Protocol):
+    """A provider holding a network client that should be closed on shutdown."""
+
+    async def aclose(self) -> None: ...
 
 
 def _maybe_bootstrap_invite(settings: Settings, container: Container | None) -> str | None:

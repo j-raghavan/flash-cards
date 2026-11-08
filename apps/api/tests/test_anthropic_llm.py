@@ -12,6 +12,7 @@ from typing import cast
 import anthropic
 import pytest
 from anthropic.types import MessageParam, OutputConfigParam
+from pydantic_settings import SettingsConfigDict
 
 from flashcards.adapters.anthropic_llm import AnthropicLLMProvider
 from flashcards.adapters.llm import NullLLMProvider
@@ -246,7 +247,33 @@ async def test_transport_error_becomes_llm_error() -> None:
         await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
 
 
+class _HermeticSettings(Settings):
+    """Settings that ignore real FLASHCARDS_* env vars and .env, for hermetic tests."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="FLASHCARDS_TEST_UNSET_", env_file=None, extra="ignore"
+    )
+
+
 def test_llm_from_settings_selects_by_key() -> None:
-    assert isinstance(_llm_from_settings(Settings(environment="test")), NullLLMProvider)
-    configured = _llm_from_settings(Settings(environment="test", anthropic_api_key="sk-test"))
+    assert isinstance(_llm_from_settings(_HermeticSettings()), NullLLMProvider)
+    configured = _llm_from_settings(_HermeticSettings(anthropic_api_key="sk-test"))
     assert isinstance(configured, AnthropicLLMProvider)
+
+
+class _ClosableClient(_Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+async def test_aclose_closes_the_sdk_client() -> None:
+    client = _ClosableClient()
+    provider = AnthropicLLMProvider(
+        api_key="unused", model="claude-opus-5-5", client=cast(anthropic.AsyncAnthropic, client)
+    )
+    await provider.aclose()
+    assert client.closed

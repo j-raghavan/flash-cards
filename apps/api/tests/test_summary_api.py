@@ -13,6 +13,7 @@ from flashcards.api.container import Container
 from flashcards.config import Settings
 from flashcards.domain.ai import StructuredRequest, StructuredResult, TokenUsage
 from flashcards.domain.invites import Role
+from flashcards.domain.ports import LLMProvider
 
 PASSWORD = "correct-horse-battery"
 
@@ -26,7 +27,7 @@ class _FakeLLM:
         )
 
 
-def _app(llm: _FakeLLM | None = None) -> FastAPI:
+def _app(llm: LLMProvider | None = None) -> FastAPI:
     settings = Settings(environment="test", session_cookie_secure=False)
     return create_app(settings, llm=llm) if llm is not None else create_app(settings)
 
@@ -107,3 +108,15 @@ def test_summary_without_a_backend_is_503() -> None:
     deck_id = _deck(client)
     _add_twenty_cards(client, deck_id)
     assert client.post(f"/decks/{deck_id}/summary").status_code == 503
+
+
+class _BadLLM:
+    async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
+        return StructuredResult(data={"summary": ""}, usage=TokenUsage(1, 1), model="fake")
+
+
+def test_summary_malformed_model_output_is_502() -> None:
+    client = _member(_app(_BadLLM()))
+    deck_id = _deck(client)
+    _add_twenty_cards(client, deck_id)
+    assert client.post(f"/decks/{deck_id}/summary").status_code == 502

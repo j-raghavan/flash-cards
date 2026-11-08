@@ -11,7 +11,7 @@ import enum
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from flashcards.domain.ai import LlmError
+from flashcards.domain.ai import InvalidModelOutput
 
 MAX_ANSWER_LEN = 20_000
 EVALUATION_MAX_OUTPUT_TOKENS = 1024
@@ -23,7 +23,7 @@ class Verdict(enum.StrEnum):
     INCORRECT = "incorrect"
 
 
-class InvalidEvaluation(LlmError):
+class InvalidEvaluation(InvalidModelOutput):
     """The model's grade did not match the evaluation schema."""
 
 

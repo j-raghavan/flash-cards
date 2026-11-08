@@ -16,7 +16,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from flashcards.domain.ai import LlmError
+from flashcards.domain.ai import InvalidModelOutput
 
 MAX_QUESTION_LEN = 2_000
 PASSAGE_CHARS = 1_200
@@ -43,7 +43,7 @@ class NoChatSources(Exception):
     """The deck has no source documents with readable text to chat with."""
 
 
-class InvalidChatAnswer(LlmError):
+class InvalidChatAnswer(InvalidModelOutput):
     """The model's answer did not match the chat schema."""
 
 

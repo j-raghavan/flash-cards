@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from flashcards.domain.ai import LlmError
+from flashcards.domain.ai import InvalidModelOutput
 
 # Default unlock threshold (R19: mock exams unlock at >= 20 cards).
 DEFAULT_MOCK_EXAM_UNLOCK_CARDS = 20
@@ -44,7 +44,7 @@ class ExamClosed(Exception):
     """The exam was already submitted, or its time limit has passed."""
 
 
-class InvalidExam(LlmError):
+class InvalidExam(InvalidModelOutput):
     """The model's exam or grades did not match the schema."""
 
 

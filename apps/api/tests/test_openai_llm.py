@@ -8,6 +8,8 @@ import json
 
 import httpx
 import pytest
+from pydantic import ValidationError
+from pydantic_settings import SettingsConfigDict
 
 from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider
@@ -238,31 +240,104 @@ async def test_non_json_body_raises() -> None:
         await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
 
 
-async def test_http_error_becomes_llm_error() -> None:
+async def test_http_error_becomes_llm_error_without_the_url() -> None:
     provider, _ = _provider(httpx.Response(500, text="server exploded"))
+    with pytest.raises(LlmError) as caught:
+        await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+    # The message can reach users (a failed job's error), so no endpoint URL in it.
+    assert str(caught.value) == "the model endpoint returned HTTP 500"
+    assert "llm.local" not in str(caught.value)
+
+
+async def test_unreachable_endpoint_is_a_generic_llm_error() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused to http://10.0.0.5:1234", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(refuse))
+    provider = OpenAICompatibleLLMProvider(
+        base_url="http://10.0.0.5:1234/v1", model="m", client=client
+    )
+    with pytest.raises(LlmError) as caught:
+        await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+    assert str(caught.value) == "could not reach the model endpoint"
+
+
+async def test_non_utf8_body_is_an_llm_error() -> None:
+    provider, _ = _provider(httpx.Response(200, content=b"\x80\x81 not utf-8"))
     with pytest.raises(LlmError):
         await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+
+
+async def test_oversized_body_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("flashcards.adapters.openai_llm.MAX_RESPONSE_BYTES", 10)
+    provider, _ = _provider(httpx.Response(200, json=_body()))
+    with pytest.raises(LlmError, match="oversized"):
+        await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+
+
+async def test_content_parts_list_is_joined() -> None:
+    parts = [
+        {"type": "text", "text": CARDS_JSON[:10]},
+        {"type": "image_url", "image_url": {"url": "data:,"}},
+        "junk",
+        {"type": "text", "text": 5},
+        {"type": "text", "text": CARDS_JSON[10:]},
+    ]
+    provider, _ = _provider(httpx.Response(200, json=_body(content=parts)))
+    result = await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+    assert "cards" in result.data
+
+
+async def test_boolean_token_counts_are_ignored() -> None:
+    usage = {"prompt_tokens": True, "completion_tokens": 3}
+    provider, _ = _provider(httpx.Response(200, json=_body(usage=usage)))
+    result = await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+    assert result.usage.input_tokens == 0 and result.usage.output_tokens == 3
+
+
+async def test_timeout_is_configurable_and_the_client_closes() -> None:
+    provider = OpenAICompatibleLLMProvider(
+        base_url="http://llm.local/v1", model="m", timeout_seconds=7.5
+    )
+    assert provider._client.timeout.read == 7.5
+    await provider.aclose()
+    assert provider._client.is_closed
+
+
+class _HermeticSettings(Settings):
+    """Settings that ignore real FLASHCARDS_* env vars and .env, for hermetic tests."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="FLASHCARDS_TEST_UNSET_", env_file=None, extra="ignore"
+    )
+
+
+def test_an_unknown_provider_fails_at_startup() -> None:
+    with pytest.raises(ValidationError):
+        _HermeticSettings.model_validate({"llm_provider": "openai"})
 
 
 def test_llm_from_settings_selects_openai_compatible() -> None:
     from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider as Provider
 
     chosen = _llm_from_settings(
-        Settings(
-            environment="test",
-            llm_provider="openai_compatible",
-            openai_base_url="http://localhost:1234/v1",
+        _HermeticSettings(
+            llm_provider="openai_compatible", openai_base_url="http://localhost:1234/v1"
         )
     )
     assert isinstance(chosen, Provider)
 
 
-def test_llm_from_settings_openai_without_base_url_is_null() -> None:
-    chosen = _llm_from_settings(
-        Settings(environment="test", llm_provider="openai_compatible")
-    )
+def test_llm_from_settings_openai_without_base_url_is_null_and_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    chosen = _llm_from_settings(_HermeticSettings(llm_provider="openai_compatible"))
     assert isinstance(chosen, NullLLMProvider)
+    assert "openai_base_url is not set" in caplog.text
 
 
-def test_llm_from_settings_defaults_to_null_without_a_backend() -> None:
-    assert isinstance(_llm_from_settings(Settings(environment="test")), NullLLMProvider)
+def test_llm_from_settings_defaults_to_null_without_a_backend(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert isinstance(_llm_from_settings(_HermeticSettings()), NullLLMProvider)
+    assert "No AI backend is configured" in caplog.text

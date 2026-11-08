@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from flashcards.domain.ai import LlmError
+from flashcards.domain.ai import InvalidModelOutput
 
 # Default unlock threshold (F-AI-6: "default >= 20 cards, configurable").
 DEFAULT_SUMMARY_UNLOCK_CARDS = 20
@@ -28,7 +28,7 @@ class SummaryLocked(Exception):
         super().__init__(f"summary needs at least {required} cards; the deck has {have}")
 
 
-class InvalidSummary(LlmError):
+class InvalidSummary(InvalidModelOutput):
     """The model's summary did not match the schema."""
 
 

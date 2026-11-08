@@ -118,3 +118,11 @@ def test_evaluate_not_configured_is_503() -> None:
     client = _member(app)
     card_id = _make_card(client)
     assert client.post(f"/cards/{card_id}/evaluate", json={"answer": "4"}).status_code == 503
+
+
+def test_evaluate_malformed_model_output_is_502() -> None:
+    client = _member(_app(_FakeLLM({"verdict": "nonsense"})))
+    card_id = _make_card(client)
+    resp = client.post(f"/cards/{card_id}/evaluate", json={"answer": "4"})
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "The AI returned an unusable answer; try again."
