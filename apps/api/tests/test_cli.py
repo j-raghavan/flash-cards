@@ -12,7 +12,7 @@ from flashcards.adapters.memory import SystemClock
 from flashcards.adapters.sql import SqlInviteRepository
 from flashcards.cli import create_invite, main
 from flashcards.config import Settings
-from flashcards.domain.invites import InviteStatus, Role
+from flashcards.domain.invites import Invite, InviteStatus, Role
 
 
 def _reset_schema(url: str) -> None:
@@ -36,7 +36,7 @@ def test_create_invite_persists_an_admin_invite(pg_url: str) -> None:
     token = asyncio.run(create_invite(Settings(database_url=pg_url), Role.ADMIN, None))
     assert len(token) >= 40
 
-    async def _list() -> list[object]:
+    async def _list() -> list[Invite]:
         engine = create_engine(pg_url)
         sessionmaker = create_sessionmaker(engine)
         async with sessionmaker() as session:

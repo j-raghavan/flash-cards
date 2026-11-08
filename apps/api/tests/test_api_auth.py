@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.domain.invites import Role
@@ -14,9 +16,10 @@ from flashcards.domain.users import User
 PASSWORD = "correct-horse-battery"
 
 
-def _signup(client: TestClient, token: str, email: str, password: str = PASSWORD) -> object:
-    return client.post(
-        "/auth/signup", json={"token": token, "email": email, "password": password}
+def _signup(client: TestClient, token: str, email: str, password: str = PASSWORD) -> Response:
+    return cast(
+        Response,
+        client.post("/auth/signup", json={"token": token, "email": email, "password": password}),
     )
 
 

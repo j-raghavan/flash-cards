@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from testcontainers.postgres import PostgresContainer
 
 from flashcards.api.app import create_app
+from flashcards.api.container import Container
 from flashcards.config import Settings
 from flashcards.domain.invites import Role
 
@@ -27,7 +28,7 @@ PASSWORD = "correct-horse-battery"
 def pg_url() -> Iterator[str]:
     """A throwaway Postgres for the SQL integration tests (needs Docker)."""
     with PostgresContainer("postgres:16-alpine", driver="asyncpg") as pg:
-        yield pg.get_connection_url()
+        yield str(pg.get_connection_url())
 
 
 @pytest.fixture
@@ -44,8 +45,9 @@ def client(app: FastAPI) -> TestClient:
 @pytest.fixture
 def seed_invite(app: FastAPI) -> Callable[..., str]:
     def _seed(role: Role = Role.MEMBER, email: str | None = None) -> str:
+        container: Container = app.state.container
         created = asyncio.run(
-            app.state.container.invites.create(created_by="seed", role=role, email=email)
+            container.invites.create(created_by="seed", role=role, email=email)
         )
         return created.raw_token
 
