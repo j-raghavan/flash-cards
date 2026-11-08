@@ -31,9 +31,26 @@ from flashcards.domain.anki import (
 MAX_ENTRIES = 10_000
 MAX_TOTAL_UNCOMPRESSED = 500 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 100
+# A real bound on the decompressed collection (not trusting the zip's self-reported
+# sizes), plus caps on row counts so a valid-but-hostile DB can't amplify into a
+# multi-GB object graph.
+MAX_COLLECTION_BYTES = 200 * 1024 * 1024
+MAX_NOTES = 100_000
+MAX_CARDS = 200_000
 FIELD_SEPARATOR = "\x1f"
 # Newer packages carry collection.anki21; older ones collection.anki2. Prefer the newer.
 _COLLECTION_NAMES = ("collection.anki21", "collection.anki2")
+
+
+def _require_int(value: object, what: str) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise InvalidPackage(f"invalid integer for {what}") from exc
+    raise InvalidPackage(f"invalid integer for {what}")
 
 
 class ApkgReader:
@@ -68,14 +85,20 @@ def _read_collection(archive: zipfile.ZipFile) -> bytes:
     names = set(archive.namelist())
     for candidate in _COLLECTION_NAMES:
         if candidate in names:
-            return archive.read(candidate)
+            # Bound the ACTUAL decompressed output, rather than trusting the zip's
+            # self-reported sizes (which the guard above can only check advisorily).
+            with archive.open(candidate) as stream:
+                data = stream.read(MAX_COLLECTION_BYTES + 1)
+            if len(data) > MAX_COLLECTION_BYTES:
+                raise UnsupportedPackage("collection database is too large")
+            return data
     raise InvalidPackage("no collection database in package")
 
 
 def _parse_collection(collection: bytes) -> AnkiPackage:
     with tempfile.NamedTemporaryFile(suffix=".anki2", delete=False) as tmp:
+        path = tmp.name  # captured before the write, so the finally always cleans up
         tmp.write(collection)
-        path = tmp.name
     try:
         connection = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
         try:
@@ -99,25 +122,37 @@ def _read_rows(connection: sqlite3.Connection) -> AnkiPackage:
     notes: list[AnkiNote] = []
     guid_by_nid: dict[int, str] = {}
     for nid, guid, mid, tags, flds in connection.execute(
-        "SELECT id, guid, mid, tags, flds FROM notes"
+        "SELECT id, guid, mid, tags, flds FROM notes LIMIT ?", (MAX_NOTES + 1,)
     ):
         guid_text = str(guid)
-        guid_by_nid[int(nid)] = guid_text
+        guid_by_nid[_require_int(nid, "note id")] = guid_text
         notes.append(
             AnkiNote(
                 guid=guid_text,
-                note_type_id=int(mid),
+                note_type_id=_require_int(mid, "note type id"),
                 fields=tuple(str(flds).split(FIELD_SEPARATOR)),
                 tags=tuple(tag for tag in str(tags).split() if tag),
             )
         )
+    if len(notes) > MAX_NOTES:
+        raise UnsupportedPackage("collection has too many notes")
 
     cards: list[AnkiCard] = []
-    for nid, did, ordinal in connection.execute("SELECT nid, did, ord FROM cards"):
-        card_guid = guid_by_nid.get(int(nid))
+    for nid, did, ordinal in connection.execute(
+        "SELECT nid, did, ord FROM cards LIMIT ?", (MAX_CARDS + 1,)
+    ):
+        card_guid = guid_by_nid.get(_require_int(nid, "card note id"))
         if card_guid is None:
             continue  # a card with no matching note; skip it
-        cards.append(AnkiCard(note_guid=card_guid, deck_id=int(did), ordinal=int(ordinal)))
+        cards.append(
+            AnkiCard(
+                note_guid=card_guid,
+                deck_id=_require_int(did, "deck id"),
+                ordinal=_require_int(ordinal, "ordinal"),
+            )
+        )
+    if len(cards) > MAX_CARDS:
+        raise UnsupportedPackage("collection has too many cards")
 
     return AnkiPackage(
         note_types=note_types, decks=decks, notes=tuple(notes), cards=tuple(cards)
@@ -130,9 +165,15 @@ def _parse_models(models_json: object) -> dict[int, AnkiNoteType]:
     for key, model in raw.items():
         if not isinstance(model, dict):
             raise InvalidPackage("malformed note type")
-        fields = tuple(str(field.get("name", "")) for field in model.get("flds", []))
-        result[int(key)] = AnkiNoteType(
-            id=int(key),
+        flds = model.get("flds", [])
+        if not isinstance(flds, list):
+            raise InvalidPackage("malformed note type fields")
+        fields = tuple(
+            str(field.get("name", "")) for field in flds if isinstance(field, dict)
+        )
+        model_id = _require_int(key, "note type id")
+        result[model_id] = AnkiNoteType(
+            id=model_id,
             name=str(model.get("name", "")),
             is_cloze=model.get("type", 0) == 1,
             field_names=fields,
@@ -146,7 +187,8 @@ def _parse_decks(decks_json: object) -> dict[int, AnkiDeck]:
     for key, deck in raw.items():
         if not isinstance(deck, dict):
             raise InvalidPackage("malformed deck")
-        result[int(key)] = AnkiDeck(id=int(key), name=str(deck.get("name", "")))
+        deck_id = _require_int(key, "deck id")
+        result[deck_id] = AnkiDeck(id=deck_id, name=str(deck.get("name", "")))
     return result
 
 

@@ -11,7 +11,10 @@ from flashcards.api.schemas import ImportReportOut
 
 router = APIRouter(prefix="/import", tags=["import"])
 
-MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+# Bounded low: a zip's central directory is parsed in full at open time, so a huge
+# upload of tiny entries can allocate many ZipInfo objects before the reader's
+# entry-count guard runs. A smaller cap bounds that worst case.
+MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 
 
 @router.post("/apkg", status_code=status.HTTP_201_CREATED, response_model=ImportReportOut)

@@ -9,6 +9,7 @@ import os
 import sqlite3
 import tempfile
 import zipfile
+from collections.abc import Sequence
 
 import pytest
 
@@ -37,7 +38,12 @@ def _as_text(value: object) -> str | None:
 
 
 def _collection(
-    *, models: object = MODELS, decks: object = DECKS, with_row: bool = True
+    *,
+    models: object = MODELS,
+    decks: object = DECKS,
+    with_row: bool = True,
+    note_rows: Sequence[tuple[object, ...]] | None = None,
+    card_rows: Sequence[tuple[object, ...]] | None = None,
 ) -> bytes:
     fd, path = tempfile.mkstemp(suffix=".anki2")
     os.close(fd)
@@ -52,9 +58,14 @@ def _collection(
         conn.execute(
             "CREATE TABLE notes (id INTEGER, guid TEXT, mid INTEGER, tags TEXT, flds TEXT)"
         )
-        conn.executemany("INSERT INTO notes VALUES (?, ?, ?, ?, ?)", NOTES)
+        conn.executemany(
+            "INSERT INTO notes VALUES (?, ?, ?, ?, ?)",
+            NOTES if note_rows is None else note_rows,
+        )
         conn.execute("CREATE TABLE cards (nid INTEGER, did INTEGER, ord INTEGER)")
-        conn.executemany("INSERT INTO cards VALUES (?, ?, ?)", CARDS)
+        conn.executemany(
+            "INSERT INTO cards VALUES (?, ?, ?)", CARDS if card_rows is None else card_rows
+        )
         conn.commit()
         conn.close()
         with open(path, "rb") as handle:
@@ -172,3 +183,46 @@ def test_corrupt_database_is_invalid() -> None:
     # A file named like a collection but not a valid SQLite database.
     with pytest.raises(InvalidPackage):
         ApkgReader().read(_apkg(b"SQLite format 3\x00 but corrupt"))
+
+
+def test_non_numeric_note_type_key_is_invalid() -> None:
+    bad_models = {"abc": {"name": "X", "type": 0, "flds": [{"name": "F"}]}}
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_collection(models=bad_models)))
+
+
+def test_models_flds_not_a_list_is_invalid() -> None:
+    bad_models = {"1": {"name": "X", "type": 0, "flds": "not-a-list"}}
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_collection(models=bad_models)))
+
+
+def test_non_integer_note_mid_is_invalid() -> None:
+    rows = [(10, "g1", "not-an-int", "", f"Q{SEP}A")]  # mid is text in an int column
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_collection(note_rows=rows)))
+
+
+def test_null_card_nid_is_invalid() -> None:
+    rows = [(None, 100, 0)]  # nid is NULL -> not int/str
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_collection(card_rows=rows)))
+
+
+def test_too_many_notes_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(apkg, "MAX_NOTES", 1)
+    rows = [(10, "g1", 1, "", f"Q{SEP}A"), (11, "g2", 1, "", f"Q2{SEP}A2")]
+    with pytest.raises(UnsupportedPackage):
+        ApkgReader().read(_apkg(_collection(note_rows=rows)))
+
+
+def test_too_many_cards_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(apkg, "MAX_CARDS", 1)
+    with pytest.raises(UnsupportedPackage):
+        ApkgReader().read(_apkg(_collection()))  # the fixture has 3 cards
+
+
+def test_oversized_collection_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(apkg, "MAX_COLLECTION_BYTES", 10)
+    with pytest.raises(UnsupportedPackage):
+        ApkgReader().read(_apkg(_collection()))  # a real SQLite file exceeds 10 bytes
