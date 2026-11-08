@@ -29,6 +29,7 @@ from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, Schedu
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import SharedDeckPreview, ShareLink
 from flashcards.domain.summary import DeckSummary
+from flashcards.domain.tags import MAX_TAGS_PER_NOTE
 from flashcards.domain.users import User
 
 
@@ -149,6 +150,14 @@ class DeckOut(BaseModel):
 class NoteCreateRequest(BaseModel):
     note_type: NoteType
     fields: dict[str, str]
+    tags: list[str] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)
+
+
+class NoteUpdateRequest(BaseModel):
+    """Either or both; the note type cannot change."""
+
+    fields: dict[str, str] | None = None
+    tags: list[str] | None = Field(default=None, max_length=MAX_TAGS_PER_NOTE)
 
 
 class CardOut(BaseModel):
@@ -157,6 +166,8 @@ class CardOut(BaseModel):
     note_id: str
     ordinal: int
     suspended: bool
+    flag: int
+    buried_until: datetime | None
 
     @classmethod
     def from_card(cls, card: Card) -> CardOut:
@@ -166,23 +177,45 @@ class CardOut(BaseModel):
             note_id=card.note_id,
             ordinal=card.ordinal,
             suspended=card.is_suspended,
+            flag=card.flag,
+            buried_until=card.buried_until,
         )
 
 
 class CardDetailOut(CardOut):
     note_type: NoteType
     fields: dict[str, str]
+    tags: list[str]
 
     @classmethod
     def from_card_and_note(cls, card: Card, note: Note) -> CardDetailOut:
         return cls(
-            id=card.id,
-            deck_id=card.deck_id,
-            note_id=card.note_id,
-            ordinal=card.ordinal,
-            suspended=card.is_suspended,
+            **CardOut.from_card(card).model_dump(),
             note_type=note.note_type,
             fields=dict(note.fields),
+            tags=list(note.tags),
+        )
+
+
+class NoteOut(BaseModel):
+    id: str
+    deck_id: str
+    note_type: NoteType
+    fields: dict[str, str]
+    tags: list[str]
+    created_at: datetime
+    cards: list[CardOut]
+
+    @classmethod
+    def from_note(cls, note: Note, cards: list[Card]) -> NoteOut:
+        return cls(
+            id=note.id,
+            deck_id=note.deck_id,
+            note_type=note.note_type,
+            fields=dict(note.fields),
+            tags=list(note.tags),
+            created_at=note.created_at,
+            cards=[CardOut.from_card(card) for card in cards],
         )
 
 

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.notes import (
@@ -17,7 +17,7 @@ from flashcards.domain.notes import (
     card_ordinals,
 )
 from flashcards.domain.ports import CardRepository, Clock, NoteRepository
-from flashcards.domain.tags import Tags
+from flashcards.domain.tags import normalize_tags
 
 
 class NoteService:
@@ -40,9 +40,10 @@ class NoteService:
         deck_id: str,
         note_type: NoteType,
         fields: Mapping[str, str],
-        tags: Tags = (),
+        tags: Iterable[str] = (),
     ) -> tuple[Note, list[Card]]:
-        """Create a note and its cards. `tags` must already be normalized."""
+        """Create a note and its cards; raises InvalidNote or InvalidTags."""
+        normalized_tags = normalize_tags(tags)
         # Raises DeckNotFound if the deck is missing or not the caller's.
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
         field_pairs: Fields = tuple(fields.items())
@@ -56,14 +57,19 @@ class NoteService:
             note_type=note_type,
             fields=field_pairs,
             created_at=now,
-            tags=tags,
+            tags=normalized_tags,
         )
         await self._notes.add(note)
+        return note, await self.add_cards(note, ordinals)
+
+    async def add_cards(self, note: Note, ordinals: list[int]) -> list[Card]:
+        """Create the note's cards for these ordinals, in the note's deck."""
+        now = self._clock.now()
         cards = [
             Card(
                 id=str(uuid.uuid4()),
-                owner_id=owner_id,
-                deck_id=deck_id,
+                owner_id=note.owner_id,
+                deck_id=note.deck_id,
                 note_id=note.id,
                 ordinal=ordinal,
                 created_at=now,
@@ -72,7 +78,12 @@ class NoteService:
         ]
         for card in cards:
             await self._cards.add(card)
-        return note, cards
+        return cards
+
+    async def cards_of(self, note: Note) -> list[Card]:
+        """The note's cards, by ordinal (they always live in the note's deck)."""
+        cards = await self._cards.list_for_deck(note.deck_id)
+        return sorted((c for c in cards if c.note_id == note.id), key=lambda c: c.ordinal)
 
     async def list_cards(self, *, owner_id: str, deck_id: str) -> list[Card]:
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)

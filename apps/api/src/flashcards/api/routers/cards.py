@@ -12,6 +12,8 @@ from flashcards.api.schemas import (
     CardOut,
     DeckStatsOut,
     NoteCreateRequest,
+    NoteOut,
+    NoteUpdateRequest,
 )
 
 router = APIRouter(tags=["cards"])
@@ -27,7 +29,11 @@ async def create_note(
     container: Container = Depends(get_container, scope="function"),
 ) -> list[CardOut]:
     _note, cards = await container.notes.create_note(
-        owner_id=caller.user.id, deck_id=deck_id, note_type=body.note_type, fields=body.fields
+        owner_id=caller.user.id,
+        deck_id=deck_id,
+        note_type=body.note_type,
+        fields=body.fields,
+        tags=body.tags,
     )
     return [CardOut.from_card(card) for card in cards]
 
@@ -83,6 +89,29 @@ async def unsuspend_card(
     return CardOut.from_card(
         await container.notes.unsuspend_card(owner_id=caller.user.id, card_id=card_id)
     )
+
+
+@router.get("/notes/{note_id}", response_model=NoteOut)
+async def get_note(
+    note_id: str,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> NoteOut:
+    note = await container.notes.get_note(owner_id=caller.user.id, note_id=note_id)
+    return NoteOut.from_note(note, await container.notes.cards_of(note))
+
+
+@router.patch("/notes/{note_id}", response_model=NoteOut)
+async def update_note(
+    note_id: str,
+    body: NoteUpdateRequest,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> NoteOut:
+    note, cards = await container.library.update_note(
+        owner_id=caller.user.id, note_id=note_id, fields=body.fields, tags=body.tags
+    )
+    return NoteOut.from_note(note, cards)
 
 
 @router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)

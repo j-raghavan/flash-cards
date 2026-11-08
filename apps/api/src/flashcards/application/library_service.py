@@ -9,8 +9,11 @@ cascades are a database-integrity backstop, not the primary mechanism).
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
+
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
+from flashcards.domain.notes import Card, Note, card_ordinals
 from flashcards.domain.ports import (
     CardRepository,
     DeckRepository,
@@ -21,6 +24,7 @@ from flashcards.domain.ports import (
     ScheduleRepository,
     ShareLinkRepository,
 )
+from flashcards.domain.tags import normalize_tags
 
 
 class LibraryService:
@@ -79,6 +83,38 @@ class LibraryService:
             await self._card_repo.delete_for_deck(deck.id)
             await self._note_repo.delete_for_deck(deck.id)
             await self._deck_repo.delete(deck.id)
+
+    async def update_note(
+        self,
+        *,
+        owner_id: str,
+        note_id: str,
+        fields: Mapping[str, str] | None = None,
+        tags: Iterable[str] | None = None,
+    ) -> tuple[Note, list[Card]]:
+        """Edit a note's fields and/or tags (ADR 0011); returns the note and its cards.
+
+        New fields re-derive the cards: a card whose ordinal survives keeps its
+        schedule and history, a removed cloze deletion takes its card, schedule and
+        history with it, and a new deletion gets a new card. Everything is checked
+        before anything is written.
+        """
+        note = await self._notes.get_note(owner_id=owner_id, note_id=note_id)
+        updated = note
+        if tags is not None:
+            updated = updated.with_tags(normalize_tags(tags))
+        if fields is not None:
+            updated = updated.with_fields(tuple(fields.items()))
+        wanted = card_ordinals(updated.note_type, updated.fields)  # raises InvalidNote
+        cards = await self._notes.cards_of(note)
+        await self._note_repo.update(updated)
+        for card in cards:
+            if card.ordinal not in wanted:
+                await self._purge_card(card.id)
+                await self._card_repo.delete(card.id)
+        have = {card.ordinal for card in cards}
+        await self._notes.add_cards(updated, [o for o in wanted if o not in have])
+        return updated, await self._notes.cards_of(updated)
 
     async def delete_note(self, *, owner_id: str, note_id: str) -> None:
         """Delete a note and the cards, schedules and logs it produced."""
