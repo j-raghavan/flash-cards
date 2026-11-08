@@ -55,6 +55,10 @@ def test_upload_then_fetch_round_trips(member: TestClient) -> None:
     assert fetched.status_code == 200
     assert fetched.content == data
     assert fetched.headers["content-type"] == "image/png"
+    # Private, non-sniffable user media.
+    assert fetched.headers["x-content-type-options"] == "nosniff"
+    assert fetched.headers["content-disposition"] == "inline"
+    assert "private" in fetched.headers["cache-control"]
 
 
 def test_upload_requires_auth(client: TestClient) -> None:
@@ -70,6 +74,13 @@ def test_oversized_media_is_rejected(
     app: FastAPI, member: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(app.state.container.media, "_max_bytes", 10)
+    assert _upload(member, _png()).status_code == 413
+
+
+def test_router_caps_body_before_reading_it(
+    member: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("flashcards.api.routers.media.MAX_UPLOAD_BYTES", 10)
     assert _upload(member, _png()).status_code == 413
 
 
