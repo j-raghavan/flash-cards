@@ -98,6 +98,15 @@ async def cancel_job(
     return JobOut.from_job(await container.generation.get(owner_id=caller.user.id, job_id=job_id))
 
 
+@router.post("/jobs/{job_id}/retry", response_model=JobOut)
+async def retry_job(
+    job_id: str,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> JobOut:
+    return JobOut.from_job(await container.generation.retry(owner_id=caller.user.id, job_id=job_id))
+
+
 @router.get("/jobs/{job_id}/drafts", response_model=list[DraftOut])
 async def list_drafts(
     job_id: str,

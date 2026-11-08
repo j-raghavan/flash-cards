@@ -38,7 +38,7 @@ from flashcards.domain.chat import NoChatSources
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
-from flashcards.domain.jobs import JobNotFound
+from flashcards.domain.jobs import IllegalJobTransition, JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
 from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import (
@@ -195,6 +195,12 @@ def _register_error_handlers(app: FastAPI) -> None:
             content={"detail": "The AI returned an unusable answer; try again."},
         )
 
+    async def job_conflict(_request: Request, _exc: Exception) -> JSONResponse:
+        # e.g. retrying a job that has not failed or has no attempts left.
+        return JSONResponse(
+            status_code=409, content={"detail": "The job cannot do that in its current state."}
+        )
+
     not_found_errors = (
         DeckNotFound,
         CardNotFound,
@@ -209,6 +215,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
+    app.add_exception_handler(IllegalJobTransition, job_conflict)
     app.add_exception_handler(InvalidDeckName, invalid_deck_name)
     app.add_exception_handler(RequestValidationError, invalid_request)
     app.add_exception_handler(InvalidNote, invalid_note)

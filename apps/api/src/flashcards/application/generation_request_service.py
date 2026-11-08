@@ -113,6 +113,18 @@ class GenerationRequestService:
             raise JobNotFound(job_id)
         return job
 
+    async def retry(self, *, owner_id: str, job_id: str) -> AiJob:
+        """Queue a failed job again (ADR 0012); raises IllegalJobTransition otherwise.
+
+        The job resumes from the pages it already generated, so they are neither
+        generated nor charged again.
+        """
+        job = await self.get(owner_id=owner_id, job_id=job_id)
+        queued = job.retried(self._clock.now())
+        await self._jobs.update(queued)
+        await self._queue.enqueue(job.id)
+        return queued
+
     async def cancel(self, *, owner_id: str, job_id: str) -> None:
         await self.get(owner_id=owner_id, job_id=job_id)  # ownership check
         await self._jobs.request_cancel(job_id, self._clock.now())
