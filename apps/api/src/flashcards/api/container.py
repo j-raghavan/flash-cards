@@ -14,6 +14,7 @@ from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
     InMemoryCardRepository,
@@ -21,6 +22,7 @@ from flashcards.adapters.memory import (
     InMemoryDraftCardRepository,
     InMemoryGoalRepository,
     InMemoryInviteRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
     InMemoryQuotaRepository,
@@ -41,6 +43,7 @@ from flashcards.application.generation_request_service import GenerationRequestS
 from flashcards.application.goal_service import GoalService
 from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
+from flashcards.application.media_service import MediaService
 from flashcards.application.note_service import NoteService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
@@ -56,6 +59,8 @@ from flashcards.domain.ports import (
     InviteRepository,
     JobQueue,
     LLMProvider,
+    MediaRepository,
+    MediaTypeSniffer,
     NoteRepository,
     ObjectStore,
     PackageReader,
@@ -91,6 +96,8 @@ class Repositories:
     llm: LLMProvider
     goals: GoalRepository
     package_reader: PackageReader
+    media: MediaRepository
+    media_sniffer: MediaTypeSniffer
     dummy_hash: str | None = None
 
 
@@ -113,6 +120,7 @@ class Container:
     planner: PlannerService
     apkg_import: ApkgImportService
     account: AccountService
+    media: MediaService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -169,6 +177,7 @@ def build_services(repos: Repositories) -> Container:
         repos.sessions,
         repos.users,
     )
+    media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -187,6 +196,7 @@ def build_services(repos: Repositories) -> Container:
         planner=planner,
         apkg_import=apkg_import,
         account=account,
+        media=media,
     )
 
 
@@ -220,5 +230,7 @@ def build_container(
             llm=llm or NullLLMProvider(),
             goals=InMemoryGoalRepository(),
             package_reader=ApkgReader(),
+            media=InMemoryMediaRepository(),
+            media_sniffer=PuremagicMediaSniffer(),
         )
     )

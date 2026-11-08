@@ -23,6 +23,7 @@ from flashcards.api.routers import (
     decks,
     goals,
     imports,
+    media,
     review,
 )
 from flashcards.config import Settings
@@ -32,6 +33,7 @@ from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobNotFound
+from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import QuotaExceeded
@@ -77,6 +79,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def bad_package(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": "The .apkg could not be imported."})
 
+    async def media_too_large(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=413, content={"detail": "The media file is too large."})
+
     not_found_errors = (
         DeckNotFound,
         CardNotFound,
@@ -84,6 +89,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         JobNotFound,
         DraftNotFound,
         GoalNotFound,
+        MediaNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -92,6 +98,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidGoal, invalid_goal)
     app.add_exception_handler(InvalidPackage, bad_package)
     app.add_exception_handler(UnsupportedPackage, bad_package)
+    app.add_exception_handler(UnsupportedMedia, unsupported_media)
+    app.add_exception_handler(MediaTooLarge, media_too_large)
     app.add_exception_handler(DeckCycle, conflict)
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
@@ -147,6 +155,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(goals.router)
     app.include_router(imports.router)
     app.include_router(account.router)
+    app.include_router(media.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

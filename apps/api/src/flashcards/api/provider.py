@@ -19,6 +19,7 @@ from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
@@ -28,6 +29,7 @@ from flashcards.adapters.sql import (
     SqlDraftCardRepository,
     SqlGoalRepository,
     SqlInviteRepository,
+    SqlMediaRepository,
     SqlNoteRepository,
     SqlObjectStore,
     SqlQuotaRepository,
@@ -73,6 +75,7 @@ def sql_provider(
     # Stateless/process-level singletons, shared across requests.
     extractor = PyMuPDFExtractor()
     package_reader = ApkgReader()
+    media_sniffer = PuremagicMediaSniffer()
     job_queue = InProcessJobQueue()
     provider_llm = llm or NullLLMProvider()
 
@@ -101,6 +104,8 @@ def sql_provider(
                     llm=provider_llm,
                     goals=SqlGoalRepository(session),
                     package_reader=package_reader,
+                    media=SqlMediaRepository(session),
+                    media_sniffer=media_sniffer,
                 )
             )
 

@@ -122,3 +122,21 @@ async def test_user_session_and_aijob_deletion(engine: AsyncEngine) -> None:
         assert await SqlUserRepository(s).get("u1") is None
         assert await SqlSessionRepository(s).list_for_user("u1") == []
         assert await SqlAiJobRepository(s).list_for_owner("u1") == []
+
+
+async def test_media_roundtrip(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlMediaRepository
+    from flashcards.domain.media import MediaAsset
+
+    sm = create_sessionmaker(engine)
+    asset = MediaAsset(
+        id="m1", owner_id="alice", content_type="image/png", data=b"\x89PNG-bytes",
+        created_at=NOW,
+    )
+    async with sm() as s, s.begin():
+        await SqlMediaRepository(s).add(asset)
+    async with sm() as s:
+        loaded = await SqlMediaRepository(s).get("m1")
+        assert loaded is not None
+        assert loaded.content_type == "image/png" and loaded.data == b"\x89PNG-bytes"
+        assert await SqlMediaRepository(s).get("missing") is None

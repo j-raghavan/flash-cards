@@ -26,6 +26,7 @@ from flashcards.adapters.db import (
     DraftCardRow,
     GoalRow,
     InviteRow,
+    MediaRow,
     NoteRow,
     ReviewLogRow,
     SessionRow,
@@ -42,6 +43,8 @@ from flashcards.adapters.db import (
     goal_to_row,
     invite_from_row,
     invite_to_row,
+    media_from_row,
+    media_to_row,
     note_from_row,
     note_to_row,
     review_log_from_row,
@@ -58,6 +61,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -473,3 +477,16 @@ class SqlGoalRepository:
         if row is not None:
             await self._session.delete(row)
             await self._session.flush()
+
+
+class SqlMediaRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, asset: MediaAsset) -> None:
+        self._session.add(media_to_row(asset))
+        await self._session.flush()
+
+    async def get(self, media_id: str) -> MediaAsset | None:
+        row = await self._session.get(MediaRow, media_id)
+        return media_from_row(row) if row is not None else None
