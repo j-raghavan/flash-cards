@@ -163,9 +163,15 @@ async def test_owner_scoped_deletes(engine: AsyncEngine) -> None:
                 id="m2", owner_id="bob", content_type="image/png", data=b"y", created_at=NOW
             )
         )
-        # A deck+card so the review log's FK is satisfied, then an owner-scoped log.
+        # A deck+note+card so the review log's FK is satisfied, then an owner-scoped log.
         await SqlDeckRepository(s).add(
             Deck(id="dk", owner_id="alice", name="D", parent_id=None, created_at=NOW)
+        )
+        await SqlNoteRepository(s).add(
+            Note(
+                id="n", owner_id="alice", deck_id="dk", note_type=NoteType.BASIC,
+                fields=(("front", "q"), ("back", "a")), created_at=NOW,
+            )
         )
         await SqlCardRepository(s).add(
             Card(
