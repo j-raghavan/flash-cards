@@ -124,6 +124,42 @@ async def test_user_session_and_aijob_deletion(engine: AsyncEngine) -> None:
         assert await SqlAiJobRepository(s).list_for_owner("u1") == []
 
 
+async def test_mock_exam_roundtrip_and_owner_delete(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlMockExamRepository
+    from flashcards.domain.mock_exam import ExamQuestion, MockExam
+
+    sm = create_sessionmaker(engine)
+    exam = MockExam(
+        id="e1", owner_id="alice", deck_id="d1", created_at=NOW, time_limit_seconds=600,
+        questions=(
+            ExamQuestion(id="q1", prompt="p1", reference="r1", topic="Bio"),
+            ExamQuestion(id="q2", prompt="p2", reference="r2", topic="Chem"),
+        ),
+    )
+    async with sm() as s, s.begin():
+        await SqlMockExamRepository(s).add(exam)
+        await SqlMockExamRepository(s).add(
+            MockExam(
+                id="e2", owner_id="bob", deck_id="d9", created_at=NOW, time_limit_seconds=None,
+                questions=(ExamQuestion(id="q", prompt="p", reference="r", topic="t"),),
+            )
+        )
+
+    async with sm() as s:
+        loaded = await SqlMockExamRepository(s).get("e1")
+        assert loaded is not None
+        assert loaded.time_limit_seconds == 600
+        assert [q.reference for q in loaded.questions] == ["r1", "r2"]
+        assert await SqlMockExamRepository(s).get("missing") is None
+
+    async with sm() as s, s.begin():
+        await SqlMockExamRepository(s).delete_for_owner("alice")
+
+    async with sm() as s:
+        assert await SqlMockExamRepository(s).get("e1") is None
+        assert await SqlMockExamRepository(s).get("e2") is not None  # Bob's exam survives
+
+
 async def test_media_roundtrip(engine: AsyncEngine) -> None:
     from flashcards.adapters.sql import SqlMediaRepository
     from flashcards.domain.media import MediaAsset

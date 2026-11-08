@@ -16,6 +16,7 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -361,3 +362,18 @@ class InMemoryMediaRepository:
     async def delete_for_owner(self, owner_id: str) -> None:
         for media_id in [a.id for a in self._by_id.values() if a.owner_id == owner_id]:
             del self._by_id[media_id]
+
+
+class InMemoryMockExamRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, MockExam] = {}
+
+    async def add(self, exam: MockExam) -> None:
+        self._by_id[exam.id] = exam
+
+    async def get(self, exam_id: str) -> MockExam | None:
+        return self._by_id.get(exam_id)
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for exam_id in [e.id for e in self._by_id.values() if e.owner_id == owner_id]:
+            del self._by_id[exam_id]

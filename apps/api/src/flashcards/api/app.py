@@ -24,6 +24,7 @@ from flashcards.api.routers import (
     goals,
     imports,
     media,
+    mock_exams,
     review,
 )
 from flashcards.config import Settings
@@ -34,6 +35,7 @@ from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
+from flashcards.domain.mock_exam import ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import QuotaExceeded
@@ -83,8 +85,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def media_too_large(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=413, content={"detail": "The media file is too large."})
 
-    async def summary_locked(_request: Request, exc: Exception) -> JSONResponse:
-        detail = str(exc) if isinstance(exc, SummaryLocked) else "Summary is locked."
+    async def feature_locked(_request: Request, exc: Exception) -> JSONResponse:
+        # A card-threshold gate (summary or mock exam) is not met yet.
+        detail = str(exc) if isinstance(exc, SummaryLocked | ExamLocked) else "Feature locked."
         return JSONResponse(status_code=409, content={"detail": detail})
 
     async def ai_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
@@ -102,6 +105,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         DraftNotFound,
         GoalNotFound,
         MediaNotFound,
+        ExamNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -116,8 +120,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
     app.add_exception_handler(TooManyPages, too_large)
-    app.add_exception_handler(SummaryLocked, summary_locked)
-    # Catches InvalidEvaluation and InvalidSummary too (both subclass LlmError).
+    app.add_exception_handler(SummaryLocked, feature_locked)
+    app.add_exception_handler(ExamLocked, feature_locked)
+    # Catches InvalidEvaluation, InvalidSummary and InvalidExam too (all LlmError).
     app.add_exception_handler(LlmError, ai_unavailable)
 
 
@@ -171,6 +176,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(imports.router)
     app.include_router(account.router)
     app.include_router(media.router)
+    app.include_router(mock_exams.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

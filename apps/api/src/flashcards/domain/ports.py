@@ -14,6 +14,7 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
@@ -347,3 +348,13 @@ class GoalRepository(Protocol):
     async def update(self, goal: Goal) -> None: ...
 
     async def delete(self, goal_id: str) -> None: ...
+
+
+class MockExamRepository(Protocol):
+    async def add(self, exam: MockExam) -> None: ...
+
+    async def get(self, exam_id: str) -> MockExam | None: ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every mock exam the owner has (account deletion)."""
+        ...

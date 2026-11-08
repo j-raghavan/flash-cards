@@ -30,6 +30,7 @@ from flashcards.adapters.sql import (
     SqlGoalRepository,
     SqlInviteRepository,
     SqlMediaRepository,
+    SqlMockExamRepository,
     SqlNoteRepository,
     SqlObjectStore,
     SqlQuotaRepository,
@@ -106,6 +107,7 @@ def sql_provider(
                     package_reader=package_reader,
                     media=SqlMediaRepository(session),
                     media_sniffer=media_sniffer,
+                    mock_exams=SqlMockExamRepository(session),
                 )
             )
 

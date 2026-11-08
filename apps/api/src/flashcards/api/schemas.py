@@ -20,6 +20,7 @@ from flashcards.domain.evaluation import AnswerEvaluation
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.mock_exam import ExamResult, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.planner import StudyPlan
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
@@ -196,6 +197,76 @@ class DeckSummaryOut(BaseModel):
     @classmethod
     def from_summary(cls, summary: DeckSummary) -> DeckSummaryOut:
         return cls(summary=summary.summary, key_points=list(summary.key_points))
+
+
+class MockExamCreateRequest(BaseModel):
+    question_count: int = Field(default=10, gt=0, le=50)
+    time_limit_seconds: int | None = Field(default=None, gt=0, le=86_400)
+
+
+class ExamQuestionOut(BaseModel):
+    id: str
+    prompt: str
+    topic: str
+
+
+class MockExamOut(BaseModel):
+    id: str
+    deck_id: str
+    time_limit_seconds: int | None
+    questions: list[ExamQuestionOut]
+
+    @classmethod
+    def from_exam(cls, exam: MockExam) -> MockExamOut:
+        # The reference answers are never serialized to the client.
+        return cls(
+            id=exam.id,
+            deck_id=exam.deck_id,
+            time_limit_seconds=exam.time_limit_seconds,
+            questions=[
+                ExamQuestionOut(id=q.id, prompt=q.prompt, topic=q.topic) for q in exam.questions
+            ],
+        )
+
+
+class ExamAnswerIn(BaseModel):
+    question_id: str
+    answer: str = Field(max_length=20_000)
+
+
+class ExamSubmitRequest(BaseModel):
+    answers: list[ExamAnswerIn] = Field(default_factory=list, max_length=200)
+
+
+class TopicScoreOut(BaseModel):
+    topic: str
+    score: float
+    question_count: int
+
+
+class QuestionScoreOut(BaseModel):
+    question_id: str
+    score: float
+
+
+class ExamResultOut(BaseModel):
+    overall_score: float
+    topics: list[TopicScoreOut]
+    question_scores: list[QuestionScoreOut]
+
+    @classmethod
+    def from_result(cls, result: ExamResult) -> ExamResultOut:
+        return cls(
+            overall_score=result.overall_score,
+            topics=[
+                TopicScoreOut(topic=t.topic, score=t.score, question_count=t.question_count)
+                for t in result.topics
+            ],
+            question_scores=[
+                QuestionScoreOut(question_id=qs.question_id, score=qs.score)
+                for qs in result.question_scores
+            ],
+        )
 
 
 class CardScheduleOut(BaseModel):

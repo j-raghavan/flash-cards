@@ -11,6 +11,7 @@ from flashcards.adapters.memory import (
     InMemoryDraftCardRepository,
     InMemoryGoalRepository,
     InMemoryMediaRepository,
+    InMemoryMockExamRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
     InMemoryQuotaRepository,
@@ -28,6 +29,7 @@ from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import new_generation_job
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
@@ -61,6 +63,7 @@ class _Fixture:
         self.users = InMemoryUserRepository()
         self.media = InMemoryMediaRepository()
         self.quotas = InMemoryQuotaRepository()
+        self.mock_exams = InMemoryMockExamRepository()
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -71,7 +74,7 @@ class _Fixture:
         self.service = AccountService(
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
-            self.sessions, self.users, self.media, self.quotas,
+            self.sessions, self.users, self.media, self.quotas, self.mock_exams,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -124,6 +127,13 @@ class _Fixture:
                 data=b"\x89PNG", created_at=NOW,
             )
         )
+        await self.mock_exams.add(
+            MockExam(
+                id=f"exam-{owner}", owner_id=owner, deck_id=deck.id, created_at=NOW,
+                time_limit_seconds=None,
+                questions=(ExamQuestion(id="q", prompt="p", reference="r", topic="t"),),
+            )
+        )
         await self.quotas.try_reserve_pages(owner, 1, "2026-11")
 
 
@@ -168,7 +178,9 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.store.get(alice_source) is None
     assert await fx.log_repo.list_for_owner(ALICE.id) == []
     assert await fx.media.list_for_owner(ALICE.id) == []
+    assert await fx.mock_exams.get("exam-alice") is None
     assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset
-    # Bob keeps his deck and his media.
+    # Bob keeps his deck, his media and his mock exam.
     assert len(await fx.decks.list_decks(owner_id=BOB)) == 1
     assert [m.id for m in await fx.media.list_for_owner(BOB)] == ["media-bob"]
+    assert await fx.mock_exams.get("exam-bob") is not None

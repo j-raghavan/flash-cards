@@ -23,6 +23,7 @@ from flashcards.adapters.memory import (
     InMemoryGoalRepository,
     InMemoryInviteRepository,
     InMemoryMediaRepository,
+    InMemoryMockExamRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
     InMemoryQuotaRepository,
@@ -45,11 +46,13 @@ from flashcards.application.goal_service import GoalService
 from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.media_service import MediaService
+from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.summary_service import SummaryService
+from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
 from flashcards.domain.ports import (
     AiJobRepository,
     CardRepository,
@@ -63,6 +66,7 @@ from flashcards.domain.ports import (
     LLMProvider,
     MediaRepository,
     MediaTypeSniffer,
+    MockExamRepository,
     NoteRepository,
     ObjectStore,
     PackageReader,
@@ -101,6 +105,7 @@ class Repositories:
     package_reader: PackageReader
     media: MediaRepository
     media_sniffer: MediaTypeSniffer
+    mock_exams: MockExamRepository
     dummy_hash: str | None = None
 
 
@@ -126,6 +131,7 @@ class Container:
     media: MediaService
     evaluation: EvaluationService
     summary: SummaryService
+    mock_exam: MockExamService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -183,11 +189,21 @@ def build_services(repos: Repositories) -> Container:
         repos.users,
         repos.media,
         repos.quotas,
+        repos.mock_exams,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     evaluation = EvaluationService(notes, repos.llm)
     summary = SummaryService(
         decks, repos.notes, repos.cards, repos.llm, unlock_cards=DEFAULT_SUMMARY_UNLOCK_CARDS
+    )
+    mock_exam = MockExamService(
+        decks,
+        repos.notes,
+        repos.cards,
+        repos.mock_exams,
+        repos.llm,
+        repos.clock,
+        unlock_cards=DEFAULT_MOCK_EXAM_UNLOCK_CARDS,
     )
     return Container(
         clock=repos.clock,
@@ -210,6 +226,7 @@ def build_services(repos: Repositories) -> Container:
         media=media,
         evaluation=evaluation,
         summary=summary,
+        mock_exam=mock_exam,
     )
 
 
@@ -245,5 +262,6 @@ def build_container(
             package_reader=ApkgReader(),
             media=InMemoryMediaRepository(),
             media_sniffer=PuremagicMediaSniffer(),
+            mock_exams=InMemoryMockExamRepository(),
         )
     )

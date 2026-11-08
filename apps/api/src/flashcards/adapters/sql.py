@@ -27,6 +27,7 @@ from flashcards.adapters.db import (
     GoalRow,
     InviteRow,
     MediaRow,
+    MockExamRow,
     NoteRow,
     ReviewLogRow,
     SessionRow,
@@ -45,6 +46,8 @@ from flashcards.adapters.db import (
     invite_to_row,
     media_from_row,
     media_to_row,
+    mock_exam_from_row,
+    mock_exam_to_row,
     note_from_row,
     note_to_row,
     review_log_from_row,
@@ -62,6 +65,7 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -507,3 +511,21 @@ class SqlMediaRepository:
 
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(delete(MediaRow).where(MediaRow.owner_id == owner_id))
+
+
+class SqlMockExamRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, exam: MockExam) -> None:
+        self._session.add(mock_exam_to_row(exam))
+        await self._session.flush()
+
+    async def get(self, exam_id: str) -> MockExam | None:
+        row = await self._session.get(MockExamRow, exam_id)
+        return mock_exam_from_row(row) if row is not None else None
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(
+            delete(MockExamRow).where(MockExamRow.owner_id == owner_id)
+        )

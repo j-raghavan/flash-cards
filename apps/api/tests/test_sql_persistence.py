@@ -35,6 +35,7 @@ from flashcards.adapters.sql import (
     SqlGoalRepository,
     SqlInviteRepository,
     SqlMediaRepository,
+    SqlMockExamRepository,
     SqlNoteRepository,
     SqlObjectStore,
     SqlQuotaRepository,
@@ -78,6 +79,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         package_reader=ApkgReader(),
         media=SqlMediaRepository(session),
         media_sniffer=PuremagicMediaSniffer(),
+        mock_exams=SqlMockExamRepository(session),
     )
 
 PASSWORD = "correct-horse-battery"

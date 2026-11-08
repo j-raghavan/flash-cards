@@ -34,6 +34,7 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus, JobType
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
@@ -519,6 +520,48 @@ def media_from_row(row: MediaRow) -> MediaAsset:
         content_type=row.content_type,
         data=row.data,
         created_at=row.created_at,
+    )
+
+
+class MockExamRow(Base):
+    __tablename__ = "mock_exams"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    deck_id: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    time_limit_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The full question set, references included, as a list of flat string maps.
+    questions: Mapped[list[dict[str, str]]] = mapped_column(JSON)
+
+
+def mock_exam_to_row(exam: MockExam) -> MockExamRow:
+    return MockExamRow(
+        id=exam.id,
+        owner_id=exam.owner_id,
+        deck_id=exam.deck_id,
+        created_at=exam.created_at,
+        time_limit_seconds=exam.time_limit_seconds,
+        questions=[
+            {"id": q.id, "prompt": q.prompt, "reference": q.reference, "topic": q.topic}
+            for q in exam.questions
+        ],
+    )
+
+
+def mock_exam_from_row(row: MockExamRow) -> MockExam:
+    return MockExam(
+        id=row.id,
+        owner_id=row.owner_id,
+        deck_id=row.deck_id,
+        created_at=row.created_at,
+        time_limit_seconds=row.time_limit_seconds,
+        questions=tuple(
+            ExamQuestion(
+                id=q["id"], prompt=q["prompt"], reference=q["reference"], topic=q["topic"]
+            )
+            for q in row.questions
+        ),
     )
 
 
