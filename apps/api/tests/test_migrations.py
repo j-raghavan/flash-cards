@@ -17,7 +17,16 @@ from flashcards.domain.invites import Role
 from flashcards.domain.users import User
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
-APP_TABLES = {"invites", "users", "sessions"}
+APP_TABLES = {
+    "invites",
+    "users",
+    "sessions",
+    "decks",
+    "notes",
+    "cards",
+    "card_schedule",
+    "review_logs",
+}
 
 
 def _alembic_config(url: str) -> Config:

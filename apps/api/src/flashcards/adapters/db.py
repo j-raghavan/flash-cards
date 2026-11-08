@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -18,7 +18,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite, Role
+from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.scheduling import CardSchedule, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
 
@@ -137,6 +140,180 @@ def session_from_row(row: SessionRow) -> Session:
         created_at=row.created_at,
         expires_at=row.expires_at,
         revoked_at=row.revoked_at,
+    )
+
+
+class DeckRow(Base):
+    __tablename__ = "decks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String)
+    parent_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NoteRow(Base):
+    __tablename__ = "notes"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    deck_id: Mapped[str] = mapped_column(
+        String, ForeignKey("decks.id", ondelete="CASCADE"), index=True
+    )
+    note_type: Mapped[str] = mapped_column(String)
+    fields: Mapped[dict[str, str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CardRow(Base):
+    __tablename__ = "cards"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    deck_id: Mapped[str] = mapped_column(
+        String, ForeignKey("decks.id", ondelete="CASCADE"), index=True
+    )
+    note_id: Mapped[str] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="CASCADE"), index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CardScheduleRow(Base):
+    __tablename__ = "card_schedule"
+
+    card_id: Mapped[str] = mapped_column(
+        String, ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
+    )
+    state: Mapped[str] = mapped_column(String)
+    step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    difficulty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class ReviewLogRow(Base):
+    __tablename__ = "review_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id", "card_id", "idempotency_key", name="uq_review_owner_card_idempotency"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    card_id: Mapped[str] = mapped_column(
+        String, ForeignKey("cards.id", ondelete="CASCADE"), index=True
+    )
+    rating: Mapped[int] = mapped_column(Integer)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    idempotency_key: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+def deck_to_row(deck: Deck) -> DeckRow:
+    return DeckRow(
+        id=deck.id,
+        owner_id=deck.owner_id,
+        name=deck.name,
+        parent_id=deck.parent_id,
+        created_at=deck.created_at,
+    )
+
+
+def deck_from_row(row: DeckRow) -> Deck:
+    return Deck(
+        id=row.id,
+        owner_id=row.owner_id,
+        name=row.name,
+        parent_id=row.parent_id,
+        created_at=row.created_at,
+    )
+
+
+def note_to_row(note: Note) -> NoteRow:
+    return NoteRow(
+        id=note.id,
+        owner_id=note.owner_id,
+        deck_id=note.deck_id,
+        note_type=note.note_type.value,
+        fields=dict(note.fields),
+        created_at=note.created_at,
+    )
+
+
+def note_from_row(row: NoteRow) -> Note:
+    return Note(
+        id=row.id,
+        owner_id=row.owner_id,
+        deck_id=row.deck_id,
+        note_type=NoteType(row.note_type),
+        fields=tuple(row.fields.items()),
+        created_at=row.created_at,
+    )
+
+
+def card_to_row(card: Card) -> CardRow:
+    return CardRow(
+        id=card.id,
+        owner_id=card.owner_id,
+        deck_id=card.deck_id,
+        note_id=card.note_id,
+        ordinal=card.ordinal,
+        created_at=card.created_at,
+        suspended_at=card.suspended_at,
+    )
+
+
+def card_from_row(row: CardRow) -> Card:
+    return Card(
+        id=row.id,
+        owner_id=row.owner_id,
+        deck_id=row.deck_id,
+        note_id=row.note_id,
+        ordinal=row.ordinal,
+        created_at=row.created_at,
+        suspended_at=row.suspended_at,
+    )
+
+
+def schedule_to_row(schedule: CardSchedule) -> CardScheduleRow:
+    return CardScheduleRow(
+        card_id=schedule.card_id,
+        state=schedule.state.value,
+        step=schedule.step,
+        stability=schedule.stability,
+        difficulty=schedule.difficulty,
+        due_at=schedule.due_at,
+        last_reviewed_at=schedule.last_reviewed_at,
+    )
+
+
+def schedule_from_row(row: CardScheduleRow) -> CardSchedule:
+    return CardSchedule(
+        card_id=row.card_id,
+        state=ScheduleState(row.state),
+        step=row.step,
+        stability=row.stability,
+        difficulty=row.difficulty,
+        due_at=row.due_at,
+        last_reviewed_at=row.last_reviewed_at,
+    )
+
+
+def review_log_to_row(log: ReviewLog) -> ReviewLogRow:
+    return ReviewLogRow(
+        id=log.id,
+        owner_id=log.owner_id,
+        card_id=log.card_id,
+        rating=int(log.rating),
+        reviewed_at=log.reviewed_at,
+        idempotency_key=log.idempotency_key,
     )
 
 

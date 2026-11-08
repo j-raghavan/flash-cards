@@ -6,12 +6,26 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from flashcards.adapters.memory import (
+    InMemoryCardRepository,
+    InMemoryDeckRepository,
     InMemoryInviteRepository,
+    InMemoryNoteRepository,
+    InMemoryReviewLogRepository,
+    InMemoryScheduleRepository,
     InMemorySessionRepository,
     InMemoryUserRepository,
     SystemClock,
 )
+from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite, Role
+from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.scheduling import (
+    CardSchedule,
+    DuplicateReview,
+    Rating,
+    ReviewLog,
+    ScheduleState,
+)
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -198,3 +212,116 @@ async def test_session_repo_revoke_is_single_use() -> None:
 
 async def test_session_repo_revoke_unknown_is_false() -> None:
     assert await InMemorySessionRepository().revoke("missing", NOW) is False
+
+
+# --- M1 in-memory repositories ---
+
+
+async def test_deck_repo_crud_and_owner_scope() -> None:
+    repo = InMemoryDeckRepository()
+    assert await repo.get("missing") is None
+    deck = Deck(id="d1", owner_id="alice", name="A", parent_id=None, created_at=NOW)
+    await repo.add(deck)
+    assert (await repo.get("d1")) is not None
+    await repo.update(Deck(id="d1", owner_id="alice", name="B", parent_id=None, created_at=NOW))
+    updated = await repo.get("d1")
+    assert updated is not None and updated.name == "B"
+    assert [d.id for d in await repo.list_for_owner("alice")] == ["d1"]
+    assert await repo.list_for_owner("bob") == []
+    await repo.delete("d1")
+    assert await repo.get("d1") is None
+
+
+async def test_note_repo_crud() -> None:
+    repo = InMemoryNoteRepository()
+    assert await repo.get("missing") is None
+    note = Note(
+        id="n1",
+        owner_id="alice",
+        deck_id="d1",
+        note_type=NoteType.BASIC,
+        fields=(("front", "Q"), ("back", "A")),
+        created_at=NOW,
+    )
+    await repo.add(note)
+    assert (await repo.get("n1")) is not None
+    await repo.delete("n1")
+    assert await repo.get("n1") is None
+
+
+def _card(card_id: str, note_id: str = "n1", deck_id: str = "d1") -> Card:
+    return Card(
+        id=card_id,
+        owner_id="alice",
+        deck_id=deck_id,
+        note_id=note_id,
+        ordinal=0,
+        created_at=NOW,
+    )
+
+
+async def test_card_repo_list_order_update_and_delete_for_note() -> None:
+    repo = InMemoryCardRepository()
+    assert await repo.get("missing") is None
+    await repo.add(_card("c1", note_id="n1"))
+    await repo.add(_card("c2", note_id="n2"))
+    assert {c.id for c in await repo.list_for_deck("d1")} == {"c1", "c2"}
+    await repo.update(_card("c1").suspended(NOW))
+    suspended = await repo.get("c1")
+    assert suspended is not None and suspended.is_suspended
+    await repo.delete_for_note("n1")
+    assert [c.id for c in await repo.list_for_deck("d1")] == ["c2"]
+
+
+async def test_schedule_repo_upsert_and_get() -> None:
+    repo = InMemoryScheduleRepository()
+    assert await repo.get("c1") is None
+    schedule = CardSchedule(
+        card_id="c1",
+        state=ScheduleState.LEARNING,
+        step=0,
+        stability=None,
+        difficulty=None,
+        due_at=NOW,
+        last_reviewed_at=None,
+    )
+    await repo.upsert(schedule)
+    loaded = await repo.get("c1")
+    assert loaded is not None and loaded.state is ScheduleState.LEARNING
+    await repo.upsert(
+        CardSchedule(
+            card_id="c1",
+            state=ScheduleState.REVIEW,
+            step=None,
+            stability=5.0,
+            difficulty=5.0,
+            due_at=NOW + timedelta(days=1),
+            last_reviewed_at=NOW,
+        )
+    )
+    reloaded = await repo.get("c1")
+    assert reloaded is not None and reloaded.state is ScheduleState.REVIEW
+
+
+def _log(key: str | None, owner: str = "alice", card: str = "c1") -> ReviewLog:
+    return ReviewLog(
+        id=f"log-{key}-{card}",
+        owner_id=owner,
+        card_id=card,
+        rating=Rating.GOOD,
+        reviewed_at=NOW,
+        idempotency_key=key,
+    )
+
+
+async def test_review_log_repo_append_and_duplicate_key() -> None:
+    repo = InMemoryReviewLogRepository()
+    await repo.append(_log("k1"))
+    # Same (owner, card, key) is rejected atomically.
+    with pytest.raises(DuplicateReview):
+        await repo.append(_log("k1"))
+    # Same key on a different card is allowed.
+    await repo.append(_log("k1", card="c2"))
+    # A keyless log is never deduplicated.
+    await repo.append(_log(None))
+    await repo.append(_log(None))

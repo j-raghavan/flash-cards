@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
+from flashcards.domain.notes import Card, Note
+from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -96,3 +99,100 @@ class InMemorySessionRepository:
             return False
         self._by_id[session_id] = session.with_revoked(now)
         return True
+
+
+class InMemoryDeckRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Deck] = {}
+
+    async def add(self, deck: Deck) -> None:
+        self._by_id[deck.id] = deck
+
+    async def get(self, deck_id: str) -> Deck | None:
+        return self._by_id.get(deck_id)
+
+    async def list_for_owner(self, owner_id: str) -> list[Deck]:
+        owned = [d for d in self._by_id.values() if d.owner_id == owner_id]
+        return sorted(owned, key=lambda d: d.created_at)
+
+    async def update(self, deck: Deck) -> None:
+        self._by_id[deck.id] = deck
+
+    async def delete(self, deck_id: str) -> None:
+        self._by_id.pop(deck_id, None)
+
+
+class InMemoryNoteRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Note] = {}
+
+    async def add(self, note: Note) -> None:
+        self._by_id[note.id] = note
+
+    async def get(self, note_id: str) -> Note | None:
+        return self._by_id.get(note_id)
+
+    async def delete(self, note_id: str) -> None:
+        self._by_id.pop(note_id, None)
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        for note_id in [n.id for n in self._by_id.values() if n.deck_id == deck_id]:
+            del self._by_id[note_id]
+
+
+class InMemoryCardRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Card] = {}
+
+    async def add(self, card: Card) -> None:
+        self._by_id[card.id] = card
+
+    async def get(self, card_id: str) -> Card | None:
+        return self._by_id.get(card_id)
+
+    async def list_for_deck(self, deck_id: str) -> list[Card]:
+        cards = [c for c in self._by_id.values() if c.deck_id == deck_id]
+        return sorted(cards, key=lambda c: (c.created_at, c.ordinal))
+
+    async def update(self, card: Card) -> None:
+        self._by_id[card.id] = card
+
+    async def delete_for_note(self, note_id: str) -> None:
+        for card_id in [c.id for c in self._by_id.values() if c.note_id == note_id]:
+            del self._by_id[card_id]
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        for card_id in [c.id for c in self._by_id.values() if c.deck_id == deck_id]:
+            del self._by_id[card_id]
+
+
+class InMemoryScheduleRepository:
+    def __init__(self) -> None:
+        self._by_card: dict[str, CardSchedule] = {}
+
+    async def get(self, card_id: str) -> CardSchedule | None:
+        return self._by_card.get(card_id)
+
+    async def upsert(self, schedule: CardSchedule) -> None:
+        self._by_card[schedule.card_id] = schedule
+
+    async def delete(self, card_id: str) -> None:
+        self._by_card.pop(card_id, None)
+
+
+class InMemoryReviewLogRepository:
+    def __init__(self) -> None:
+        self._logs: list[ReviewLog] = []
+
+    async def append(self, log: ReviewLog) -> None:
+        if log.idempotency_key is not None and any(
+            existing.owner_id == log.owner_id
+            and existing.card_id == log.card_id
+            and existing.idempotency_key == log.idempotency_key
+            for existing in self._logs
+        ):
+            raise DuplicateReview(log.idempotency_key)
+        self._logs.append(log)
+
+    async def delete_for_card(self, card_id: str) -> None:
+        self._logs = [log for log in self._logs if log.card_id != card_id]
