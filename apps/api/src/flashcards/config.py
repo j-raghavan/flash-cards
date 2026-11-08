@@ -20,7 +20,15 @@ class Settings(BaseSettings):
     dev_bootstrap_invite: bool = False
     # SQLAlchemy async URL (postgresql+asyncpg://...). Unset means in-memory mode.
     database_url: str | None = None
-    # AI generation backend. With no key the server wires a provider that refuses,
-    # so generation jobs fail cleanly instead of pretending to work.
+    # AI generation backend selector: "anthropic" (default) or "openai_compatible".
+    # With no backend configured the server wires a provider that refuses, so
+    # generation jobs fail cleanly instead of pretending to work.
+    llm_provider: str = "anthropic"
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-opus-5-5"
+    # OpenAI-compatible endpoint (LM Studio, Ollama, vLLM, ...). base_url points at
+    # the API root, e.g. http://localhost:1234/v1. The key is optional; many local
+    # servers ignore it. Used only when llm_provider == "openai_compatible".
+    openai_base_url: str | None = None
+    openai_api_key: str | None = None
+    openai_model: str = "local-model"

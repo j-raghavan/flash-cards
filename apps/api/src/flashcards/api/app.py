@@ -165,15 +165,25 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
 
 
 def _llm_from_settings(settings: Settings) -> LLMProvider:
-    """The real Anthropic provider when a key is configured, else a refusing stub."""
+    """Select the AI backend from settings, else a refusing stub (ADR 0006)."""
+    from flashcards.adapters.llm import NullLLMProvider
+
+    if settings.llm_provider == "openai_compatible":
+        if settings.openai_base_url:
+            from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider
+
+            return OpenAICompatibleLLMProvider(
+                base_url=settings.openai_base_url,
+                model=settings.openai_model,
+                api_key=settings.openai_api_key,
+            )
+        return NullLLMProvider()
     if settings.anthropic_api_key:
         from flashcards.adapters.anthropic_llm import AnthropicLLMProvider
 
         return AnthropicLLMProvider(
             api_key=settings.anthropic_api_key, model=settings.anthropic_model
         )
-    from flashcards.adapters.llm import NullLLMProvider
-
     return NullLLMProvider()
 
 
