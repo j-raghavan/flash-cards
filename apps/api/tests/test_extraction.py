@@ -81,3 +81,9 @@ async def test_image_upload_is_a_single_image_page() -> None:
 async def test_too_many_pages_is_rejected() -> None:
     with pytest.raises(TooManyPages):
         await _pages(_pdf(["one page of text here", "second page of text"]), max_pages=1)
+
+
+def test_count_pages() -> None:
+    extractor = PyMuPDFExtractor()
+    assert extractor.count_pages(_pdf(["a", "b", "c"])) == 3
+    assert extractor.count_pages(_png()) == 1

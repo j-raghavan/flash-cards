@@ -39,6 +39,15 @@ class PyMuPDFExtractor:
             raise UnsupportedMediaType(media)
         return media
 
+    def count_pages(self, data: bytes) -> int:
+        if self.sniff(data) != "application/pdf":
+            return 1
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        try:
+            return int(doc.page_count)
+        finally:
+            doc.close()
+
     async def extract(
         self, data: bytes, *, file_id: str, max_pages: int
     ) -> AsyncIterator[ExtractedPage]:

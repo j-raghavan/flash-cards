@@ -194,6 +194,10 @@ class DocumentExtractor(Protocol):
         """
         ...
 
+    def count_pages(self, data: bytes) -> int:
+        """Return the page count cheaply (images are one page), for quota reservation."""
+        ...
+
     def extract(
         self, data: bytes, *, file_id: str, max_pages: int
     ) -> AsyncIterator[ExtractedPage]:
@@ -247,3 +251,15 @@ class DraftCardRepository(Protocol):
         ...
 
     async def delete_for_job(self, job_id: str) -> None: ...
+
+
+class JobQueue(Protocol):
+    async def enqueue(self, job_id: str) -> None:
+        """Hand a job id to the worker to be processed (idempotent)."""
+        ...
+
+
+class QuotaRepository(Protocol):
+    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+        """Atomically reserve pages against the owner's limit; True if within it."""
+        ...

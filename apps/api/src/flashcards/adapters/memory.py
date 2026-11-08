@@ -15,6 +15,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
@@ -263,3 +264,25 @@ class InMemoryDraftCardRepository:
     async def delete_for_job(self, job_id: str) -> None:
         for record_id in [r.id for r in self._by_id.values() if r.job_id == job_id]:
             del self._by_id[record_id]
+
+
+class InMemoryJobQueue:
+    def __init__(self) -> None:
+        self.enqueued: list[str] = []
+
+    async def enqueue(self, job_id: str) -> None:
+        self.enqueued.append(job_id)
+
+
+class InMemoryQuotaRepository:
+    def __init__(self, limit: int = DEFAULT_MONTHLY_PAGES) -> None:
+        self._limit = limit
+        self._used: dict[tuple[str, str], int] = {}
+
+    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+        key = (owner_id, period)
+        used = self._used.get(key, 0)
+        if used + pages > self._limit:
+            return False
+        self._used[key] = used + pages
+        return True
