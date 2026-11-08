@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from flashcards.application.account_service import AccountExport
+from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.audit import AuditEvent
@@ -24,7 +25,7 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.mock_exam import ExamResult, MockExam
-from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.notes import MAX_FLAG, Card, Note, NoteType
 from flashcards.domain.planner import StudyPlan
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
@@ -230,6 +231,28 @@ class BrowserRowOut(BaseModel):
             proficiency=row.proficiency,
             created_at=row.created_at,
         )
+
+
+class BulkCardRequest(BaseModel):
+    card_ids: list[str] = Field(min_length=1, max_length=MAX_BULK_CARDS)
+    action: BulkAction
+    deck_id: str | None = None  # move
+    tags: list[str] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)  # add/remove
+    flag: int = Field(default=0, ge=0, le=MAX_FLAG)  # flag
+    until: AwareDatetime | None = None  # bury; 24 hours when omitted
+
+    @model_validator(mode="after")
+    def _arguments_present(self) -> BulkCardRequest:
+        if self.action is BulkAction.MOVE and self.deck_id is None:
+            raise ValueError("move needs a deck_id")
+        if self.action in (BulkAction.ADD_TAGS, BulkAction.REMOVE_TAGS) and not self.tags:
+            raise ValueError(f"{self.action.value} needs tags")
+        return self
+
+
+class BulkResultOut(BaseModel):
+    cards: int
+    notes: int
 
 
 class BrowserPageOut(BaseModel):

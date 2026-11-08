@@ -12,6 +12,8 @@ from flashcards.api.deps import CurrentUser, current_user, get_container
 from flashcards.api.schemas import (
     BrowserPageOut,
     BrowserRowOut,
+    BulkCardRequest,
+    BulkResultOut,
     CardDetailOut,
     CardOut,
     DeckStatsOut,
@@ -106,6 +108,24 @@ async def browse_cards(
     return BrowserPageOut(
         total=page.total, cards=[BrowserRowOut.from_row(row) for row in page.rows]
     )
+
+
+@router.post("/cards/bulk", response_model=BulkResultOut)
+async def bulk_cards(
+    body: BulkCardRequest,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> BulkResultOut:
+    result = await container.bulk_cards.apply(
+        owner_id=caller.user.id,
+        card_ids=body.card_ids,
+        action=body.action,
+        deck_id=body.deck_id,
+        tags=body.tags,
+        flag=body.flag,
+        until=body.until,
+    )
+    return BulkResultOut(cards=result.cards, notes=result.notes)
 
 
 @router.get("/cards/{card_id}", response_model=CardDetailOut)

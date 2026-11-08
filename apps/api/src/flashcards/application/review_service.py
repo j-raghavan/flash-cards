@@ -84,7 +84,7 @@ class ReviewService:
         now = self._clock.now()
         due: list[Card] = []
         for card in cards:
-            if card.is_suspended:
+            if card.is_suspended or card.is_buried(now):
                 continue
             schedule = await self._schedules.get(card.id)
             if schedule is None or schedule.due_at <= now:
@@ -104,11 +104,12 @@ class ReviewService:
                 suspended += 1
                 continue
             schedule = await self._schedules.get(card.id)
+            available = not card.is_buried(now)  # a buried card is not due until later
             if schedule is None:
                 new += 1
-                due += 1
+                due += available
                 continue
-            if schedule.due_at <= now:
+            if available and schedule.due_at <= now:
                 due += 1
             if schedule.state in (ScheduleState.LEARNING, ScheduleState.RELEARNING):
                 learning += 1
