@@ -41,6 +41,11 @@ from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import QuotaExceeded
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 from flashcards.domain.summary import SummaryLocked
+from flashcards.domain.transcripts import (
+    InvalidTranscript,
+    InvalidVideoUrl,
+    TranscriptUnavailable,
+)
 
 logger = logging.getLogger("flashcards")
 
@@ -90,6 +95,20 @@ def _register_error_handlers(app: FastAPI) -> None:
         detail = str(exc) if isinstance(exc, SummaryLocked | ExamLocked) else "Feature locked."
         return JSONResponse(status_code=409, content={"detail": detail})
 
+    async def invalid_video_url(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": "Not a YouTube video link."})
+
+    async def no_transcript(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": "No transcript is available for this video. Paste the transcript instead."
+            },
+        )
+
+    async def invalid_transcript(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
     async def ai_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
         # A synchronous AI call failed or is not configured (the async generation
         # worker captures its own errors onto the job and never reaches here).
@@ -120,6 +139,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
     app.add_exception_handler(TooManyPages, too_large)
+    app.add_exception_handler(InvalidVideoUrl, invalid_video_url)
+    app.add_exception_handler(TranscriptUnavailable, no_transcript)
+    app.add_exception_handler(InvalidTranscript, invalid_transcript)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
     # Catches InvalidEvaluation, InvalidSummary and InvalidExam too (all LlmError).

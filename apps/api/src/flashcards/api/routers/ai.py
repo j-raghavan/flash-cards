@@ -11,7 +11,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
-from flashcards.api.schemas import ApproveDraftsRequest, CardOut, DraftOut, JobOut
+from flashcards.api.schemas import (
+    ApproveDraftsRequest,
+    CardOut,
+    DraftOut,
+    JobOut,
+    TranscriptGenerateRequest,
+    YouTubeGenerateRequest,
+)
 from flashcards.domain.ai import Thoroughness
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -34,6 +41,40 @@ async def start_generation(
         )
     job = await container.generation.start(
         owner_id=caller.user.id, deck_id=deck_id, data=data, thoroughness=thoroughness
+    )
+    return JobOut.from_job(job)
+
+
+@router.post(
+    "/generate/youtube", status_code=status.HTTP_202_ACCEPTED, response_model=JobOut
+)
+async def start_youtube_generation(
+    body: YouTubeGenerateRequest,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container),
+) -> JobOut:
+    job = await container.transcript_import.from_youtube(
+        owner_id=caller.user.id,
+        deck_id=body.deck_id,
+        url=body.url,
+        thoroughness=body.thoroughness,
+    )
+    return JobOut.from_job(job)
+
+
+@router.post(
+    "/generate/transcript", status_code=status.HTTP_202_ACCEPTED, response_model=JobOut
+)
+async def start_transcript_generation(
+    body: TranscriptGenerateRequest,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container),
+) -> JobOut:
+    job = await container.transcript_import.from_text(
+        owner_id=caller.user.id,
+        deck_id=body.deck_id,
+        text=body.transcript,
+        thoroughness=body.thoroughness,
     )
     return JobOut.from_job(job)
 

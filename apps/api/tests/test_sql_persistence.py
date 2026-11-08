@@ -44,6 +44,7 @@ from flashcards.adapters.sql import (
     SqlSessionRepository,
     SqlUserRepository,
 )
+from flashcards.adapters.transcripts import NullTranscriptProvider
 from flashcards.api.app import create_app
 from flashcards.api.container import Repositories, build_services
 from flashcards.application.invite_service import InviteService
@@ -80,6 +81,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         media=SqlMediaRepository(session),
         media_sniffer=PuremagicMediaSniffer(),
         mock_exams=SqlMockExamRepository(session),
+        transcripts=NullTranscriptProvider(),
     )
 
 PASSWORD = "correct-horse-battery"

@@ -39,6 +39,7 @@ from flashcards.adapters.sql import (
     SqlSessionRepository,
     SqlUserRepository,
 )
+from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.api.container import (
     Container,
     Repositories,
@@ -74,7 +75,8 @@ def sql_provider(
     scheduler = FsrsScheduler()
     dummy_hash = hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
     # Stateless/process-level singletons, shared across requests.
-    extractor = PyMuPDFExtractor()
+    extractor = TranscriptAwareExtractor(PyMuPDFExtractor())
+    transcripts = NullTranscriptProvider()
     package_reader = ApkgReader()
     media_sniffer = PuremagicMediaSniffer()
     job_queue = InProcessJobQueue()
@@ -108,6 +110,7 @@ def sql_provider(
                     media=SqlMediaRepository(session),
                     media_sniffer=media_sniffer,
                     mock_exams=SqlMockExamRepository(session),
+                    transcripts=transcripts,
                 )
             )
 

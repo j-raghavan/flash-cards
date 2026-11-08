@@ -19,6 +19,7 @@ from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sources import ExtractedPage
+from flashcards.domain.transcripts import Transcript
 from flashcards.domain.users import User
 
 
@@ -357,4 +358,14 @@ class MockExamRepository(Protocol):
 
     async def delete_for_owner(self, owner_id: str) -> None:
         """Delete every mock exam the owner has (account deletion)."""
+        ...
+
+
+class TranscriptProvider(Protocol):
+    async def fetch(self, video_id: str) -> Transcript:
+        """Retrieve a video's transcript, or raise TranscriptUnavailable (F-AI-2).
+
+        Best-effort by design: transcript access is unreliable, so callers offer a
+        manual paste as the fallback.
+        """
         ...

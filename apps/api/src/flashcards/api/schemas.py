@@ -13,7 +13,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from flashcards.application.account_service import AccountExport
-from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.decks import Deck
 from flashcards.domain.evaluation import AnswerEvaluation
@@ -355,6 +355,19 @@ class DraftOut(BaseModel):
 
 class ApproveDraftsRequest(BaseModel):
     draft_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class YouTubeGenerateRequest(BaseModel):
+    deck_id: str
+    url: str = Field(min_length=1, max_length=2_000)
+    thoroughness: Thoroughness = Thoroughness.STANDARD
+
+
+class TranscriptGenerateRequest(BaseModel):
+    deck_id: str
+    # Bounded at the edge; the domain enforces the exact transcript limit.
+    transcript: str = Field(min_length=1, max_length=200_000)
+    thoroughness: Thoroughness = Thoroughness.STANDARD
 
 
 class GoalCreateRequest(BaseModel):

@@ -34,6 +34,7 @@ from flashcards.adapters.memory import (
     SystemClock,
 )
 from flashcards.adapters.passwords import Argon2PasswordHasher
+from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.application.account_service import AccountService
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.auth_service import AuthService
@@ -52,6 +53,7 @@ from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.summary_service import SummaryService
+from flashcards.application.transcript_import_service import TranscriptImportService
 from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
 from flashcards.domain.ports import (
     AiJobRepository,
@@ -76,6 +78,7 @@ from flashcards.domain.ports import (
     Scheduler,
     ScheduleRepository,
     SessionRepository,
+    TranscriptProvider,
     UserRepository,
 )
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
@@ -106,6 +109,7 @@ class Repositories:
     media: MediaRepository
     media_sniffer: MediaTypeSniffer
     mock_exams: MockExamRepository
+    transcripts: TranscriptProvider
     dummy_hash: str | None = None
 
 
@@ -132,6 +136,7 @@ class Container:
     evaluation: EvaluationService
     summary: SummaryService
     mock_exam: MockExamService
+    transcript_import: TranscriptImportService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -205,6 +210,7 @@ def build_services(repos: Repositories) -> Container:
         repos.clock,
         unlock_cards=DEFAULT_MOCK_EXAM_UNLOCK_CARDS,
     )
+    transcript_import = TranscriptImportService(decks, generation, repos.transcripts)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -227,11 +233,15 @@ def build_services(repos: Repositories) -> Container:
         evaluation=evaluation,
         summary=summary,
         mock_exam=mock_exam,
+        transcript_import=transcript_import,
     )
 
 
 def build_container(
-    *, llm: LLMProvider | None = None, job_queue: JobQueue | None = None
+    *,
+    llm: LLMProvider | None = None,
+    job_queue: JobQueue | None = None,
+    transcripts: TranscriptProvider | None = None,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -255,7 +265,7 @@ def build_container(
             draft_cards=InMemoryDraftCardRepository(),
             object_store=InMemoryObjectStore(),
             quotas=InMemoryQuotaRepository(),
-            extractor=PyMuPDFExtractor(),
+            extractor=TranscriptAwareExtractor(PyMuPDFExtractor()),
             job_queue=job_queue or InProcessJobQueue(),
             llm=llm or NullLLMProvider(),
             goals=InMemoryGoalRepository(),
@@ -263,5 +273,6 @@ def build_container(
             media=InMemoryMediaRepository(),
             media_sniffer=PuremagicMediaSniffer(),
             mock_exams=InMemoryMockExamRepository(),
+            transcripts=transcripts or NullTranscriptProvider(),
         )
     )
