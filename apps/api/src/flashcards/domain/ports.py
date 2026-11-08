@@ -9,15 +9,18 @@ from typing import Protocol
 
 from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
 from flashcards.domain.anki import AnkiPackage
+from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sources import ExtractedPage
+from flashcards.domain.transcripts import Transcript
 from flashcards.domain.users import User
 
 
@@ -347,3 +350,55 @@ class GoalRepository(Protocol):
     async def update(self, goal: Goal) -> None: ...
 
     async def delete(self, goal_id: str) -> None: ...
+
+
+class MockExamRepository(Protocol):
+    async def add(self, exam: MockExam) -> None: ...
+
+    async def get(self, exam_id: str) -> MockExam | None: ...
+
+    async def list_for_owner(self, owner_id: str) -> list[MockExam]:
+        """Return the owner's mock exams, oldest first (account export)."""
+        ...
+
+    async def try_mark_submitted(self, exam_id: str, now: datetime) -> bool:
+        """Record the one submission atomically; False if it was already submitted."""
+        ...
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        """Delete a deck's mock exams (deck deletion)."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every mock exam the owner has (account deletion)."""
+        ...
+
+
+class TranscriptProvider(Protocol):
+    async def fetch(self, video_id: str) -> Transcript:
+        """Retrieve a video's transcript, or raise TranscriptUnavailable (F-AI-2).
+
+        Best-effort by design: transcript access is unreliable, so callers offer a
+        manual paste as the fallback.
+        """
+        ...
+
+
+class PassageRepository(Protocol):
+    async def add_many(self, passages: list[Passage]) -> None: ...
+
+    async def list_for_deck(self, deck_id: str) -> list[Passage]:
+        """Return the deck's indexed passages in file, page and ordinal order."""
+        ...
+
+    async def indexed_files(self, deck_id: str) -> set[str]:
+        """The source file ids already indexed for the deck."""
+        ...
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        """Delete a deck's passages (deck deletion)."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every passage the owner has (account deletion)."""
+        ...

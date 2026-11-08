@@ -7,6 +7,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Protocol, runtime_checkable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -20,24 +21,34 @@ from flashcards.api.routers import (
     ai,
     auth,
     cards,
+    chat,
     decks,
     goals,
     imports,
     media,
+    mock_exams,
     review,
 )
 from flashcards.config import Settings
-from flashcards.domain.ai import DraftNotFound
+from flashcards.domain.ai import DraftNotFound, InvalidModelOutput, LlmError
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
+from flashcards.domain.chat import NoChatSources
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
+from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
-from flashcards.domain.quotas import QuotaExceeded
+from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
+from flashcards.domain.summary import SummaryLocked
+from flashcards.domain.transcripts import (
+    InvalidTranscript,
+    InvalidVideoUrl,
+    TranscriptUnavailable,
+)
 
 logger = logging.getLogger("flashcards")
 
@@ -82,6 +93,55 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def media_too_large(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=413, content={"detail": "The media file is too large."})
 
+    async def feature_locked(_request: Request, exc: Exception) -> JSONResponse:
+        # A card-threshold gate (summary or mock exam) is not met yet.
+        detail = str(exc) if isinstance(exc, SummaryLocked | ExamLocked) else "Feature locked."
+        return JSONResponse(status_code=409, content={"detail": detail})
+
+    async def invalid_video_url(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": "Not a YouTube video link."})
+
+    async def no_transcript(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": "No transcript is available for this video. Paste the transcript instead."
+            },
+        )
+
+    async def invalid_transcript(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    async def ai_call_limit(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=429, content={"detail": "Daily AI request limit reached."}
+        )
+
+    async def exam_closed(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    async def no_chat_sources(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "This deck has no source documents with text to chat with."},
+        )
+
+    async def ai_unavailable(_request: Request, exc: Exception) -> JSONResponse:
+        # A synchronous AI call failed or is not configured (the async generation
+        # worker captures its own errors onto the job and never reaches here).
+        logger.warning("AI call failed: %s", exc, exc_info=exc)
+        return JSONResponse(
+            status_code=503, content={"detail": "AI is unavailable right now."}
+        )
+
+    async def ai_bad_output(_request: Request, exc: Exception) -> JSONResponse:
+        # The provider answered but the output failed the domain's schema.
+        logger.warning("AI returned unusable output: %s", exc, exc_info=exc)
+        return JSONResponse(
+            status_code=502,
+            content={"detail": "The AI returned an unusable answer; try again."},
+        )
+
     not_found_errors = (
         DeckNotFound,
         CardNotFound,
@@ -90,6 +150,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         DraftNotFound,
         GoalNotFound,
         MediaNotFound,
+        ExamNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -104,6 +165,17 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
     app.add_exception_handler(TooManyPages, too_large)
+    app.add_exception_handler(InvalidVideoUrl, invalid_video_url)
+    app.add_exception_handler(TranscriptUnavailable, no_transcript)
+    app.add_exception_handler(InvalidTranscript, invalid_transcript)
+    app.add_exception_handler(NoChatSources, no_chat_sources)
+    app.add_exception_handler(ExamClosed, exam_closed)
+    app.add_exception_handler(AiCallLimitReached, ai_call_limit)
+    app.add_exception_handler(SummaryLocked, feature_locked)
+    app.add_exception_handler(ExamLocked, feature_locked)
+    # The more specific handler wins: malformed output is 502, anything else 503.
+    app.add_exception_handler(InvalidModelOutput, ai_bad_output)
+    app.add_exception_handler(LlmError, ai_unavailable)
 
 
 def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = None) -> FastAPI:
@@ -128,6 +200,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         job_queue.start(process)
         yield
         await job_queue.stop()
+        if isinstance(configured_llm, Closeable):
+            await configured_llm.aclose()
         if engine is not None:
             await engine.dispose()
 
@@ -156,6 +230,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(imports.router)
     app.include_router(account.router)
     app.include_router(media.router)
+    app.include_router(mock_exams.router)
+    app.include_router(chat.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
@@ -165,16 +241,39 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
 
 
 def _llm_from_settings(settings: Settings) -> LLMProvider:
-    """The real Anthropic provider when a key is configured, else a refusing stub."""
+    """Select the AI backend from settings, else a refusing stub (ADR 0006)."""
+    from flashcards.adapters.llm import NullLLMProvider
+
+    if settings.llm_provider == "openai_compatible":
+        if settings.openai_base_url:
+            from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider
+
+            return OpenAICompatibleLLMProvider(
+                base_url=settings.openai_base_url,
+                model=settings.openai_model,
+                api_key=settings.openai_api_key,
+                timeout_seconds=settings.openai_timeout_seconds,
+            )
+        logger.warning(
+            "llm_provider is openai_compatible but openai_base_url is not set; "
+            "AI requests will be refused."
+        )
+        return NullLLMProvider()
     if settings.anthropic_api_key:
         from flashcards.adapters.anthropic_llm import AnthropicLLMProvider
 
         return AnthropicLLMProvider(
             api_key=settings.anthropic_api_key, model=settings.anthropic_model
         )
-    from flashcards.adapters.llm import NullLLMProvider
-
+    logger.warning("No AI backend is configured; AI requests will be refused.")
     return NullLLMProvider()
+
+
+@runtime_checkable
+class Closeable(Protocol):
+    """A provider holding a network client that should be closed on shutdown."""
+
+    async def aclose(self) -> None: ...
 
 
 def _maybe_bootstrap_invite(settings: Settings, container: Container | None) -> str | None:

@@ -14,7 +14,9 @@ from flashcards.application.note_service import NoteService
 from flashcards.domain.ports import (
     CardRepository,
     DeckRepository,
+    MockExamRepository,
     NoteRepository,
+    PassageRepository,
     ReviewLogRepository,
     ScheduleRepository,
 )
@@ -30,6 +32,8 @@ class LibraryService:
         card_repo: CardRepository,
         schedule_repo: ScheduleRepository,
         review_log_repo: ReviewLogRepository,
+        passage_repo: PassageRepository,
+        mock_exam_repo: MockExamRepository,
     ) -> None:
         self._decks = decks
         self._notes = notes
@@ -38,9 +42,15 @@ class LibraryService:
         self._card_repo = card_repo
         self._schedule_repo = schedule_repo
         self._review_log_repo = review_log_repo
+        self._passage_repo = passage_repo
+        self._mock_exam_repo = mock_exam_repo
 
     async def delete_deck(self, *, owner_id: str, deck_id: str) -> None:
-        """Delete a deck subtree and every note, card, schedule and log inside it."""
+        """Delete a deck subtree and everything in it.
+
+        That covers notes, cards, schedules and logs, plus the chat passages
+        extracted from its sources and its mock exams (which hold reference answers).
+        """
         # Raises DeckNotFound if the deck is missing or not the caller's.
         subtree = await self._decks.subtree_ids(owner_id=owner_id, deck_id=deck_id)
         for sub_deck_id in subtree:
@@ -48,6 +58,8 @@ class LibraryService:
                 await self._purge_card(card.id)
             await self._card_repo.delete_for_deck(sub_deck_id)
             await self._note_repo.delete_for_deck(sub_deck_id)
+            await self._passage_repo.delete_for_deck(sub_deck_id)
+            await self._mock_exam_repo.delete_for_deck(sub_deck_id)
             await self._deck_repo.delete(sub_deck_id)
 
     async def delete_owner_library(self, owner_id: str) -> None:

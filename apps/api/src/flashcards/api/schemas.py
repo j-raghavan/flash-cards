@@ -13,16 +13,20 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from flashcards.application.account_service import AccountExport
-from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
+from flashcards.domain.chat import ChatAnswer
 from flashcards.domain.decks import Deck
+from flashcards.domain.evaluation import AnswerEvaluation
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.mock_exam import ExamResult, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.planner import StudyPlan
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
+from flashcards.domain.summary import DeckSummary
 from flashcards.domain.users import User
 
 
@@ -169,6 +173,131 @@ class ReviewRequest(BaseModel):
     idempotency_key: str | None = None
 
 
+class EvaluateRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=20_000)
+
+
+class EvaluationOut(BaseModel):
+    verdict: str
+    score: float
+    explanation: str
+
+    @classmethod
+    def from_evaluation(cls, evaluation: AnswerEvaluation) -> EvaluationOut:
+        return cls(
+            verdict=evaluation.verdict.value,
+            score=evaluation.score,
+            explanation=evaluation.explanation,
+        )
+
+
+class DeckSummaryOut(BaseModel):
+    summary: str
+    key_points: list[str]
+
+    @classmethod
+    def from_summary(cls, summary: DeckSummary) -> DeckSummaryOut:
+        return cls(summary=summary.summary, key_points=list(summary.key_points))
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2_000)
+
+
+class CitationOut(BaseModel):
+    file_id: str
+    page: int
+
+
+class ChatAnswerOut(BaseModel):
+    answer: str
+    citations: list[CitationOut]
+
+    @classmethod
+    def from_answer(cls, answer: ChatAnswer) -> ChatAnswerOut:
+        return cls(
+            answer=answer.answer,
+            citations=[CitationOut(file_id=c.file_id, page=c.page) for c in answer.citations],
+        )
+
+
+class MockExamCreateRequest(BaseModel):
+    question_count: int = Field(default=10, gt=0, le=50)
+    time_limit_seconds: int | None = Field(default=None, gt=0, le=86_400)
+
+
+class ExamQuestionOut(BaseModel):
+    id: str
+    prompt: str
+    topic: str
+
+
+class MockExamOut(BaseModel):
+    id: str
+    deck_id: str
+    created_at: datetime
+    time_limit_seconds: int | None
+    # When the timer runs out, so a client that reloads can rebuild it.
+    deadline: datetime | None
+    submitted_at: datetime | None
+    questions: list[ExamQuestionOut]
+
+    @classmethod
+    def from_exam(cls, exam: MockExam) -> MockExamOut:
+        # The reference answers are never serialized to the client.
+        return cls(
+            id=exam.id,
+            deck_id=exam.deck_id,
+            created_at=exam.created_at,
+            time_limit_seconds=exam.time_limit_seconds,
+            deadline=exam.deadline,
+            submitted_at=exam.submitted_at,
+            questions=[
+                ExamQuestionOut(id=q.id, prompt=q.prompt, topic=q.topic) for q in exam.questions
+            ],
+        )
+
+
+class ExamAnswerIn(BaseModel):
+    question_id: str
+    answer: str = Field(max_length=20_000)
+
+
+class ExamSubmitRequest(BaseModel):
+    answers: list[ExamAnswerIn] = Field(default_factory=list, max_length=200)
+
+
+class TopicScoreOut(BaseModel):
+    topic: str
+    score: float
+    question_count: int
+
+
+class QuestionScoreOut(BaseModel):
+    question_id: str
+    score: float
+
+
+class ExamResultOut(BaseModel):
+    overall_score: float
+    topics: list[TopicScoreOut]
+    question_scores: list[QuestionScoreOut]
+
+    @classmethod
+    def from_result(cls, result: ExamResult) -> ExamResultOut:
+        return cls(
+            overall_score=result.overall_score,
+            topics=[
+                TopicScoreOut(topic=t.topic, score=t.score, question_count=t.question_count)
+                for t in result.topics
+            ],
+            question_scores=[
+                QuestionScoreOut(question_id=qs.question_id, score=qs.score)
+                for qs in result.question_scores
+            ],
+        )
+
+
 class CardScheduleOut(BaseModel):
     card_id: str
     state: ScheduleState
@@ -255,6 +384,19 @@ class DraftOut(BaseModel):
 
 class ApproveDraftsRequest(BaseModel):
     draft_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class YouTubeGenerateRequest(BaseModel):
+    deck_id: str
+    url: str = Field(min_length=1, max_length=2_000)
+    thoroughness: Thoroughness = Thoroughness.STANDARD
+
+
+class TranscriptGenerateRequest(BaseModel):
+    deck_id: str
+    # Bounded at the edge; the domain enforces the exact transcript limit.
+    transcript: str = Field(min_length=1, max_length=120_000)
+    thoroughness: Thoroughness = Thoroughness.STANDARD
 
 
 class GoalCreateRequest(BaseModel):
@@ -384,6 +526,21 @@ class GoalExportOut(BaseModel):
     created_at: datetime
 
 
+class MockExamQuestionExportOut(BaseModel):
+    prompt: str
+    reference: str
+    topic: str
+
+
+class MockExamExportOut(BaseModel):
+    id: str
+    deck_id: str
+    created_at: datetime
+    time_limit_seconds: int | None
+    submitted_at: datetime | None
+    questions: list[MockExamQuestionExportOut]
+
+
 class MediaExportOut(BaseModel):
     id: str
     content_type: str
@@ -399,6 +556,7 @@ class AccountExportOut(BaseModel):
     review_logs: list[ReviewLogExportOut]
     goals: list[GoalExportOut]
     media: list[MediaExportOut]
+    mock_exams: list[MockExamExportOut]
 
     @classmethod
     def from_export(cls, export: AccountExport) -> AccountExportOut:
@@ -466,5 +624,21 @@ class AccountExportOut(BaseModel):
             media=[
                 MediaExportOut(id=m.id, content_type=m.content_type, created_at=m.created_at)
                 for m in export.media
+            ],
+            mock_exams=[
+                MockExamExportOut(
+                    id=e.id,
+                    deck_id=e.deck_id,
+                    created_at=e.created_at,
+                    time_limit_seconds=e.time_limit_seconds,
+                    submitted_at=e.submitted_at,
+                    questions=[
+                        MockExamQuestionExportOut(
+                            prompt=q.prompt, reference=q.reference, topic=q.topic
+                        )
+                        for q in e.questions
+                    ],
+                )
+                for e in export.mock_exams
             ],
         )

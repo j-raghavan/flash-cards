@@ -23,7 +23,11 @@ class LlmError(Exception):
     """Transport or provider failure while generating."""
 
 
-class InvalidDraft(LlmError):
+class InvalidModelOutput(LlmError):
+    """The provider answered, but its output did not satisfy the domain's schema."""
+
+
+class InvalidDraft(InvalidModelOutput):
     """The model output did not match the draft-card schema or had unusable fields."""
 
 

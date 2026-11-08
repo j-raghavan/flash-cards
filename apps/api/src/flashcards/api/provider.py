@@ -30,14 +30,17 @@ from flashcards.adapters.sql import (
     SqlGoalRepository,
     SqlInviteRepository,
     SqlMediaRepository,
+    SqlMockExamRepository,
     SqlNoteRepository,
     SqlObjectStore,
+    SqlPassageRepository,
     SqlQuotaRepository,
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
     SqlUserRepository,
 )
+from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.api.container import (
     Container,
     Repositories,
@@ -45,6 +48,7 @@ from flashcards.api.container import (
     build_services,
 )
 from flashcards.domain.ports import LLMProvider
+from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
 
@@ -73,7 +77,8 @@ def sql_provider(
     scheduler = FsrsScheduler()
     dummy_hash = hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
     # Stateless/process-level singletons, shared across requests.
-    extractor = PyMuPDFExtractor()
+    extractor = TranscriptAwareExtractor(PyMuPDFExtractor())
+    transcripts = NullTranscriptProvider()
     package_reader = ApkgReader()
     media_sniffer = PuremagicMediaSniffer()
     job_queue = InProcessJobQueue()
@@ -106,6 +111,11 @@ def sql_provider(
                     package_reader=package_reader,
                     media=SqlMediaRepository(session),
                     media_sniffer=media_sniffer,
+                    mock_exams=SqlMockExamRepository(session),
+                    transcripts=transcripts,
+                    passages=SqlPassageRepository(session),
+                    # Same counter table as page quota, separate daily period keys.
+                    ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
                 )
             )
 

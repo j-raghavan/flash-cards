@@ -23,8 +23,10 @@ from flashcards.adapters.memory import (
     InMemoryGoalRepository,
     InMemoryInviteRepository,
     InMemoryMediaRepository,
+    InMemoryMockExamRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
+    InMemoryPassageRepository,
     InMemoryQuotaRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
@@ -33,21 +35,29 @@ from flashcards.adapters.memory import (
     SystemClock,
 )
 from flashcards.adapters.passwords import Argon2PasswordHasher
+from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.application.account_service import AccountService
+from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.auth_service import AuthService
 from flashcards.application.card_generation_service import CardGenerationService
+from flashcards.application.chat_service import ChatService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
+from flashcards.application.evaluation_service import EvaluationService
 from flashcards.application.generation_request_service import GenerationRequestService
 from flashcards.application.goal_service import GoalService
 from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.media_service import MediaService
+from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
+from flashcards.application.summary_service import SummaryService
+from flashcards.application.transcript_import_service import TranscriptImportService
+from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
 from flashcards.domain.ports import (
     AiJobRepository,
     CardRepository,
@@ -61,17 +71,22 @@ from flashcards.domain.ports import (
     LLMProvider,
     MediaRepository,
     MediaTypeSniffer,
+    MockExamRepository,
     NoteRepository,
     ObjectStore,
     PackageReader,
+    PassageRepository,
     PasswordHasher,
     QuotaRepository,
     ReviewLogRepository,
     Scheduler,
     ScheduleRepository,
     SessionRepository,
+    TranscriptProvider,
     UserRepository,
 )
+from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS
+from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +113,10 @@ class Repositories:
     package_reader: PackageReader
     media: MediaRepository
     media_sniffer: MediaTypeSniffer
+    mock_exams: MockExamRepository
+    transcripts: TranscriptProvider
+    passages: PassageRepository
+    ai_calls: QuotaRepository
     dummy_hash: str | None = None
 
 
@@ -121,6 +140,11 @@ class Container:
     apkg_import: ApkgImportService
     account: AccountService
     media: MediaService
+    evaluation: EvaluationService
+    summary: SummaryService
+    mock_exam: MockExamService
+    transcript_import: TranscriptImportService
+    chat: ChatService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -141,6 +165,8 @@ def build_services(repos: Repositories) -> Container:
         repos.cards,
         repos.schedules,
         repos.review_logs,
+        repos.passages,
+        repos.mock_exams,
     )
     generation = GenerationRequestService(
         decks,
@@ -178,8 +204,41 @@ def build_services(repos: Repositories) -> Container:
         repos.users,
         repos.media,
         repos.quotas,
+        repos.mock_exams,
+        repos.passages,
+        repos.ai_calls,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
+    ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
+    evaluation = EvaluationService(notes, repos.llm, ai_budget)
+    summary = SummaryService(
+        decks,
+        repos.notes,
+        repos.cards,
+        repos.llm,
+        ai_budget,
+        unlock_cards=DEFAULT_SUMMARY_UNLOCK_CARDS,
+    )
+    mock_exam = MockExamService(
+        decks,
+        repos.notes,
+        repos.cards,
+        repos.mock_exams,
+        repos.llm,
+        ai_budget,
+        repos.clock,
+        unlock_cards=DEFAULT_MOCK_EXAM_UNLOCK_CARDS,
+    )
+    transcript_import = TranscriptImportService(decks, generation, repos.transcripts)
+    chat = ChatService(
+        decks,
+        repos.ai_jobs,
+        repos.object_store,
+        repos.extractor,
+        repos.passages,
+        repos.llm,
+        ai_budget,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -199,11 +258,19 @@ def build_services(repos: Repositories) -> Container:
         apkg_import=apkg_import,
         account=account,
         media=media,
+        evaluation=evaluation,
+        summary=summary,
+        mock_exam=mock_exam,
+        transcript_import=transcript_import,
+        chat=chat,
     )
 
 
 def build_container(
-    *, llm: LLMProvider | None = None, job_queue: JobQueue | None = None
+    *,
+    llm: LLMProvider | None = None,
+    job_queue: JobQueue | None = None,
+    transcripts: TranscriptProvider | None = None,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -227,12 +294,16 @@ def build_container(
             draft_cards=InMemoryDraftCardRepository(),
             object_store=InMemoryObjectStore(),
             quotas=InMemoryQuotaRepository(),
-            extractor=PyMuPDFExtractor(),
+            extractor=TranscriptAwareExtractor(PyMuPDFExtractor()),
             job_queue=job_queue or InProcessJobQueue(),
             llm=llm or NullLLMProvider(),
             goals=InMemoryGoalRepository(),
             package_reader=ApkgReader(),
             media=InMemoryMediaRepository(),
             media_sniffer=PuremagicMediaSniffer(),
+            mock_exams=InMemoryMockExamRepository(),
+            transcripts=transcripts or NullTranscriptProvider(),
+            passages=InMemoryPassageRepository(),
+            ai_calls=InMemoryQuotaRepository(limit=DEFAULT_DAILY_AI_CALLS),
         )
     )

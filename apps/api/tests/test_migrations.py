@@ -32,6 +32,8 @@ APP_TABLES = {
     "ai_quota",
     "goals",
     "media_assets",
+    "mock_exams",
+    "document_passages",
 }
 
 

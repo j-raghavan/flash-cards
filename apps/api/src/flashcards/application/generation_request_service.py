@@ -18,6 +18,12 @@ from flashcards.domain.ports import (
 )
 from flashcards.domain.quotas import QuotaExceeded, billing_period
 from flashcards.domain.sources import TooManyPages
+from flashcards.domain.transcripts import (
+    TRANSCRIPT_MEDIA_TYPE,
+    Transcript,
+    chunk_transcript,
+    encode_transcript,
+)
 
 
 class GenerationRequestService:
@@ -51,6 +57,36 @@ class GenerationRequestService:
         # Raises UnsupportedMediaType on a disallowed type.
         media = self._extractor.sniff(data)
         pages = self._extractor.count_pages(data)
+        return await self._enqueue(owner_id, deck_id, data, media, pages, thoroughness)
+
+    async def start_transcript(
+        self,
+        *,
+        owner_id: str,
+        deck_id: str,
+        transcript: Transcript,
+        thoroughness: Thoroughness,
+    ) -> AiJob:
+        """Enqueue generation from a video or pasted transcript (F-AI-2).
+
+        Each time-windowed chunk counts as one page against the quota and the cap.
+        """
+        await self._decks.get(owner_id=owner_id, deck_id=deck_id)
+        data = encode_transcript(transcript)  # raises InvalidTranscript
+        pages = len(chunk_transcript(transcript))
+        return await self._enqueue(
+            owner_id, deck_id, data, TRANSCRIPT_MEDIA_TYPE, pages, thoroughness
+        )
+
+    async def _enqueue(
+        self,
+        owner_id: str,
+        deck_id: str,
+        data: bytes,
+        media: str,
+        pages: int,
+        thoroughness: Thoroughness,
+    ) -> AiJob:
         if pages > self._max_pages:
             raise TooManyPages(f"{pages} pages (max {self._max_pages})")
 

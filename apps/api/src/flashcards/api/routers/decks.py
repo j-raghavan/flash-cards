@@ -6,15 +6,27 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Response, status
 
 from flashcards.api.container import Container
-from flashcards.api.deps import CurrentUser, current_user, get_container
+from flashcards.api.deps import CurrentUser, ai_slot, current_user, get_container
 from flashcards.api.schemas import (
     DeckCreateRequest,
     DeckMoveRequest,
     DeckOut,
     DeckRenameRequest,
+    DeckSummaryOut,
 )
 
 router = APIRouter(prefix="/decks", tags=["decks"])
+
+
+@router.post("/{deck_id}/summary", response_model=DeckSummaryOut)
+async def summarize_deck(
+    deck_id: str,
+    _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container),
+) -> DeckSummaryOut:
+    summary = await container.summary.summarize(owner_id=caller.user.id, deck_id=deck_id)
+    return DeckSummaryOut.from_summary(summary)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=DeckOut)

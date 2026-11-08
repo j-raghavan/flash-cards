@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +22,23 @@ class Settings(BaseSettings):
     dev_bootstrap_invite: bool = False
     # SQLAlchemy async URL (postgresql+asyncpg://...). Unset means in-memory mode.
     database_url: str | None = None
-    # AI generation backend. With no key the server wires a provider that refuses,
-    # so generation jobs fail cleanly instead of pretending to work.
+    # AI generation backend selector: "anthropic" (default) or "openai_compatible".
+    # With no backend configured the server wires a provider that refuses, so
+    # generation jobs fail cleanly instead of pretending to work.
+    # A Literal, so a typo (e.g. "openai") fails at startup instead of silently
+    # falling back to a provider that refuses every request.
+    llm_provider: Literal["anthropic", "openai_compatible"] = "anthropic"
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-opus-5-5"
+    # OpenAI-compatible endpoint (LM Studio, Ollama, vLLM, ...). base_url points at
+    # the API root, e.g. http://localhost:1234/v1. The key is optional; many local
+    # servers ignore it. Used only when llm_provider == "openai_compatible".
+    openai_base_url: str | None = None
+    openai_api_key: str | None = None
+    openai_model: str = "local-model"
+    # Seconds to wait on the endpoint. Local models on CPU can be slow to answer.
+    openai_timeout_seconds: float = 300.0
+    # Synchronous AI requests (grading, summaries, mock exams, chat) running at once.
+    # Keep it below the database pool size: each holds a connection while it waits
+    # on the model.
+    max_concurrent_ai_calls: int = 4

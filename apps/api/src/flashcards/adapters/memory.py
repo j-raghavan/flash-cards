@@ -8,14 +8,17 @@ what the invite single-use guarantee relies on here.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -361,3 +364,60 @@ class InMemoryMediaRepository:
     async def delete_for_owner(self, owner_id: str) -> None:
         for media_id in [a.id for a in self._by_id.values() if a.owner_id == owner_id]:
             del self._by_id[media_id]
+
+
+class InMemoryMockExamRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, MockExam] = {}
+
+    async def add(self, exam: MockExam) -> None:
+        self._by_id[exam.id] = exam
+
+    async def get(self, exam_id: str) -> MockExam | None:
+        return self._by_id.get(exam_id)
+
+    async def list_for_owner(self, owner_id: str) -> list[MockExam]:
+        owned = [e for e in self._by_id.values() if e.owner_id == owner_id]
+        return sorted(owned, key=lambda e: e.created_at)
+
+    async def try_mark_submitted(self, exam_id: str, now: datetime) -> bool:
+        exam = self._by_id.get(exam_id)
+        if exam is None or exam.submitted_at is not None:
+            return False
+        self._by_id[exam_id] = replace(exam, submitted_at=now)
+        return True
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        for exam_id in [e.id for e in self._by_id.values() if e.deck_id == deck_id]:
+            del self._by_id[exam_id]
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for exam_id in [e.id for e in self._by_id.values() if e.owner_id == owner_id]:
+            del self._by_id[exam_id]
+
+
+class InMemoryPassageRepository:
+    def __init__(self) -> None:
+        self._rows: list[Passage] = []
+
+    async def add_many(self, passages: list[Passage]) -> None:
+        # Same rule as the SQL unique index: one row per (deck, file, page, ordinal).
+        seen = {(p.deck_id, p.file_id, p.page, p.ordinal) for p in self._rows}
+        for passage in passages:
+            key = (passage.deck_id, passage.file_id, passage.page, passage.ordinal)
+            if key not in seen:
+                seen.add(key)
+                self._rows.append(passage)
+
+    async def list_for_deck(self, deck_id: str) -> list[Passage]:
+        owned = [p for p in self._rows if p.deck_id == deck_id]
+        return sorted(owned, key=lambda p: (p.file_id, p.page, p.ordinal))
+
+    async def indexed_files(self, deck_id: str) -> set[str]:
+        return {p.file_id for p in self._rows if p.deck_id == deck_id}
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        self._rows = [p for p in self._rows if p.deck_id != deck_id]
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        self._rows = [p for p in self._rows if p.owner_id != owner_id]

@@ -41,6 +41,9 @@ class AnthropicLLMProvider:
         self._client = client or anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
         content: list[ContentBlockParam] = [_to_content_block(d) for d in request.documents]
         messages: list[MessageParam] = [{"role": "user", "content": content}]

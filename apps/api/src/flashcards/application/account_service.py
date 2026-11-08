@@ -15,6 +15,7 @@ from flashcards.application.library_service import LibraryService
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.ports import (
     AiJobRepository,
@@ -23,8 +24,10 @@ from flashcards.domain.ports import (
     DraftCardRepository,
     GoalRepository,
     MediaRepository,
+    MockExamRepository,
     NoteRepository,
     ObjectStore,
+    PassageRepository,
     QuotaRepository,
     ReviewLogRepository,
     ScheduleRepository,
@@ -45,6 +48,7 @@ class AccountExport:
     review_logs: tuple[ReviewLog, ...]
     goals: tuple[Goal, ...]
     media: tuple[MediaAsset, ...]
+    mock_exams: tuple[MockExam, ...]
 
 
 class AccountService:
@@ -64,6 +68,9 @@ class AccountService:
         users: UserRepository,
         media: MediaRepository,
         quotas: QuotaRepository,
+        mock_exams: MockExamRepository,
+        passages: PassageRepository,
+        ai_calls: QuotaRepository,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -79,6 +86,9 @@ class AccountService:
         self._users = users
         self._media = media
         self._quotas = quotas
+        self._mock_exams = mock_exams
+        self._passages = passages
+        self._ai_calls = ai_calls
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -102,6 +112,7 @@ class AccountService:
             review_logs=tuple(await self._review_logs.list_for_owner(user.id)),
             goals=tuple(await self._goals.list_for_owner(user.id)),
             media=tuple(await self._media.list_for_owner(user.id)),
+            mock_exams=tuple(await self._mock_exams.list_for_owner(user.id)),
         )
 
     async def delete(self, *, user: User) -> None:
@@ -122,6 +133,9 @@ class AccountService:
         # so deletion matches), the uploaded media, and the usage counters.
         await self._review_logs.delete_for_owner(owner_id)
         await self._media.delete_for_owner(owner_id)
+        await self._mock_exams.delete_for_owner(owner_id)
+        await self._passages.delete_for_owner(owner_id)
         await self._quotas.delete_for_owner(owner_id)
+        await self._ai_calls.delete_for_owner(owner_id)
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)

@@ -124,6 +124,107 @@ async def test_user_session_and_aijob_deletion(engine: AsyncEngine) -> None:
         assert await SqlAiJobRepository(s).list_for_owner("u1") == []
 
 
+async def test_mock_exam_roundtrip_and_owner_delete(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlMockExamRepository
+    from flashcards.domain.mock_exam import ExamQuestion, MockExam
+
+    sm = create_sessionmaker(engine)
+    exam = MockExam(
+        id="e1", owner_id="alice", deck_id="d1", created_at=NOW, time_limit_seconds=600,
+        questions=(
+            ExamQuestion(id="q1", prompt="p1", reference="r1", topic="Bio"),
+            ExamQuestion(id="q2", prompt="p2", reference="r2", topic="Chem"),
+        ),
+    )
+    async with sm() as s, s.begin():
+        await SqlMockExamRepository(s).add(exam)
+        await SqlMockExamRepository(s).add(
+            MockExam(
+                id="e2", owner_id="bob", deck_id="d9", created_at=NOW, time_limit_seconds=None,
+                questions=(ExamQuestion(id="q", prompt="p", reference="r", topic="t"),),
+            )
+        )
+
+    async with sm() as s:
+        loaded = await SqlMockExamRepository(s).get("e1")
+        assert loaded is not None
+        assert loaded.time_limit_seconds == 600 and loaded.submitted_at is None
+        assert [e.id for e in await SqlMockExamRepository(s).list_for_owner("alice")] == ["e1"]
+
+    async with sm() as s, s.begin():
+        # A conditional update: only the first submission is recorded.
+        assert await SqlMockExamRepository(s).try_mark_submitted("e1", NOW) is True
+        assert await SqlMockExamRepository(s).try_mark_submitted("e1", NOW) is False
+        assert await SqlMockExamRepository(s).try_mark_submitted("missing", NOW) is False
+    async with sm() as s:
+        marked = await SqlMockExamRepository(s).get("e1")
+        assert marked is not None and marked.submitted_at == NOW
+        assert [q.reference for q in loaded.questions] == ["r1", "r2"]
+        assert await SqlMockExamRepository(s).get("missing") is None
+
+    async with sm() as s, s.begin():
+        await SqlMockExamRepository(s).delete_for_deck("d9")
+    async with sm() as s:
+        assert await SqlMockExamRepository(s).get("e2") is None  # Bob's exam was in d9
+        assert await SqlMockExamRepository(s).get("e1") is not None
+
+    async with sm() as s, s.begin():
+        await SqlMockExamRepository(s).delete_for_owner("alice")
+
+    async with sm() as s:
+        assert await SqlMockExamRepository(s).get("e1") is None
+
+
+async def test_passage_repository(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlPassageRepository
+    from flashcards.domain.chat import Passage
+
+    def passage(pid: str, owner: str, deck: str, file_id: str, page: int, ordinal: int) -> Passage:
+        return Passage(
+            id=pid, owner_id=owner, deck_id=deck, file_id=file_id, page=page,
+            ordinal=ordinal, text=f"text {pid}",
+        )
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlPassageRepository(s).add_many(
+            [
+                passage("p3", "alice", "d1", "f2", 1, 0),
+                passage("p2", "alice", "d1", "f1", 2, 0),
+                passage("p1", "alice", "d1", "f1", 1, 1),
+                passage("p0", "alice", "d1", "f1", 1, 0),
+                passage("pb", "bob", "d9", "fb", 1, 0),
+            ]
+        )
+
+    async with sm() as s:
+        repo = SqlPassageRepository(s)
+        assert [p.id for p in await repo.list_for_deck("d1")] == ["p0", "p1", "p2", "p3"]
+        assert await repo.indexed_files("d1") == {"f1", "f2"}
+        assert await repo.indexed_files("none") == set()
+
+    async with sm() as s, s.begin():
+        # The same positions again (a concurrent indexer) are ignored, not an error.
+        await SqlPassageRepository(s).add_many([passage("dup", "alice", "d1", "f1", 1, 0)])
+        await SqlPassageRepository(s).add_many([])
+    async with sm() as s:
+        assert len(await SqlPassageRepository(s).list_for_deck("d1")) == 4
+
+    async with sm() as s, s.begin():
+        await SqlPassageRepository(s).delete_for_deck("d1")
+    async with sm() as s:
+        assert await SqlPassageRepository(s).list_for_deck("d1") == []
+        assert len(await SqlPassageRepository(s).list_for_deck("d9")) == 1
+
+    async with sm() as s, s.begin():
+        await SqlPassageRepository(s).add_many([passage("p0", "alice", "d1", "f1", 1, 0)])
+        await SqlPassageRepository(s).delete_for_owner("alice")
+
+    async with sm() as s:
+        assert await SqlPassageRepository(s).list_for_deck("d1") == []
+        assert [p.id for p in await SqlPassageRepository(s).list_for_deck("d9")] == ["pb"]
+
+
 async def test_media_roundtrip(engine: AsyncEngine) -> None:
     from flashcards.adapters.sql import SqlMediaRepository
     from flashcards.domain.media import MediaAsset
