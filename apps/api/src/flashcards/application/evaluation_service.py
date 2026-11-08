@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """AI-evaluation use case: grade a typed answer against a card (F-STUDY-2).
 
-The card's content is the grading key; the student's typed answer is sent to the
-model as a data document, never concatenated into the instructions (NF-SEC-6).
+The card's content (the grading key) and the student's typed answer both go to the
+model as data documents, never concatenated into the instructions (NF-SEC-6).
 The grade is advisory: it does not touch scheduling, which stays with review.
 """
 
@@ -33,8 +33,13 @@ class EvaluationService:
         card = await self._notes.get_card(owner_id=owner_id, card_id=card_id)
         note = await self._notes.get_note(owner_id=owner_id, note_id=card.note_id)
         request = StructuredRequest(
-            instructions=evaluation_prompt(_reference_text(note.fields)),
-            documents=(LlmDocument(media_type="text/plain", data=answer.encode("utf-8")),),
+            instructions=evaluation_prompt(),
+            documents=(
+                LlmDocument(
+                    media_type="text/plain", data=_reference_text(note.fields).encode("utf-8")
+                ),
+                LlmDocument(media_type="text/plain", data=answer.encode("utf-8")),
+            ),
             schema=EVALUATION_SCHEMA,
             max_output_tokens=EVALUATION_MAX_OUTPUT_TOKENS,
         )

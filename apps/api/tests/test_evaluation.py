@@ -91,11 +91,12 @@ async def test_evaluate_grades_the_answer_and_isolates_it_as_data() -> None:
     assert result.verdict is Verdict.CORRECT and result.score == 0.9
     request = llm.last_request
     assert request is not None
-    # NF-SEC-6: the student's answer rides as a data document, not in the instructions.
-    assert request.documents[0].data == b"Lyon-is-my-guess"
-    assert "Lyon-is-my-guess" not in request.instructions
-    # The card's own content is the grading key in the instructions.
-    assert "Capital of France?" in request.instructions and "Paris" in request.instructions
+    # NF-SEC-6: the card's content and the student's answer are separate data
+    # documents; neither is in the instructions.
+    assert request.documents[0].data == b"front: Capital of France?\nback: Paris"
+    assert request.documents[1].data == b"Lyon-is-my-guess"
+    for text in ("Lyon-is-my-guess", "Capital of France?", "Paris"):
+        assert text not in request.instructions
 
 
 async def test_evaluate_is_owner_scoped() -> None:
