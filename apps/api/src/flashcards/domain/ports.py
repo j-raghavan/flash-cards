@@ -8,6 +8,7 @@ from typing import Protocol
 
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
+from flashcards.domain.notes import Card, Note
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
 
@@ -96,3 +97,29 @@ class DeckRepository(Protocol):
         ...
 
     async def delete(self, deck_id: str) -> None: ...
+
+
+class NoteRepository(Protocol):
+    async def add(self, note: Note) -> None: ...
+
+    async def get(self, note_id: str) -> Note | None: ...
+
+    async def delete(self, note_id: str) -> None: ...
+
+
+class CardRepository(Protocol):
+    async def add(self, card: Card) -> None: ...
+
+    async def get(self, card_id: str) -> Card | None: ...
+
+    async def list_for_deck(self, deck_id: str) -> list[Card]:
+        """Return the deck's cards, oldest first."""
+        ...
+
+    async def update(self, card: Card) -> None:
+        """Persist a card change (suspend/unsuspend)."""
+        ...
+
+    async def delete_for_note(self, note_id: str) -> None:
+        """Delete every card produced by a note."""
+        ...

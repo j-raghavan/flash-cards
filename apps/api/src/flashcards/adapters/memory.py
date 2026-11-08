@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
+from flashcards.domain.notes import Card, Note
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -118,3 +119,39 @@ class InMemoryDeckRepository:
 
     async def delete(self, deck_id: str) -> None:
         self._by_id.pop(deck_id, None)
+
+
+class InMemoryNoteRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Note] = {}
+
+    async def add(self, note: Note) -> None:
+        self._by_id[note.id] = note
+
+    async def get(self, note_id: str) -> Note | None:
+        return self._by_id.get(note_id)
+
+    async def delete(self, note_id: str) -> None:
+        self._by_id.pop(note_id, None)
+
+
+class InMemoryCardRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, Card] = {}
+
+    async def add(self, card: Card) -> None:
+        self._by_id[card.id] = card
+
+    async def get(self, card_id: str) -> Card | None:
+        return self._by_id.get(card_id)
+
+    async def list_for_deck(self, deck_id: str) -> list[Card]:
+        cards = [c for c in self._by_id.values() if c.deck_id == deck_id]
+        return sorted(cards, key=lambda c: (c.created_at, c.ordinal))
+
+    async def update(self, card: Card) -> None:
+        self._by_id[card.id] = card
+
+    async def delete_for_note(self, note_id: str) -> None:
+        for card_id in [c.id for c in self._by_id.values() if c.note_id == note_id]:
+            del self._by_id[card_id]
