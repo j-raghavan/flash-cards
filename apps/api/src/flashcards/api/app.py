@@ -56,6 +56,7 @@ from flashcards.domain.transcripts import (
     InvalidVideoUrl,
     TranscriptUnavailable,
 )
+from flashcards.domain.users import AdminSelfAction, UserNotFound
 
 logger = logging.getLogger("flashcards")
 
@@ -137,6 +138,12 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def clone_limit(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=429, content={"detail": "Daily clone limit reached."})
 
+    async def admin_self_action(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Admins cannot do this to their own account."},
+        )
+
     async def exam_closed(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
@@ -172,6 +179,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         MediaNotFound,
         ExamNotFound,
         ShareNotFound,
+        UserNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -191,6 +199,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidTranscript, invalid_transcript)
     app.add_exception_handler(NoChatSources, no_chat_sources)
     app.add_exception_handler(ExamClosed, exam_closed)
+    app.add_exception_handler(AdminSelfAction, admin_self_action)
     app.add_exception_handler(CloneNotAllowed, clone_not_allowed)
     app.add_exception_handler(CloneTooLarge, clone_too_large)
     app.add_exception_handler(CloneLimitReached, clone_limit)

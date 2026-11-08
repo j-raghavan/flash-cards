@@ -398,3 +398,21 @@ def test_password_reset_over_http(mailer: _CapturingMailer) -> None:
         "/auth/password-reset/confirm", json={"token": token, "password": "a-third-password"}
     )
     assert again.status_code == 422
+
+
+async def test_in_memory_repositories_ignore_missing_rows() -> None:
+    users = InMemoryUserRepository()
+    ghost = User(id="g", email="g@e.com", password_hash="h", role=Role.MEMBER, created_at=START)
+    await users.update(ghost)  # updating a missing user is a no-op
+    assert await users.get("g") is None
+
+    tokens = InMemoryUserTokenRepository()
+    await tokens.add(
+        UserToken(
+            id="t", user_id="u", purpose=TokenPurpose.PASSWORD_RESET, token_hash="h",
+            created_at=START, expires_at=START + PASSWORD_RESET_TTL,
+        )
+    )
+    assert await tokens.try_use("t", START) is True
+    assert await tokens.try_use("t", START) is False
+    assert await tokens.try_use("missing", START) is False

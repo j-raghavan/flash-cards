@@ -15,6 +15,7 @@ from flashcards.api.deps import (
 )
 from flashcards.api.schemas import AccountExportOut
 from flashcards.config import Settings
+from flashcards.domain.audit import AuditAction
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -35,6 +36,9 @@ async def delete_account(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     await container.account.delete(user=caller.user)
+    await container.audit.record(
+        AuditAction.ACCOUNT_DELETED, actor_id=caller.user.id, target_id=caller.user.id
+    )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_session_cookie(response, settings)
     return response

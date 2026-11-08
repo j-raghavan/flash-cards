@@ -32,6 +32,14 @@ class WeakPassword(UserError):
     pass
 
 
+class UserNotFound(UserError):
+    """No user with that id."""
+
+
+class AdminSelfAction(UserError):
+    """An admin tried to suspend, demote or delete their own account."""
+
+
 class EmailAlreadyRegistered(UserError):
     """Raised when creating a user whose email already exists."""
 

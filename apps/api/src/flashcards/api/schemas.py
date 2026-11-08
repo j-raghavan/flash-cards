@@ -239,6 +239,30 @@ class ChatAnswerOut(BaseModel):
         )
 
 
+class AdminUserOut(BaseModel):
+    id: str
+    email: str
+    role: Role
+    email_verified: bool
+    suspended: bool
+    created_at: datetime
+
+    @classmethod
+    def from_user(cls, user: User) -> AdminUserOut:
+        return cls(
+            id=user.id,
+            email=user.email,
+            role=user.role,
+            email_verified=user.is_verified,
+            suspended=user.suspended_at is not None,
+            created_at=user.created_at,
+        )
+
+
+class RoleUpdateRequest(BaseModel):
+    role: Role
+
+
 class AuditEventOut(BaseModel):
     id: str
     action: str

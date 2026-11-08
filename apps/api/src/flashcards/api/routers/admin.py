@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Admin routes: invite management and the audit log (F-ADMIN-1, F-ADMIN-5).
+"""Admin routes: invites, users and the audit log (F-ADMIN-1, F-ADMIN-2, F-ADMIN-5).
 
 All require the admin role, and every change is recorded in the audit log.
 """
@@ -13,10 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, get_container, require_admin
 from flashcards.api.schemas import (
+    AdminUserOut,
     AuditEventOut,
     CreatedInviteOut,
     InviteCreateRequest,
     InviteOut,
+    RoleUpdateRequest,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -72,3 +74,54 @@ async def list_audit_events(
 ) -> list[AuditEventOut]:
     events = await container.audit.recent(limit=limit, before=before)
     return [AuditEventOut.from_event(event) for event in events]
+
+
+@router.get("/users", response_model=list[AdminUserOut])
+async def list_users(
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container),
+) -> list[AdminUserOut]:
+    return [AdminUserOut.from_user(user) for user in await container.admin.list_users()]
+
+
+@router.post("/users/{user_id}/suspend", response_model=AdminUserOut)
+async def suspend_user(
+    user_id: str,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container),
+) -> AdminUserOut:
+    user = await container.admin.suspend_user(admin_id=admin.user.id, user_id=user_id)
+    return AdminUserOut.from_user(user)
+
+
+@router.post("/users/{user_id}/unsuspend", response_model=AdminUserOut)
+async def unsuspend_user(
+    user_id: str,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container),
+) -> AdminUserOut:
+    user = await container.admin.unsuspend_user(admin_id=admin.user.id, user_id=user_id)
+    return AdminUserOut.from_user(user)
+
+
+@router.patch("/users/{user_id}", response_model=AdminUserOut)
+async def set_user_role(
+    user_id: str,
+    body: RoleUpdateRequest,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container),
+) -> AdminUserOut:
+    user = await container.admin.set_role(
+        admin_id=admin.user.id, user_id=user_id, role=body.role
+    )
+    return AdminUserOut.from_user(user)
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: str,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container),
+) -> Response:
+    await container.admin.delete_user(admin_id=admin.user.id, user_id=user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
