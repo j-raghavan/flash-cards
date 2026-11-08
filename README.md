@@ -12,14 +12,14 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - Exam goals with a daily study plan and a readiness forecast
 - Self-evaluated and AI-evaluated study, deck summaries, timed mock exams with a per-topic breakdown, and chat with source documents with page citations
 - Anki `.apkg` import, full account export and account deletion
-- Invite-only access with administrator-issued invites
+- Invite-only access with administrator-issued invites, email verification, password reset and sign-in lockout
+- Administrator user management (suspend, role changes, deletion) with an append-only audit log
+- Deck sharing by revocable link, with optional cloning
 - Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint, including locally hosted models
 
 ## Roadmap
 
 - Web client: installable PWA with offline review
-- Deck sharing by revocable link, with optional cloning
-- Email verification, password reset, administrator console and audit log
 - Image Occlusion and custom note types
 - Anki `.apkg` export
 - Automatic YouTube transcript retrieval
