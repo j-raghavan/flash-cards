@@ -357,7 +357,7 @@ async def test_audit_repository(engine: AsyncEngine) -> None:
     sm = create_sessionmaker(engine)
     async with sm() as s, s.begin():
         repo = SqlAuditRepository(s)
-        await repo.append(AuditEvent(id="e1", action=AuditAction.LOGIN_FAILED, created_at=NOW))
+        await repo.append(AuditEvent(id="e1", action=AuditAction.LOGIN_LOCKED, created_at=NOW))
         await repo.append(
             AuditEvent(
                 id="e2", action=AuditAction.USER_SUSPENDED, created_at=NOW + timedelta(minutes=1),
@@ -376,20 +376,32 @@ async def test_audit_repository(engine: AsyncEngine) -> None:
 
 async def test_login_throttle_repository(engine: AsyncEngine) -> None:
     from flashcards.adapters.sql import SqlLoginThrottleRepository
-    from flashcards.domain.login_throttle import ThrottleState
+    from flashcards.domain.login_throttle import (
+        FAILURE_WINDOW,
+        LOCKOUT,
+        MAX_FAILED_LOGINS,
+        admitted,
+    )
 
     sm = create_sessionmaker(engine)
-    async with sm() as s, s.begin():
-        await SqlLoginThrottleRepository(s).save(
-            ThrottleState(key="k", failures=1, window_started_at=NOW)
-        )
-    async with sm() as s, s.begin():
-        await SqlLoginThrottleRepository(s).save(
-            ThrottleState(key="k", failures=0, window_started_at=NOW, locked_until=NOW)
-        )
+
+    async def attempt(key: str, at: datetime) -> tuple[int, datetime | None]:
+        async with sm() as s, s.begin():
+            state = await SqlLoginThrottleRepository(s).register_attempt(key, at)
+        return state.failures, state.locked_until
+
+    # The atomic upsert follows the same rules as the in-memory domain function.
+    for n in range(1, MAX_FAILED_LOGINS):
+        assert await attempt("k", NOW) == (n, None)
+    assert await attempt("k", NOW) == (MAX_FAILED_LOGINS, NOW + LOCKOUT)
+    later = NOW + timedelta(minutes=5)
+    assert await attempt("k", later) == (MAX_FAILED_LOGINS + 1, NOW + LOCKOUT)
+    assert await attempt("k", NOW + LOCKOUT) == (1, None)  # an expired lock starts fresh
+    assert await attempt("k", NOW + LOCKOUT + FAILURE_WINDOW) == (1, None)  # so does a window
+
     async with sm() as s:
         state = await SqlLoginThrottleRepository(s).get("k")
-        assert state is not None and state.failures == 0 and state.locked_until == NOW
+        assert state is not None and admitted(state)
         assert await SqlLoginThrottleRepository(s).get("missing") is None
     async with sm() as s, s.begin():
         await SqlLoginThrottleRepository(s).delete("k")

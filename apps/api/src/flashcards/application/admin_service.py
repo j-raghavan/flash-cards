@@ -15,9 +15,15 @@ from datetime import timedelta
 from flashcards.application.account_service import AccountService
 from flashcards.application.audit_service import AuditService
 from flashcards.application.invite_service import DEFAULT_TTL, CreatedInvite, InviteService
+from flashcards.application.sign_in_service import throttle_key
 from flashcards.domain.audit import AuditAction
 from flashcards.domain.invites import Role
-from flashcards.domain.ports import Clock, SessionRepository, UserRepository
+from flashcards.domain.ports import (
+    Clock,
+    LoginThrottleRepository,
+    SessionRepository,
+    UserRepository,
+)
 from flashcards.domain.users import AdminSelfAction, User, UserNotFound, UserStatus
 
 
@@ -29,6 +35,7 @@ class AdminService:
         users: UserRepository,
         sessions: SessionRepository,
         account: AccountService,
+        throttle: LoginThrottleRepository,
         clock: Clock,
     ) -> None:
         self._invites = invites
@@ -36,6 +43,7 @@ class AdminService:
         self._users = users
         self._sessions = sessions
         self._account = account
+        self._throttle = throttle
         self._clock = clock
 
     async def create_invite(
@@ -101,6 +109,15 @@ class AdminService:
             detail={"from": user.role.value, "to": role.value},
         )
         return changed
+
+    async def unlock_user(self, *, admin_id: str, user_id: str) -> User:
+        """Clear a sign-in lockout, e.g. when someone keeps an account locked."""
+        user = await self._users.get(user_id)
+        if user is None:
+            raise UserNotFound(user_id)
+        await self._throttle.delete(throttle_key(user.email))
+        await self._audit.record(AuditAction.USER_UNLOCKED, actor_id=admin_id, target_id=user_id)
+        return user
 
     async def delete_user(self, *, admin_id: str, user_id: str) -> None:
         user = await self._target(admin_id, user_id)

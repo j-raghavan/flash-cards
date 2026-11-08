@@ -1,19 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Sign-in with failed-attempt throttling and lockout (F-AUTH-6).
 
-Wraps AuthService.login: a locked email is refused before the password is even
-checked, a wrong password counts toward the lock, and a successful sign-in clears
-the count. Only the moment a lock starts is audited, so a guessing attack cannot
-flood the audit log.
+Wraps AuthService.login: every attempt is counted atomically before the password
+is checked, an attempt past the limit is refused, and a successful sign-in clears
+the count. Only the failure that starts a lock is audited, so a guessing attack
+cannot flood the audit log.
 """
 
 from __future__ import annotations
 
 from flashcards.application.audit_service import AuditService
-from flashcards.application.auth_service import AuthService, InvalidCredentials, IssuedSession
+from flashcards.application.auth_service import (
+    AccountSuspended,
+    AuthService,
+    InvalidCredentials,
+    IssuedSession,
+)
 from flashcards.domain.audit import AuditAction
 from flashcards.domain.invites import hash_token, normalize_email
-from flashcards.domain.login_throttle import LoginLocked, after_failure
+from flashcards.domain.login_throttle import LOCKOUT, MAX_FAILED_LOGINS, LoginLocked, admitted
 from flashcards.domain.ports import Clock, LoginThrottleRepository, UserRepository
 
 
@@ -39,24 +44,22 @@ class SignInService:
 
     async def login(self, *, email: str, password: str) -> IssuedSession:
         key = throttle_key(email)
-        state = await self._throttle.get(key)
         now = self._clock.now()
-        if state is not None:
-            remaining = state.locked_for(now)
-            if remaining is not None:
-                raise LoginLocked(remaining)
+        # Count first, so attempts already in flight are counted too.
+        state = await self._throttle.register_attempt(key, now)
+        if not admitted(state):
+            raise LoginLocked(state.locked_for(now) or LOCKOUT)
         try:
             issued = await self._auth.login(email=email, password=password)
         except InvalidCredentials:
-            updated = after_failure(state, key, now)
-            await self._throttle.save(updated)
-            remaining = updated.locked_for(now)
-            if remaining is not None:
+            if state.failures == MAX_FAILED_LOGINS:  # this failure started the lock
                 user = await self._users.get_by_email(normalize_email(email))
                 await self._audit.record(
                     AuditAction.LOGIN_LOCKED, target_id=user.id if user is not None else None
                 )
             raise
-        if state is not None:
-            await self._throttle.delete(key)
+        except AccountSuspended:
+            await self._throttle.delete(key)  # the password was right
+            raise
+        await self._throttle.delete(key)
         return issued

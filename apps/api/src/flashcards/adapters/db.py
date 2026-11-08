@@ -682,15 +682,6 @@ class LoginThrottleRow(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-def throttle_to_row(state: ThrottleState) -> LoginThrottleRow:
-    return LoginThrottleRow(
-        key=state.key,
-        failures=state.failures,
-        window_started_at=state.window_started_at,
-        locked_until=state.locked_until,
-    )
-
-
 def throttle_from_row(row: LoginThrottleRow) -> ThrottleState:
     return ThrottleState(
         key=row.key,

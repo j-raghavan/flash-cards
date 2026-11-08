@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -27,7 +28,8 @@ from flashcards.domain.login_throttle import (
     MAX_FAILED_LOGINS,
     LoginLocked,
     ThrottleState,
-    after_failure,
+    admitted,
+    after_attempt,
 )
 from flashcards.domain.users import User
 
@@ -55,20 +57,27 @@ class _Hasher:
         return password_hash == f"hashed:{password}"
 
 
-def test_failures_lock_after_the_limit_and_reset_after_the_window() -> None:
+def test_attempts_lock_at_the_limit_and_never_extend_the_lock() -> None:
     state: ThrottleState | None = None
-    for _ in range(MAX_FAILED_LOGINS - 1):
-        state = after_failure(state, "k", START)
-    assert state is not None and state.failures == MAX_FAILED_LOGINS - 1
-    assert state.locked_for(START) is None
+    for attempt in range(1, MAX_FAILED_LOGINS + 1):
+        state = after_attempt(state, "k", START)
+        assert admitted(state) and state.failures == attempt
+    assert state is not None and state.locked_for(START) == LOCKOUT  # the 5th starts it
+    assert state.locked_for(START + LOCKOUT) is None  # and it ends on time
 
-    locked = after_failure(state, "k", START)
-    assert locked.locked_for(START) == LOCKOUT
-    assert locked.locked_for(START + LOCKOUT) is None
-    assert locked.failures == 0  # a fresh window starts with the lock
+    later = START + timedelta(minutes=5)
+    refused = after_attempt(state, "k", later)
+    assert not admitted(refused)
+    assert refused.locked_until == state.locked_until  # refused attempts do not extend it
 
-    stale = after_failure(state, "k", START + FAILURE_WINDOW)
-    assert stale.failures == 1  # the old window expired, so counting restarts
+    after_lock = after_attempt(refused, "k", START + LOCKOUT)
+    assert admitted(after_lock) and after_lock.failures == 1 and after_lock.locked_until is None
+
+
+def test_an_old_window_starts_counting_again() -> None:
+    state = after_attempt(after_attempt(None, "k", START), "k", START)
+    assert state.failures == 2
+    assert after_attempt(state, "k", START + FAILURE_WINDOW).failures == 1
 
 
 class _Rig:
@@ -142,6 +151,26 @@ async def test_a_suspended_account_is_not_counted() -> None:
     with pytest.raises(AccountSuspended):
         await rig.sign_in.login(email=EMAIL, password=PASSWORD)
     assert await rig.throttle.get(throttle_key(EMAIL)) is None
+
+
+async def test_concurrent_guesses_are_each_counted() -> None:
+    rig = _Rig()
+    await rig.add_user()
+
+    async def guess() -> str:
+        try:
+            await rig.sign_in.login(email=EMAIL, password="wrong")
+        except InvalidCredentials:
+            return "checked"
+        except LoginLocked:
+            return "refused"
+        raise AssertionError("a wrong password signed in")  # pragma: no cover
+
+    outcomes = await asyncio.gather(*(guess() for _ in range(50)))
+
+    # However many arrive at once, only the limit's worth reach the password check.
+    assert outcomes.count("checked") == MAX_FAILED_LOGINS
+    assert outcomes.count("refused") == 50 - MAX_FAILED_LOGINS
 
 
 def test_lockout_over_http(app: FastAPI, seed_invite: Callable[..., str]) -> None:

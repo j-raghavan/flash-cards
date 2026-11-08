@@ -132,3 +132,21 @@ def test_self_service_account_deletion_is_audited(
     member, member_id = _member(app, seed_invite)
     assert member.delete("/account").status_code == 204
     assert ("account.deleted", member_id) in _actions(admin_client)
+
+
+def test_admin_can_clear_a_sign_in_lockout(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    _member_client, member_id = _member(app, seed_invite)
+    stranger = TestClient(app)
+    for _ in range(5):
+        stranger.post("/auth/login", json={"email": MEMBER, "password": "wrong"})
+    right = {"email": MEMBER, "password": PASSWORD}
+    assert TestClient(app).post("/auth/login", json=right).status_code == 429
+
+    unlocked = admin_client.post(f"/admin/users/{member_id}/unlock")
+
+    assert unlocked.status_code == 200
+    assert TestClient(app).post("/auth/login", json=right).status_code == 200
+    assert ("user.unlocked", member_id) in _actions(admin_client)
+    assert admin_client.post("/admin/users/missing/unlock").status_code == 404

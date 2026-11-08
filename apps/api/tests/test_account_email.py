@@ -29,7 +29,6 @@ from flashcards.application.sign_in_service import throttle_key
 from flashcards.config import Settings
 from flashcards.domain.audit import AuditAction
 from flashcards.domain.invites import Role
-from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.mail import OutgoingEmail
 from flashcards.domain.sessions import Session
 from flashcards.domain.user_tokens import (
@@ -209,9 +208,7 @@ async def test_password_reset_changes_the_password_and_ends_every_session() -> N
                 expires_at=START + timedelta(days=1),
             )
         )
-    await rig.throttle.save(
-        ThrottleState(key=throttle_key(EMAIL), failures=3, window_started_at=START)
-    )
+    await rig.throttle.register_attempt(throttle_key(EMAIL), START)
     email = await rig.service.password_reset_email("  Person@Example.com ")
     assert email is not None and "reset-password?token=" in email.body
 

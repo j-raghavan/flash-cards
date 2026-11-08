@@ -18,7 +18,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
-from flashcards.domain.login_throttle import ThrottleState
+from flashcards.domain.login_throttle import ThrottleState, after_attempt
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -498,8 +498,11 @@ class InMemoryLoginThrottleRepository:
     async def get(self, key: str) -> ThrottleState | None:
         return self._by_key.get(key)
 
-    async def save(self, state: ThrottleState) -> None:
-        self._by_key[state.key] = state
+    async def register_attempt(self, key: str, now: datetime) -> ThrottleState:
+        # No await between the read and the write, so this is atomic on the loop.
+        state = after_attempt(self._by_key.get(key), key, now)
+        self._by_key[key] = state
+        return state
 
     async def delete(self, key: str) -> None:
         self._by_key.pop(key, None)

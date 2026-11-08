@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import CursorResult, Result, delete, func, select, update
+from sqlalchemy import CursorResult, Result, and_, case, delete, func, null, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,7 +67,6 @@ from flashcards.adapters.db import (
     share_link_from_row,
     share_link_to_row,
     throttle_from_row,
-    throttle_to_row,
     user_from_row,
     user_to_row,
     user_token_from_row,
@@ -80,7 +79,13 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
-from flashcards.domain.login_throttle import ThrottleState
+from flashcards.domain.login_throttle import (
+    FAILURE_WINDOW,
+    LOCKOUT,
+    MAX_FAILED_LOGINS,
+    ThrottleState,
+    after_attempt,
+)
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -714,9 +719,46 @@ class SqlLoginThrottleRepository:
         row = await self._session.get(LoginThrottleRow, key)
         return throttle_from_row(row) if row is not None else None
 
-    async def save(self, state: ThrottleState) -> None:
-        await self._session.merge(throttle_to_row(state))
-        await self._session.flush()
+    async def register_attempt(self, key: str, now: datetime) -> ThrottleState:
+        # One statement, so concurrent attempts are each counted (no lost update)
+        # and two first attempts cannot collide on the insert. It mirrors
+        # login_throttle.after_attempt; the SET expressions read the old row.
+        row = LoginThrottleRow.__table__.c
+        first = after_attempt(None, key, now)
+        fresh = or_(
+            and_(row.locked_until.is_not(None), row.locked_until <= now),
+            and_(row.locked_until.is_(None), row.window_started_at <= now - FAILURE_WINDOW),
+        )
+        statement = (
+            pg_insert(LoginThrottleRow)
+            .values(
+                key=key,
+                failures=first.failures,
+                window_started_at=first.window_started_at,
+                locked_until=first.locked_until,
+            )
+            .on_conflict_do_update(
+                index_elements=[row.key],
+                set_={
+                    "failures": case((fresh, 1), else_=row.failures + 1),
+                    "window_started_at": case((fresh, now), else_=row.window_started_at),
+                    "locked_until": case(
+                        (fresh, null()),
+                        (row.locked_until.is_not(None), row.locked_until),
+                        (row.failures + 1 >= MAX_FAILED_LOGINS, now + LOCKOUT),
+                        else_=null(),
+                    ),
+                },
+            )
+            .returning(row.key, row.failures, row.window_started_at, row.locked_until)
+        )
+        saved = (await self._session.execute(statement)).one()
+        return ThrottleState(
+            key=saved.key,
+            failures=saved.failures,
+            window_started_at=saved.window_started_at,
+            locked_until=saved.locked_until,
+        )
 
     async def delete(self, key: str) -> None:
         await self._session.execute(delete(LoginThrottleRow).where(LoginThrottleRow.key == key))

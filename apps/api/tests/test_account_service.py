@@ -34,7 +34,6 @@ from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.chat import Passage
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import new_generation_job
-from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import NoteType
@@ -201,9 +200,7 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     )
     await fx.seed_full_account(BOB)  # Bob's full account must survive Alice's deletion
 
-    await fx.throttle.save(
-        ThrottleState(key=throttle_key(ALICE.email), failures=2, window_started_at=NOW)
-    )
+    await fx.throttle.register_attempt(throttle_key(ALICE.email), NOW)
     await fx.user_tokens.add(
         UserToken(
             id="tok", user_id=ALICE.id, purpose=TokenPurpose.PASSWORD_RESET, token_hash="h",

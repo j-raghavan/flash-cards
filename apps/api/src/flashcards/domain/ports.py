@@ -464,8 +464,11 @@ class AuditRepository(Protocol):
 class LoginThrottleRepository(Protocol):
     async def get(self, key: str) -> ThrottleState | None: ...
 
-    async def save(self, state: ThrottleState) -> None:
-        """Insert or replace the state for its key."""
+    async def register_attempt(self, key: str, now: datetime) -> ThrottleState:
+        """Count one attempt atomically (see login_throttle.after_attempt).
+
+        Concurrent attempts must each be counted: no read-modify-write race.
+        """
         ...
 
     async def delete(self, key: str) -> None: ...

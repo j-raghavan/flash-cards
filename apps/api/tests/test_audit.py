@@ -27,7 +27,7 @@ class _Clock:
 async def test_record_and_page_newest_first() -> None:
     clock = _Clock()
     audit = AuditService(InMemoryAuditRepository(), clock)
-    first = await audit.record(AuditAction.LOGIN_FAILED)
+    first = await audit.record(AuditAction.LOGIN_LOCKED)
     clock.now_value += timedelta(minutes=1)
     second = await audit.record(
         AuditAction.USER_ROLE_CHANGED,

@@ -284,7 +284,9 @@ def build_services(repos: Repositories) -> Container:
         repos.clock,
     )
     audit = AuditService(repos.audit_events, repos.clock)
-    admin = AdminService(invites, audit, repos.users, repos.sessions, account, repos.clock)
+    admin = AdminService(
+        invites, audit, repos.users, repos.sessions, account, repos.login_throttle, repos.clock
+    )
     sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
     account_email = AccountEmailService(
         repos.users,

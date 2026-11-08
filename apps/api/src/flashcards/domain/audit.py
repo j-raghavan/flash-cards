@@ -25,7 +25,7 @@ class AuditAction(enum.StrEnum):
     USER_ROLE_CHANGED = "user.role_changed"
     USER_DELETED = "user.deleted"
     ACCOUNT_DELETED = "account.deleted"
-    LOGIN_FAILED = "login.failed"
+    USER_UNLOCKED = "user.unlocked"
     LOGIN_LOCKED = "login.locked"
     # Event names, not secrets (bandit flags any name containing PASSWORD).
     PASSWORD_RESET_REQUESTED = "password_reset.requested"  # noqa: S105

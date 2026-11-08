@@ -104,6 +104,16 @@ async def unsuspend_user(
     return AdminUserOut.from_user(user)
 
 
+@router.post("/users/{user_id}/unlock", response_model=AdminUserOut)
+async def unlock_user(
+    user_id: str,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> AdminUserOut:
+    user = await container.admin.unlock_user(admin_id=admin.user.id, user_id=user_id)
+    return AdminUserOut.from_user(user)
+
+
 @router.patch("/users/{user_id}", response_model=AdminUserOut)
 async def set_user_role(
     user_id: str,
