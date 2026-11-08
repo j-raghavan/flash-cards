@@ -55,7 +55,7 @@ async def test_imports_decks_notes_and_skips_the_unmappable() -> None:
         note_types={1: BASIC, 2: CLOZE, 3: SINGLE},
         decks={100: AnkiDeck(100, "Biology"), 200: AnkiDeck(200, "Chemistry")},
         notes=(
-            AnkiNote("g1", 1, ("Capital?", "Paris"), ()),
+            AnkiNote("g1", 1, ("Capital?", "Paris"), ("geo::europe", "Geo::Europe", "")),
             AnkiNote("g2", 2, ("The {{c1::cell}}",), ()),
             AnkiNote("g3", 3, ("only one field",), ()),  # too few fields -> skipped
             AnkiNote("g4", 1, ("Q4", "A4"), ()),
@@ -86,6 +86,9 @@ async def test_imports_decks_notes_and_skips_the_unmappable() -> None:
     chem_cards = await fx.notes.list_cards(owner_id=ALICE, deck_id=decks["Chemistry"])
     assert len(bio_cards) == 2  # g1 (1) + g2 cloze with one deletion (1)
     assert len(chem_cards) == 1  # g4
+    # Tags come across, cleaned up (duplicates and blanks dropped).
+    g1 = await fx.notes.get_note(owner_id=ALICE, note_id=bio_cards[0].note_id)
+    assert g1.tags == ("geo::europe",)
 
 
 async def test_unknown_or_blank_deck_names_fall_back() -> None:

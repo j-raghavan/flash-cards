@@ -9,13 +9,16 @@ what a valid address is and no extra email-parsing dependency.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
 
 from flashcards.application.account_service import AccountExport
+from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.audit import AuditEvent
+from flashcards.domain.browser import BrowserRow, CardState
 from flashcards.domain.chat import ChatAnswer
 from flashcards.domain.decks import Deck
 from flashcards.domain.evaluation import AnswerEvaluation
@@ -23,12 +26,13 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.mock_exam import ExamResult, MockExam
-from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.notes import MAX_FLAG, Card, Note, NoteType
 from flashcards.domain.planner import StudyPlan
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import SharedDeckPreview, ShareLink
 from flashcards.domain.summary import DeckSummary
+from flashcards.domain.tags import MAX_TAG_LENGTH, MAX_TAGS_PER_NOTE
 from flashcards.domain.users import User
 
 
@@ -146,9 +150,20 @@ class DeckOut(BaseModel):
         return cls(id=deck.id, name=deck.name, parent_id=deck.parent_id, created_at=deck.created_at)
 
 
+TagIn = Annotated[str, StringConstraints(max_length=MAX_TAG_LENGTH)]
+
+
 class NoteCreateRequest(BaseModel):
     note_type: NoteType
     fields: dict[str, str]
+    tags: list[TagIn] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)
+
+
+class NoteUpdateRequest(BaseModel):
+    """Either or both; the note type cannot change."""
+
+    fields: dict[str, str] | None = None
+    tags: list[TagIn] | None = Field(default=None, max_length=MAX_TAGS_PER_NOTE)
 
 
 class CardOut(BaseModel):
@@ -157,6 +172,8 @@ class CardOut(BaseModel):
     note_id: str
     ordinal: int
     suspended: bool
+    flag: int
+    buried_until: datetime | None
 
     @classmethod
     def from_card(cls, card: Card) -> CardOut:
@@ -166,23 +183,108 @@ class CardOut(BaseModel):
             note_id=card.note_id,
             ordinal=card.ordinal,
             suspended=card.is_suspended,
+            flag=card.flag,
+            buried_until=card.buried_until,
         )
 
 
 class CardDetailOut(CardOut):
     note_type: NoteType
     fields: dict[str, str]
+    tags: list[str]
 
     @classmethod
     def from_card_and_note(cls, card: Card, note: Note) -> CardDetailOut:
         return cls(
-            id=card.id,
-            deck_id=card.deck_id,
-            note_id=card.note_id,
-            ordinal=card.ordinal,
-            suspended=card.is_suspended,
+            **CardOut.from_card(card).model_dump(),
             note_type=note.note_type,
             fields=dict(note.fields),
+            tags=list(note.tags),
+        )
+
+
+class BrowserRowOut(BaseModel):
+    card_id: str
+    note_id: str
+    deck_id: str
+    deck_name: str
+    ordinal: int
+    note_type: NoteType
+    preview: str
+    tags: list[str]
+    flag: int
+    state: CardState
+    due_at: datetime | None
+    proficiency: int
+    created_at: datetime
+
+    @classmethod
+    def from_row(cls, row: BrowserRow) -> BrowserRowOut:
+        return cls(
+            card_id=row.card_id,
+            note_id=row.note_id,
+            deck_id=row.deck_id,
+            deck_name=row.deck_name,
+            ordinal=row.ordinal,
+            note_type=row.note_type,
+            preview=row.preview,
+            tags=list(row.tags),
+            flag=row.flag,
+            state=row.state,
+            due_at=row.due_at,
+            proficiency=row.proficiency,
+            created_at=row.created_at,
+        )
+
+
+class BulkCardRequest(BaseModel):
+    card_ids: list[str] = Field(min_length=1, max_length=MAX_BULK_CARDS)
+    action: BulkAction
+    deck_id: str | None = None  # move
+    tags: list[TagIn] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)  # add/remove
+    flag: int | None = Field(default=None, ge=0, le=MAX_FLAG)  # flag (0 clears)
+    until: AwareDatetime | None = None  # bury; 24 hours when omitted
+
+    @model_validator(mode="after")
+    def _arguments_present(self) -> BulkCardRequest:
+        if self.action is BulkAction.MOVE and self.deck_id is None:
+            raise ValueError("move needs a deck_id")
+        if self.action in (BulkAction.ADD_TAGS, BulkAction.REMOVE_TAGS) and not self.tags:
+            raise ValueError(f"{self.action.value} needs tags")
+        if self.action is BulkAction.FLAG and self.flag is None:
+            raise ValueError("flag needs a flag (0 clears it)")
+        return self
+
+
+class BulkResultOut(BaseModel):
+    cards: int
+    notes: int
+
+
+class BrowserPageOut(BaseModel):
+    total: int
+    cards: list[BrowserRowOut]
+
+
+class NoteOut(BaseModel):
+    id: str
+    deck_id: str
+    note_type: NoteType
+    fields: dict[str, str]
+    tags: list[str]
+    created_at: datetime
+    cards: list[CardOut]
+
+    @classmethod
+    def from_note(cls, note: Note, cards: list[Card]) -> NoteOut:
+        return cls(
+            id=note.id,
+            deck_id=note.deck_id,
+            note_type=note.note_type,
+            fields=dict(note.fields),
+            tags=list(note.tags),
+            created_at=note.created_at,
+            cards=[CardOut.from_card(card) for card in cards],
         )
 
 
@@ -617,6 +719,7 @@ class NoteExportOut(BaseModel):
     deck_id: str
     note_type: NoteType
     fields: dict[str, str]
+    tags: list[str]
     created_at: datetime
 
 
@@ -626,6 +729,8 @@ class CardExportOut(BaseModel):
     note_id: str
     ordinal: int
     suspended: bool
+    flag: int
+    buried_until: datetime | None
 
 
 class ScheduleExportOut(BaseModel):
@@ -707,6 +812,7 @@ class AccountExportOut(BaseModel):
                     deck_id=n.deck_id,
                     note_type=n.note_type,
                     fields=dict(n.fields),
+                    tags=list(n.tags),
                     created_at=n.created_at,
                 )
                 for n in export.notes
@@ -718,6 +824,8 @@ class AccountExportOut(BaseModel):
                     note_id=c.note_id,
                     ordinal=c.ordinal,
                     suspended=c.is_suspended,
+                    flag=c.flag,
+                    buried_until=c.buried_until,
                 )
                 for c in export.cards
             ],

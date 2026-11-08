@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Protocol, runtime_checkable
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from flashcards import __version__
@@ -40,7 +41,13 @@ from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
 from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
-from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
+from flashcards.domain.notes import (
+    CardNotFound,
+    InvalidBury,
+    InvalidFlag,
+    InvalidNote,
+    NoteNotFound,
+)
 from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sharing import (
@@ -51,6 +58,7 @@ from flashcards.domain.sharing import (
 )
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 from flashcards.domain.summary import SummaryLocked
+from flashcards.domain.tags import InvalidTags
 from flashcards.domain.transcripts import (
     InvalidTranscript,
     InvalidVideoUrl,
@@ -66,6 +74,16 @@ def _register_error_handlers(app: FastAPI) -> None:
 
     def not_found(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": "Not found."})
+
+    async def invalid_request(_request: Request, exc: Exception) -> JSONResponse:
+        # FastAPI's default 422 echoes each offending value back ("input"), which can
+        # be megabytes long or a password. Keep where and why, never the value.
+        errors = exc.errors() if isinstance(exc, RequestValidationError) else []
+        detail = [
+            {"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": e.get("msg")}
+            for e in errors
+        ]
+        return JSONResponse(status_code=422, content={"detail": detail})
 
     async def invalid_note(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
@@ -192,7 +210,11 @@ def _register_error_handlers(app: FastAPI) -> None:
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
     app.add_exception_handler(InvalidDeckName, invalid_deck_name)
+    app.add_exception_handler(RequestValidationError, invalid_request)
     app.add_exception_handler(InvalidNote, invalid_note)
+    app.add_exception_handler(InvalidTags, invalid_note)
+    app.add_exception_handler(InvalidFlag, invalid_note)
+    app.add_exception_handler(InvalidBury, invalid_note)
     app.add_exception_handler(InvalidGoal, invalid_goal)
     app.add_exception_handler(InvalidPackage, bad_package)
     app.add_exception_handler(UnsupportedPackage, bad_package)

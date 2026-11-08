@@ -8,6 +8,7 @@ user insert together, or not at all.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 
@@ -96,6 +97,7 @@ from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
+_IN_CHUNK = 5_000  # ids per IN (...) list, well under the bind-parameter cap
 _TERMINAL = (JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value)
 
 
@@ -304,6 +306,32 @@ class SqlNoteRepository:
         rows = await self._session.scalars(query)
         return [note_from_row(row) for row in rows]
 
+    async def list_for_owner(self, owner_id: str) -> list[Note]:
+        rows = await self._session.scalars(
+            select(NoteRow)
+            .where(NoteRow.owner_id == owner_id)
+            .order_by(NoteRow.created_at, NoteRow.id)
+        )
+        return [note_from_row(row) for row in rows]
+
+    async def lock_many(self, note_ids: Sequence[str]) -> list[Note]:
+        ordered = sorted(set(note_ids))
+        notes: list[Note] = []
+        for start in range(0, len(ordered), _IN_CHUNK):
+            rows = await self._session.scalars(
+                select(NoteRow)
+                .where(NoteRow.id.in_(ordered[start : start + _IN_CHUNK]))
+                .order_by(NoteRow.id)
+                .with_for_update()
+            )
+            notes += [note_from_row(row) for row in rows]
+        return notes
+
+    async def update(self, note: Note) -> None:
+        if await self._session.get(NoteRow, note.id) is not None:
+            await self._session.merge(note_to_row(note))
+            await self._session.flush()
+
     async def count_for_deck(self, deck_id: str) -> int:
         count = await self._session.scalar(
             select(func.count()).select_from(NoteRow).where(NoteRow.deck_id == deck_id)
@@ -340,9 +368,40 @@ class SqlCardRepository:
         )
         return [card_from_row(row) for row in rows]
 
+    async def list_for_owner(self, owner_id: str) -> list[Card]:
+        rows = await self._session.scalars(
+            select(CardRow)
+            .where(CardRow.owner_id == owner_id)
+            .order_by(CardRow.created_at, CardRow.ordinal, CardRow.id)
+        )
+        return [card_from_row(row) for row in rows]
+
     async def update(self, card: Card) -> None:
         await self._session.merge(card_to_row(card))
         await self._session.flush()
+
+    async def get_many(self, card_ids: Sequence[str]) -> list[Card]:
+        unique = list(dict.fromkeys(card_ids))
+        found: dict[str, Card] = {}
+        for start in range(0, len(unique), _IN_CHUNK):
+            rows = await self._session.scalars(
+                select(CardRow).where(CardRow.id.in_(unique[start : start + _IN_CHUNK]))
+            )
+            found.update({row.id: card_from_row(row) for row in rows})
+        return [found[cid] for cid in unique if cid in found]
+
+    async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
+        unique = sorted(set(note_ids))
+        cards: list[Card] = []
+        for start in range(0, len(unique), _IN_CHUNK):
+            rows = await self._session.scalars(
+                select(CardRow).where(CardRow.note_id.in_(unique[start : start + _IN_CHUNK]))
+            )
+            cards += [card_from_row(row) for row in rows]
+        return sorted(cards, key=lambda c: (c.note_id, c.ordinal))
+
+    async def delete(self, card_id: str) -> None:
+        await self._session.execute(delete(CardRow).where(CardRow.id == card_id))
 
     async def delete_for_note(self, note_id: str) -> None:
         await self._session.execute(delete(CardRow).where(CardRow.note_id == note_id))
@@ -358,6 +417,17 @@ class SqlScheduleRepository:
     async def get(self, card_id: str) -> CardSchedule | None:
         row = await self._session.get(CardScheduleRow, card_id)
         return schedule_from_row(row) if row is not None else None
+
+    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+        found: dict[str, CardSchedule] = {}
+        # Chunked: Postgres caps the number of bind parameters in one statement.
+        for start in range(0, len(card_ids), _IN_CHUNK):
+            chunk = card_ids[start : start + _IN_CHUNK]
+            rows = await self._session.scalars(
+                select(CardScheduleRow).where(CardScheduleRow.card_id.in_(chunk))
+            )
+            found.update({row.card_id: schedule_from_row(row) for row in rows})
+        return found
 
     async def upsert(self, schedule: CardSchedule) -> None:
         await self._session.merge(schedule_to_row(schedule))

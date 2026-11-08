@@ -187,10 +187,13 @@ class NoteRow(Base):
     note_type: Mapped[str] = mapped_column(String)
     fields: Mapped[dict[str, str]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class CardRow(Base):
     __tablename__ = "cards"
+    # One card per cloze deletion (or the single Basic card) of a note.
+    __table_args__ = (UniqueConstraint("note_id", "ordinal", name="uq_cards_note_ordinal"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     owner_id: Mapped[str] = mapped_column(String, index=True)
@@ -203,6 +206,8 @@ class CardRow(Base):
     ordinal: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    flag: Mapped[int] = mapped_column(Integer, default=0)
+    buried_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CardScheduleRow(Base):
@@ -267,6 +272,7 @@ def note_to_row(note: Note) -> NoteRow:
         note_type=note.note_type.value,
         fields=dict(note.fields),
         created_at=note.created_at,
+        tags=list(note.tags),
     )
 
 
@@ -278,6 +284,7 @@ def note_from_row(row: NoteRow) -> Note:
         note_type=NoteType(row.note_type),
         fields=tuple(row.fields.items()),
         created_at=row.created_at,
+        tags=tuple(row.tags or ()),
     )
 
 
@@ -290,6 +297,8 @@ def card_to_row(card: Card) -> CardRow:
         ordinal=card.ordinal,
         created_at=card.created_at,
         suspended_at=card.suspended_at,
+        flag=card.flag,
+        buried_until=card.buried_until,
     )
 
 
@@ -302,6 +311,8 @@ def card_from_row(row: CardRow) -> Card:
         ordinal=row.ordinal,
         created_at=row.created_at,
         suspended_at=row.suspended_at,
+        flag=row.flag,
+        buried_until=row.buried_until,
     )
 
 

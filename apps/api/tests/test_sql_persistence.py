@@ -426,14 +426,14 @@ async def _seed_card(sm: async_sessionmaker[AsyncSession]) -> None:
                 created_at=_now(),
             )
         )
-        for cid in ("c1", "c2"):
+        for ordinal, cid in enumerate(("c1", "c2")):
             await SqlCardRepository(s).add(
                 Card(
                     id=cid,
                     owner_id="alice",
                     deck_id="d1",
                     note_id="n1",
-                    ordinal=0,
+                    ordinal=ordinal,  # one card per ordinal (uq_cards_note_ordinal)
                     created_at=_now(),
                 )
             )

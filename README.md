@@ -8,6 +8,7 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 
 - AI card generation from PDF, PNG and JPEG files or a lecture transcript, with every card reviewed before it is scheduled and a source reference on each one
 - Basic and Cloze cards with image and audio attachments
+- Card browser with search and filters by state, tag, flag and proficiency, plus bulk move, delete, tag, suspend, bury and flag
 - FSRS-based adaptive scheduling, with deck statistics and proficiency
 - Exam goals with a daily study plan and a readiness forecast
 - Self-evaluated and AI-evaluated study, deck summaries, timed mock exams with a per-topic breakdown, and chat with source documents with page citations

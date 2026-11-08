@@ -254,6 +254,19 @@ async def test_clone_copies_content_but_not_history() -> None:
     assert len(await c.notes.list_cards(owner_id=ALICE, deck_id=child)) == 2
 
 
+async def test_clone_keeps_note_tags() -> None:
+    c = await _container()
+    deck = await c.decks.create(owner_id=ALICE, name="Tagged")
+    await c.notes.create_note(
+        owner_id=ALICE, deck_id=deck.id, note_type=NoteType.BASIC,
+        fields={"front": "q", "back": "a"}, tags=("bio", "exam::1"),
+    )
+    clone = await c.sharing.clone(owner_id=BOB, token=await _token(c, deck.id))
+    cards = await c.notes.list_cards(owner_id=BOB, deck_id=clone.id)
+    note = await c.notes.get_note(owner_id=BOB, note_id=cards[0].note_id)
+    assert note.tags == ("bio", "exam::1")
+
+
 async def test_sharing_a_subdeck_shares_only_that_subtree() -> None:
     c = await _container()
     _root, child = await _shared_tree(c)
