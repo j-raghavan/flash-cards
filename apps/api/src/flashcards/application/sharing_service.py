@@ -182,6 +182,7 @@ class SharingService:
                     deck_id=created.id,
                     note_type=note.note_type,
                     fields=dict(note.fields),
+                    tags=note.tags,
                 )
         return await self._decks.get(owner_id=owner_id, deck_id=new_ids[link.deck_id])
 

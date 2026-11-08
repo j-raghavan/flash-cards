@@ -8,6 +8,7 @@ what the invite single-use guarantee relies on here.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -180,6 +181,14 @@ class InMemoryNoteRepository:
         ordered = sorted(notes, key=lambda note: note.created_at)
         return ordered if limit is None else ordered[:limit]
 
+    async def list_for_owner(self, owner_id: str) -> list[Note]:
+        notes = [note for note in self._by_id.values() if note.owner_id == owner_id]
+        return sorted(notes, key=lambda note: (note.created_at, note.id))
+
+    async def update(self, note: Note) -> None:
+        if note.id in self._by_id:
+            self._by_id[note.id] = note
+
     async def count_for_deck(self, deck_id: str) -> int:
         return sum(1 for note in self._by_id.values() if note.deck_id == deck_id)
 
@@ -205,8 +214,15 @@ class InMemoryCardRepository:
         cards = [c for c in self._by_id.values() if c.deck_id == deck_id]
         return sorted(cards, key=lambda c: (c.created_at, c.ordinal))
 
+    async def list_for_owner(self, owner_id: str) -> list[Card]:
+        cards = [c for c in self._by_id.values() if c.owner_id == owner_id]
+        return sorted(cards, key=lambda c: (c.created_at, c.ordinal, c.id))
+
     async def update(self, card: Card) -> None:
         self._by_id[card.id] = card
+
+    async def delete(self, card_id: str) -> None:
+        self._by_id.pop(card_id, None)
 
     async def delete_for_note(self, note_id: str) -> None:
         for card_id in [c.id for c in self._by_id.values() if c.note_id == note_id]:
@@ -223,6 +239,9 @@ class InMemoryScheduleRepository:
 
     async def get(self, card_id: str) -> CardSchedule | None:
         return self._by_card.get(card_id)
+
+    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+        return {cid: self._by_card[cid] for cid in card_ids if cid in self._by_card}
 
     async def upsert(self, schedule: CardSchedule) -> None:
         self._by_card[schedule.card_id] = schedule

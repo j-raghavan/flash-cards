@@ -15,6 +15,7 @@ from flashcards.domain.anki import AnkiPackage, ImportReport, UnsupportedNote, m
 from flashcards.domain.decks import MAX_DECK_NAME
 from flashcards.domain.notes import InvalidNote
 from flashcards.domain.ports import PackageReader
+from flashcards.domain.tags import sanitize_tags
 
 _FALLBACK_DECK_NAME = "Imported"
 
@@ -47,6 +48,7 @@ class ApkgImportService:
                     deck_id=our_deck_id[anki_deck_id],
                     note_type=our_type,
                     fields=dict(fields),
+                    tags=sanitize_tags(note.tags),
                 )
             except (UnsupportedNote, InvalidNote):
                 skipped += 1

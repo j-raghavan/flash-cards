@@ -11,9 +11,14 @@ from __future__ import annotations
 import enum
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
+
+from flashcards.domain.tags import Tags
 
 MAX_FIELD_LEN = 20_000
+MAX_FLAG = 7
+DEFAULT_BURY = timedelta(hours=24)
+MAX_BURY = timedelta(days=7)
 MAX_FIELDS = 64
 # A full {{cN::...}} deletion with a closing brace. N is a positive integer:
 # leading zeros are allowed (c01 == c1) but c0/c00 are not valid deletions.
@@ -35,6 +40,14 @@ class InvalidNote(CardError):
 
 class NoteNotFound(CardError):
     """A note that does not exist or is not the caller's."""
+
+
+class InvalidFlag(CardError):
+    """A flag outside 0 to MAX_FLAG."""
+
+
+class InvalidBury(CardError):
+    """A bury time in the past or more than MAX_BURY ahead."""
 
 
 class CardNotFound(CardError):
@@ -94,9 +107,19 @@ class Note:
     note_type: NoteType
     fields: Fields
     created_at: datetime
+    tags: Tags = ()
 
     def field(self, name: str) -> str | None:
         return _field(self.fields, name)
+
+    def with_fields(self, fields: Fields) -> Note:
+        return replace(self, fields=fields)
+
+    def with_tags(self, tags: Tags) -> Note:
+        return replace(self, tags=tags)
+
+    def moved_to(self, deck_id: str) -> Note:
+        return replace(self, deck_id=deck_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +131,8 @@ class Card:
     ordinal: int
     created_at: datetime
     suspended_at: datetime | None = None
+    flag: int = 0  # 0 is no flag; 1 to 7 are Anki's colours
+    buried_until: datetime | None = None
 
     @property
     def is_suspended(self) -> bool:
@@ -118,3 +143,24 @@ class Card:
 
     def unsuspended(self) -> Card:
         return replace(self, suspended_at=None)
+
+    def is_buried(self, now: datetime) -> bool:
+        return self.buried_until is not None and now < self.buried_until
+
+    def buried(self, now: datetime, until: datetime | None = None) -> Card:
+        """Hidden from the review queue until `until` (24 hours when not given)."""
+        until = until if until is not None else now + DEFAULT_BURY
+        if not now < until <= now + MAX_BURY:
+            raise InvalidBury("a card can be buried for up to 7 days")
+        return replace(self, buried_until=until)
+
+    def unburied(self) -> Card:
+        return replace(self, buried_until=None)
+
+    def with_flag(self, flag: int) -> Card:
+        if not 0 <= flag <= MAX_FLAG:
+            raise InvalidFlag(f"flags run from 0 to {MAX_FLAG}")
+        return replace(self, flag=flag)
+
+    def moved_to(self, deck_id: str) -> Card:
+        return replace(self, deck_id=deck_id)

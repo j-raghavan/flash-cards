@@ -546,3 +546,63 @@ async def test_invites_revoked_by_creator(engine: AsyncEngine) -> None:
     async with sm() as s:
         other = await SqlInviteRepository(s).get("i4")
         assert other is not None and other.revoked_at is None
+
+
+async def test_card_browser_reads_and_writes(
+    engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flashcards.adapters import sql
+    from flashcards.adapters.sql import SqlScheduleRepository
+    from flashcards.domain.scheduling import CardSchedule, ScheduleState
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlDeckRepository(s).add(
+            Deck(id="d1", owner_id="alice", name="Bio", parent_id=None, created_at=NOW)
+        )
+        for owner, nid in (("alice", "n1"), ("alice", "n2"), ("bob", "n3")):
+            await SqlNoteRepository(s).add(
+                Note(
+                    id=nid, owner_id=owner, deck_id="d1", note_type=NoteType.BASIC,
+                    fields=(("front", "q"), ("back", "a")), created_at=NOW, tags=("t",),
+                )
+            )
+            await SqlCardRepository(s).add(
+                Card(id=f"c-{nid}", owner_id=owner, deck_id="d1", note_id=nid, ordinal=0,
+                     created_at=NOW)
+            )
+        for nid in ("n1", "n2"):
+            await SqlScheduleRepository(s).upsert(
+                CardSchedule(
+                    card_id=f"c-{nid}", state=ScheduleState.REVIEW, step=None, stability=3.0,
+                    difficulty=5.0, due_at=NOW, last_reviewed_at=NOW,
+                )
+            )
+
+    async with sm() as s, s.begin():
+        notes, cards = SqlNoteRepository(s), SqlCardRepository(s)
+        assert [n.id for n in await notes.list_for_owner("alice")] == ["n1", "n2"]
+        n1 = await notes.get("n1")
+        assert n1 is not None and n1.tags == ("t",)
+        await notes.update(n1.with_tags(("a", "b")).with_fields((("front", "Q"), ("back", "A"))))
+        await notes.update(
+            Note(id="ghost", owner_id="alice", deck_id="d1", note_type=NoteType.BASIC,
+                 fields=(), created_at=NOW)
+        )  # a missing note is not created
+        c1 = await cards.get("c-n1")
+        assert c1 is not None
+        await cards.update(c1.with_flag(3).buried(NOW))
+        await cards.delete("c-n2")
+
+    async with sm() as s:
+        notes, cards = SqlNoteRepository(s), SqlCardRepository(s)
+        stored = await notes.get("n1")
+        assert stored is not None and stored.tags == ("a", "b") and stored.field("front") == "Q"
+        assert await notes.get("ghost") is None
+        assert [c.id for c in await cards.list_for_owner("alice")] == ["c-n1"]
+        marked = await cards.get("c-n1")
+        assert marked is not None and marked.flag == 3 and marked.is_buried(NOW)
+        # Batched schedule reads span several IN (...) chunks.
+        monkeypatch.setattr(sql, "_IN_CHUNK", 1)
+        found = await SqlScheduleRepository(s).get_many(["c-n1", "c-n2", "missing"])
+        assert set(found) == {"c-n1"}  # c-n2's schedule went with its card

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -176,6 +176,14 @@ class NoteRepository(Protocol):
         """Return the deck's notes, oldest first; at most `limit` when given."""
         ...
 
+    async def list_for_owner(self, owner_id: str) -> list[Note]:
+        """Every note the owner has, oldest first (the card browser)."""
+        ...
+
+    async def update(self, note: Note) -> None:
+        """Persist a change to a note's fields, tags or deck."""
+        ...
+
     async def count_for_deck(self, deck_id: str) -> int:
         """How many notes the deck has, without loading them."""
         ...
@@ -196,8 +204,16 @@ class CardRepository(Protocol):
         """Return the deck's cards, oldest first."""
         ...
 
+    async def list_for_owner(self, owner_id: str) -> list[Card]:
+        """Every card the owner has, oldest first (the card browser)."""
+        ...
+
     async def update(self, card: Card) -> None:
-        """Persist a card change (suspend/unsuspend)."""
+        """Persist a card change (suspend, bury, flag, deck)."""
+        ...
+
+    async def delete(self, card_id: str) -> None:
+        """Delete one card (a cloze deletion removed from its note)."""
         ...
 
     async def delete_for_note(self, note_id: str) -> None:
@@ -221,6 +237,10 @@ class Scheduler(Protocol):
 
 class ScheduleRepository(Protocol):
     async def get(self, card_id: str) -> CardSchedule | None: ...
+
+    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+        """The schedules of these cards, keyed by card id; cards never reviewed are absent."""
+        ...
 
     async def upsert(self, schedule: CardSchedule) -> None: ...
 

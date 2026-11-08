@@ -17,6 +17,7 @@ from flashcards.domain.notes import (
     card_ordinals,
 )
 from flashcards.domain.ports import CardRepository, Clock, NoteRepository
+from flashcards.domain.tags import Tags
 
 
 class NoteService:
@@ -39,7 +40,9 @@ class NoteService:
         deck_id: str,
         note_type: NoteType,
         fields: Mapping[str, str],
+        tags: Tags = (),
     ) -> tuple[Note, list[Card]]:
+        """Create a note and its cards. `tags` must already be normalized."""
         # Raises DeckNotFound if the deck is missing or not the caller's.
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
         field_pairs: Fields = tuple(fields.items())
@@ -53,6 +56,7 @@ class NoteService:
             note_type=note_type,
             fields=field_pairs,
             created_at=now,
+            tags=tags,
         )
         await self._notes.add(note)
         cards = [
