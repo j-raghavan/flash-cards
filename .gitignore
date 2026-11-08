@@ -31,3 +31,6 @@ coverage/
 # Local data
 /data/
 *.sqlite3
+
+# Personal Claude Code settings (not shared)
+.claude/settings.local.json

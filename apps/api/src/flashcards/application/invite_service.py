@@ -33,7 +33,7 @@ class InviteService:
         self._repo = repo
         self._clock = clock
 
-    def create(
+    async def create(
         self,
         *,
         created_by: str,
@@ -54,24 +54,24 @@ class InviteService:
             expires_at=now + ttl,
             email=normalize_email(email) if email else None,
         )
-        self._repo.add(invite)
+        await self._repo.add(invite)
         return CreatedInvite(invite=invite, raw_token=raw_token)
 
-    def redeem(self, raw_token: str, email: str | None = None) -> Invite:
+    async def redeem(self, raw_token: str, email: str | None = None) -> Invite:
         """Consume an invite and return it so the caller can create the user.
 
         Raises a specific InviteError subclass on failure. Callers at the API
         boundary must not reveal which one to the client.
         """
         now = self._clock.now()
-        invite = self._repo.get_by_token_hash(hash_token(raw_token))
+        invite = await self._repo.get_by_token_hash(hash_token(raw_token))
         if invite is None:
             raise InviteNotFound()
         invite.check_redeemable(now, email)
-        if not self._repo.try_redeem(invite.id, now):
+        if not await self._repo.try_redeem(invite.id, now):
             # Lost a race with another signup using the same token.
             raise InviteAlreadyRedeemed(invite.id)
         return invite.with_redeemed(now)
 
-    def revoke(self, invite_id: str) -> bool:
-        return self._repo.try_revoke(invite_id, self._clock.now())
+    async def revoke(self, invite_id: str) -> bool:
+        return await self._repo.try_revoke(invite_id, self._clock.now())
