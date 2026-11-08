@@ -11,20 +11,33 @@ came from. Everything here is pure; fetching a transcript sits behind a port.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
 TRANSCRIPT_MEDIA_TYPE = "application/vnd.flashcards.transcript+json"
 ENVELOPE_PREFIX = b"FLASHCARDS-TRANSCRIPT/1\n"
-# Bound the whole transcript and each generation chunk (roughly two hours of speech
-# fits in the default 20-page cap at this chunk size).
-MAX_TRANSCRIPT_CHARS = 200_000
 CHUNK_CHARS = 6_000
+# The whole transcript must fit the default 20-page generation cap at one chunk per
+# page, so a too-long paste gets a clear "too long" instead of "too many pages".
+MAX_TRANSCRIPT_CHARS = 20 * CHUNK_CHARS
+# The envelope can arrive as an upload, so bound it before parsing: the byte size
+# (generous for 120k chars of escaped JSON), the segment count and the timestamps.
+MAX_ENVELOPE_BYTES = 2_000_000
+MAX_SEGMENTS = 50_000
+MAX_START_SECONDS = 7 * 24 * 3600
 
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
-_YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
-_PATH_PREFIXES = ("/shorts/", "/embed/", "/live/")
+_YOUTUBE_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtube-nocookie.com",
+    "www.youtube-nocookie.com",
+}
+_PATH_PREFIXES = ("/shorts/", "/embed/", "/live/", "/v/")
 
 
 class InvalidVideoUrl(Exception):
@@ -69,7 +82,7 @@ def parse_youtube_video_id(url: str) -> str:
     if host == "youtu.be":
         candidate = parsed.path.lstrip("/").split("/")[0]
     elif host in _YOUTUBE_HOSTS:
-        if parsed.path == "/watch":
+        if parsed.path.rstrip("/") == "/watch":
             candidate = parse_qs(parsed.query).get("v", [""])[0]
         else:
             for prefix in _PATH_PREFIXES:
@@ -90,6 +103,12 @@ def pasted_transcript(text: str) -> Transcript:
 
 
 def validate_transcript(transcript: Transcript) -> None:
+    """Applies to pasted, fetched and uploaded transcripts alike."""
+    if len(transcript.segments) > MAX_SEGMENTS:
+        raise InvalidTranscript(f"the transcript has too many segments (max {MAX_SEGMENTS})")
+    for segment in transcript.segments:
+        if not math.isfinite(segment.start) or not 0 <= segment.start <= MAX_START_SECONDS:
+            raise InvalidTranscript("a transcript timestamp is out of range")
     total = sum(len(segment.text) for segment in transcript.segments)
     if total == 0 or not any(segment.text.strip() for segment in transcript.segments):
         raise InvalidTranscript("the transcript is empty")
@@ -114,9 +133,12 @@ def decode_transcript(data: bytes) -> Transcript:
     """Parse an envelope. The bytes may come from an upload, so validate everything."""
     if not is_transcript_envelope(data):
         raise InvalidTranscript("not a transcript envelope")
+    if len(data) > MAX_ENVELOPE_BYTES:
+        raise InvalidTranscript("the transcript envelope is too large")
     try:
-        body: object = json.loads(data[len(ENVELOPE_PREFIX) :])
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # NaN and Infinity are not JSON; reject them rather than let them through.
+        body: object = json.loads(data[len(ENVELOPE_PREFIX) :], parse_constant=_no_constants)
+    except (ValueError, RecursionError) as exc:  # bad JSON, bad UTF-8, deep nesting
         raise InvalidTranscript("malformed transcript envelope") from exc
     if not isinstance(body, dict):
         raise InvalidTranscript("malformed transcript envelope")
@@ -131,7 +153,7 @@ def decode_transcript(data: bytes) -> Transcript:
         if not isinstance(item, list) or len(item) != 2:
             raise InvalidTranscript("malformed transcript segment")
         start, text = item
-        if isinstance(start, bool) or not isinstance(start, int | float) or start < 0:
+        if isinstance(start, bool) or not isinstance(start, int | float):
             raise InvalidTranscript("malformed transcript segment")
         if not isinstance(text, str):
             raise InvalidTranscript("malformed transcript segment")
@@ -153,7 +175,12 @@ def chunk_transcript(transcript: Transcript, max_chars: int = CHUNK_CHARS) -> li
             TranscriptChunk(index=len(chunks) + 1, start=start, end=end, text=" ".join(parts))
         )
 
-    for segment in transcript.segments:
+    segments = transcript.segments
+    for position, segment in enumerate(segments):
+        # A segment ends where the next one starts; the last one's end is unknown,
+        # so its own start stands in.
+        has_next = position + 1 < len(segments)
+        segment_end = segments[position + 1].start if has_next else segment.start
         for piece in _pieces(segment.text.strip(), max_chars):
             if parts and size + 1 + len(piece) > max_chars:
                 flush()
@@ -162,7 +189,7 @@ def chunk_transcript(transcript: Transcript, max_chars: int = CHUNK_CHARS) -> li
                 start = segment.start
             parts.append(piece)
             size += len(piece) + (1 if size else 0)
-            end = segment.start
+            end = segment_end
     if parts:
         flush()
     return chunks
@@ -176,7 +203,14 @@ def chunk_page_text(transcript: Transcript, chunk: TranscriptChunk) -> str:
 
 
 def _pieces(text: str, max_chars: int) -> list[str]:
-    return [text[i : i + max_chars] for i in range(0, len(text), max_chars)] if text else []
+    # Skip pieces that are only whitespace: they would be charged as a page and sent
+    # to the model as blank text.
+    pieces = (text[i : i + max_chars] for i in range(0, len(text), max_chars))
+    return [piece.strip() for piece in pieces if piece.strip()]
+
+
+def _no_constants(name: str) -> float:
+    raise ValueError(f"non-standard JSON constant {name}")
 
 
 def _clock(seconds: float) -> str:

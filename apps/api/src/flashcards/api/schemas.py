@@ -388,7 +388,7 @@ class YouTubeGenerateRequest(BaseModel):
 class TranscriptGenerateRequest(BaseModel):
     deck_id: str
     # Bounded at the edge; the domain enforces the exact transcript limit.
-    transcript: str = Field(min_length=1, max_length=200_000)
+    transcript: str = Field(min_length=1, max_length=120_000)
     thoroughness: Thoroughness = Thoroughness.STANDARD
 
 

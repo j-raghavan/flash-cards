@@ -20,10 +20,14 @@ parallel pipeline for transcripts would duplicate all of that.
   `TranscriptAwareExtractor` decorates the PDF/image extractor: an envelope is split
   into chunks of at most 6,000 characters, each yielded as a text page; anything else
   goes to the wrapped extractor. Quota, the worker, drafts and approval are unchanged.
-- Each chunk counts as one page for the quota and the 20-page cap, which fits about
-  two hours of speech. The whole transcript is capped at 200,000 characters.
-- The envelope is decoded defensively (it can also arrive through the generic upload
-  route): structure, types, non-negative timestamps and the size cap are all checked.
+- Each chunk counts as one page for the quota and the 20-page cap. The whole
+  transcript is capped at 120,000 characters (20 chunks of 6,000), so a too-long
+  paste gets a clear 422 instead of a "too many pages" error. Whitespace-only chunks
+  are never produced, and a chunk's end time is the start of the segment after it.
+- The envelope is decoded defensively, since it can also arrive through the generic
+  upload route: a 2 MB byte cap before parsing and a 50,000-segment cap after it,
+  no NaN or Infinity, timestamps finite and between 0 and seven days, and malformed
+  or deeply nested JSON rejected as invalid input rather than a server error.
 - Retrieval sits behind a `TranscriptProvider` port. The default adapter,
   `NullTranscriptProvider`, reports every video as having no transcript, so
   `POST /ai/generate/youtube` answers 422 with a pointer to the paste route. No

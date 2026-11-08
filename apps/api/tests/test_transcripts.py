@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import AsyncIterator
 
 import pytest
@@ -12,6 +13,8 @@ from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAw
 from flashcards.domain.sources import ExtractedPage, PageKind, SourceRef, TooManyPages
 from flashcards.domain.transcripts import (
     ENVELOPE_PREFIX,
+    MAX_ENVELOPE_BYTES,
+    MAX_SEGMENTS,
     MAX_TRANSCRIPT_CHARS,
     TRANSCRIPT_MEDIA_TYPE,
     InvalidTranscript,
@@ -42,6 +45,9 @@ VID = "dQw4w9WgXcQ"
         f"https://www.youtube.com/embed/{VID}",
         f"https://www.youtube.com/live/{VID}",
         f"  https://www.youtube.com/watch?v={VID}  ",
+        f"https://www.youtube.com/watch/?v={VID}",
+        f"https://www.youtube-nocookie.com/embed/{VID}",
+        f"https://youtube.com/v/{VID}",
     ],
 )
 def test_parse_youtube_video_id_accepts_known_forms(url: str) -> None:
@@ -87,6 +93,11 @@ def test_envelope_round_trips() -> None:
     assert decode_transcript(data) == transcript
 
 
+def test_encode_rejects_non_finite_provider_timestamps() -> None:
+    with pytest.raises(InvalidTranscript):
+        encode_transcript(Transcript(video_id=VID, segments=(TranscriptSegment(math.nan, "a"),)))
+
+
 def test_encode_rejects_empty_and_too_long() -> None:
     with pytest.raises(InvalidTranscript):
         encode_transcript(Transcript(video_id=None, segments=(TranscriptSegment(0.0, " "),)))
@@ -117,6 +128,12 @@ def _envelope(body: object) -> bytes:
         _envelope({"video_id": None, "segments": [[-1, "a"]]}),
         _envelope({"video_id": None, "segments": [[0, 7]]}),
         _envelope({"video_id": None, "segments": [[0, "   "]]}),
+        ENVELOPE_PREFIX + b'{"video_id": null, "segments": [[NaN, "a"]]}',
+        ENVELOPE_PREFIX + b'{"video_id": null, "segments": [[Infinity, "a"]]}',
+        _envelope({"video_id": None, "segments": [[1e12, "a"]]}),
+        ENVELOPE_PREFIX + b"[" * 100_000,
+        ENVELOPE_PREFIX + b"x" * MAX_ENVELOPE_BYTES,
+        _envelope({"video_id": None, "segments": [[0, "a"]] * (MAX_SEGMENTS + 1)}),
     ],
 )
 def test_decode_rejects_malformed(data: bytes) -> None:
@@ -130,8 +147,16 @@ def test_chunking_groups_segments_and_splits_long_ones() -> None:
     # "aaaa bbbb" fits (9); "cccc" starts a new chunk; the 12-char segment is split.
     assert [c.text for c in chunks] == ["aaaa bbbb", "cccc", "ddddddddd", "ddd ee"]
     assert [c.index for c in chunks] == [1, 2, 3, 4]
-    assert (chunks[0].start, chunks[0].end) == (0.0, 30.0)
+    # A chunk ends where the segment after its last one starts.
+    assert (chunks[0].start, chunks[0].end) == (0.0, 60.0)
     assert (chunks[3].start, chunks[3].end) == (90.0, 150.0)
+
+
+def test_chunking_skips_whitespace_only_pieces() -> None:
+    transcript = Transcript(video_id=None, segments=(TranscriptSegment(0.0, "a" + " " * 20 + "b"),))
+    # The middle 9-char window is all spaces: it must not become a blank chunk, and
+    # the trimmed pieces around it pack together.
+    assert [c.text for c in chunk_transcript(transcript, max_chars=9)] == ["a b"]
 
 
 def test_chunking_an_empty_transcript_yields_no_chunks() -> None:

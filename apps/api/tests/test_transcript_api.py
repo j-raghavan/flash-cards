@@ -95,14 +95,14 @@ def test_blank_transcript_is_422(app: FastAPI) -> None:
     assert resp.status_code == 422
 
 
-def test_transcript_over_the_page_cap_is_413(app: FastAPI) -> None:
+def test_transcript_over_the_size_cap_is_422(app: FastAPI) -> None:
     client = _member(app)
-    # ~25 chunks at 6,000 chars each exceeds the 20-page cap.
+    # Over the 120,000-char cap that keeps a paste within the 20-page limit.
     resp = client.post(
         "/ai/generate/transcript",
         json={"deck_id": _deck(client), "transcript": "word " * 30_000},
     )
-    assert resp.status_code == 413
+    assert resp.status_code == 422
 
 
 def test_transcript_unknown_deck_is_404(app: FastAPI) -> None:
