@@ -13,6 +13,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
@@ -291,6 +292,21 @@ class QuotaRepository(Protocol):
     async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
         """Atomically reserve pages against the owner's limit; True if within it."""
         ...
+
+
+class MediaTypeSniffer(Protocol):
+    def sniff(self, data: bytes) -> str:
+        """Return the media content type from the bytes, or raise UnsupportedMedia.
+
+        The declared Content-Type and filename are never trusted.
+        """
+        ...
+
+
+class MediaRepository(Protocol):
+    async def add(self, asset: MediaAsset) -> None: ...
+
+    async def get(self, media_id: str) -> MediaAsset | None: ...
 
 
 class PackageReader(Protocol):

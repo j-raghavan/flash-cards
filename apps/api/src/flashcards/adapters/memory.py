@@ -15,6 +15,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.media import MediaAsset
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -334,3 +335,14 @@ class InMemoryGoalRepository:
 
     async def delete(self, goal_id: str) -> None:
         self._by_id.pop(goal_id, None)
+
+
+class InMemoryMediaRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, MediaAsset] = {}
+
+    async def add(self, asset: MediaAsset) -> None:
+        self._by_id[asset.id] = asset
+
+    async def get(self, media_id: str) -> MediaAsset | None:
+        return self._by_id.get(media_id)
