@@ -280,6 +280,22 @@ async def test_delete_note_removes_its_cards(
     assert await service.list_cards(owner_id=ALICE, deck_id=deck_id) == []
 
 
+async def test_get_foreign_or_missing_note_is_not_found(
+    service: NoteService, decks: DeckService
+) -> None:
+    bob_deck = await _deck(decks, owner=BOB)
+    note, _ = await service.create_note(
+        owner_id=BOB,
+        deck_id=bob_deck,
+        note_type=NoteType.BASIC,
+        fields={"front": "Q", "back": "A"},
+    )
+    with pytest.raises(NoteNotFound):
+        await service.get_note(owner_id=ALICE, note_id=note.id)
+    with pytest.raises(NoteNotFound):
+        await service.get_note(owner_id=ALICE, note_id="ghost")
+
+
 async def test_delete_foreign_note_is_not_found(
     service: NoteService, decks: DeckService
 ) -> None:

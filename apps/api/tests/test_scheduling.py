@@ -233,3 +233,89 @@ async def test_same_key_across_owners_both_apply(
     )
     await reviews.submit(owner_id=BOB, card_id=bob_card, rating=Rating.GOOD, idempotency_key="k")
     assert len(logs._logs) == 2
+
+
+async def test_deck_stats_counts_each_card_state(
+    reviews: ReviewService,
+    notes: NoteService,
+    schedules: InMemoryScheduleRepository,
+) -> None:
+    deck = await notes._decks.create(owner_id=ALICE, name="D")
+
+    async def make_card(front: str) -> str:
+        _, cards = await notes.create_note(
+            owner_id=ALICE,
+            deck_id=deck.id,
+            note_type=NoteType.BASIC,
+            fields={"front": front, "back": "A"},
+        )
+        return cards[0].id
+
+    _c_new = await make_card("new")
+    c_learning = await make_card("learning")
+    c_review = await make_card("review")
+    c_mature = await make_card("mature")
+    c_suspended = await make_card("suspended")
+
+    await schedules.upsert(
+        CardSchedule(
+            card_id=c_learning,
+            state=ScheduleState.LEARNING,
+            step=0,
+            stability=None,
+            difficulty=None,
+            due_at=START,
+            last_reviewed_at=None,
+        )
+    )
+    await schedules.upsert(
+        CardSchedule(
+            card_id=c_review,
+            state=ScheduleState.REVIEW,
+            step=None,
+            stability=5.0,
+            difficulty=5.0,
+            due_at=START + timedelta(days=5),
+            last_reviewed_at=START,
+        )
+    )
+    await schedules.upsert(
+        CardSchedule(
+            card_id=c_mature,
+            state=ScheduleState.REVIEW,
+            step=None,
+            stability=50.0,
+            difficulty=5.0,
+            due_at=START,
+            last_reviewed_at=START - timedelta(days=30),
+        )
+    )
+    await notes.suspend_card(owner_id=ALICE, card_id=c_suspended)
+
+    stats = await reviews.deck_stats(owner_id=ALICE, deck_id=deck.id)
+    assert stats.total == 5
+    assert stats.new == 1
+    assert stats.learning == 1
+    assert stats.review == 1
+    assert stats.mature == 1
+    assert stats.suspended == 1
+    # Due today: new + learning + mature (the review card is due in 5 days).
+    assert stats.due == 3
+    # (review + mature) / (total - suspended) = 2 / 4
+    assert stats.proficiency == 50
+
+
+async def test_deck_stats_proficiency_zero_when_all_suspended(
+    reviews: ReviewService, notes: NoteService
+) -> None:
+    deck = await notes._decks.create(owner_id=ALICE, name="D")
+    _, cards = await notes.create_note(
+        owner_id=ALICE,
+        deck_id=deck.id,
+        note_type=NoteType.BASIC,
+        fields={"front": "Q", "back": "A"},
+    )
+    await notes.suspend_card(owner_id=ALICE, card_id=cards[0].id)
+    stats = await reviews.deck_stats(owner_id=ALICE, deck_id=deck.id)
+    assert stats.proficiency == 0
+    assert stats.suspended == 1

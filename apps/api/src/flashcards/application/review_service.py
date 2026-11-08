@@ -9,7 +9,7 @@ a client-supplied key so a retry never double-counts a review (NF-REL-1).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flashcards.application.note_service import NoteService
 from flashcards.domain.notes import Card
@@ -19,7 +19,15 @@ from flashcards.domain.ports import (
     Scheduler,
     ScheduleRepository,
 )
-from flashcards.domain.scheduling import CardSchedule, DuplicateReview, Rating, ReviewLog
+from flashcards.domain.scheduling import (
+    MATURE_DAYS,
+    CardSchedule,
+    DeckStats,
+    DuplicateReview,
+    Rating,
+    ReviewLog,
+    ScheduleState,
+)
 
 
 class ReviewService:
@@ -82,6 +90,47 @@ class ReviewService:
             if schedule is None or schedule.due_at <= now:
                 due.append(card)
         return due[:limit]
+
+    async def deck_stats(self, *, owner_id: str, deck_id: str) -> DeckStats:
+        # Raises DeckNotFound if the deck is missing or not the caller's.
+        cards = await self._notes.list_cards(owner_id=owner_id, deck_id=deck_id)
+        now = self._clock.now()
+        mature_after = timedelta(days=MATURE_DAYS)
+
+        total = len(cards)
+        new = learning = review = mature = suspended = due = 0
+        for card in cards:
+            if card.is_suspended:
+                suspended += 1
+                continue
+            schedule = await self._schedules.get(card.id)
+            if schedule is None:
+                new += 1
+                due += 1
+                continue
+            if schedule.due_at <= now:
+                due += 1
+            if schedule.state in (ScheduleState.LEARNING, ScheduleState.RELEARNING):
+                learning += 1
+            elif schedule.last_reviewed_at is not None and (
+                schedule.due_at - schedule.last_reviewed_at >= mature_after
+            ):
+                mature += 1
+            else:
+                review += 1
+
+        active = total - suspended
+        proficiency = round(100 * (review + mature) / active) if active else 0
+        return DeckStats(
+            total=total,
+            new=new,
+            learning=learning,
+            review=review,
+            mature=mature,
+            suspended=suspended,
+            due=due,
+            proficiency=proficiency,
+        )
 
     async def _current_schedule(self, card_id: str, now: datetime) -> CardSchedule:
         existing = await self._schedules.get(card_id)

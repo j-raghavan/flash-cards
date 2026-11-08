@@ -45,6 +45,21 @@ class CardSchedule:
     last_reviewed_at: datetime | None
 
 
+MATURE_DAYS = 21
+
+
+@dataclass(frozen=True, slots=True)
+class DeckStats:
+    total: int
+    new: int
+    learning: int
+    review: int
+    mature: int
+    suspended: int
+    due: int
+    proficiency: int  # percent of non-suspended cards that have graduated (review + mature)
+
+
 @dataclass(frozen=True, slots=True)
 class ReviewLog:
     id: str

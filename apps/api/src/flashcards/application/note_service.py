@@ -80,6 +80,12 @@ class NoteService:
             raise CardNotFound(card_id)
         return card
 
+    async def get_note(self, *, owner_id: str, note_id: str) -> Note:
+        note = await self._notes.get(note_id)
+        if note is None or note.owner_id != owner_id:
+            raise NoteNotFound(note_id)
+        return note
+
     async def suspend_card(self, *, owner_id: str, card_id: str) -> Card:
         card = await self.get_card(owner_id=owner_id, card_id=card_id)
         suspended = card.suspended(self._clock.now())
