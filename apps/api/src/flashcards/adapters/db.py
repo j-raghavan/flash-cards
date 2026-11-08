@@ -9,7 +9,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -18,8 +28,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite, Role
+from flashcards.domain.jobs import AiJob, JobStatus, JobType
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import CardSchedule, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
@@ -314,6 +326,120 @@ def review_log_to_row(log: ReviewLog) -> ReviewLogRow:
         rating=int(log.rating),
         reviewed_at=log.reviewed_at,
         idempotency_key=log.idempotency_key,
+    )
+
+
+class AiJobRow(Base):
+    __tablename__ = "ai_jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    type: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, index=True)
+    source_id: Mapped[str] = mapped_column(String)
+    draft_deck_id: Mapped[str] = mapped_column(String)
+    thoroughness: Mapped[str] = mapped_column(String)
+    total_units: Mapped[int] = mapped_column(Integer)
+    completed_units: Mapped[int] = mapped_column(Integer)
+    attempt: Mapped[int] = mapped_column(Integer)
+    max_attempts: Mapped[int] = mapped_column(Integer)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DraftCardRow(Base):
+    __tablename__ = "draft_cards"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        String, ForeignKey("ai_jobs.id", ondelete="CASCADE"), index=True
+    )
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    note_type: Mapped[str] = mapped_column(String)
+    fields: Mapped[dict[str, str]] = mapped_column(JSON)
+    source_page: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AiBlobRow(Base):
+    __tablename__ = "ai_blobs"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    content_type: Mapped[str] = mapped_column(String)
+
+
+class AiQuotaRow(Base):
+    __tablename__ = "ai_quota"
+
+    owner_id: Mapped[str] = mapped_column(String, primary_key=True)
+    period: Mapped[str] = mapped_column(String, primary_key=True)
+    used_pages: Mapped[int] = mapped_column(Integer)
+
+
+def aijob_to_row(job: AiJob) -> AiJobRow:
+    return AiJobRow(
+        id=job.id,
+        owner_id=job.owner_id,
+        type=job.type.value,
+        status=job.status.value,
+        source_id=job.source_id,
+        draft_deck_id=job.draft_deck_id,
+        thoroughness=job.thoroughness.value,
+        total_units=job.total_units,
+        completed_units=job.completed_units,
+        attempt=job.attempt,
+        max_attempts=job.max_attempts,
+        cancel_requested=job.cancel_requested,
+        error=job.error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+def aijob_from_row(row: AiJobRow) -> AiJob:
+    return AiJob(
+        id=row.id,
+        owner_id=row.owner_id,
+        type=JobType(row.type),
+        status=JobStatus(row.status),
+        source_id=row.source_id,
+        draft_deck_id=row.draft_deck_id,
+        thoroughness=Thoroughness(row.thoroughness),
+        total_units=row.total_units,
+        completed_units=row.completed_units,
+        attempt=row.attempt,
+        max_attempts=row.max_attempts,
+        cancel_requested=row.cancel_requested,
+        error=row.error,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def draft_to_row(record: DraftCardRecord) -> DraftCardRow:
+    return DraftCardRow(
+        id=record.id,
+        job_id=record.job_id,
+        owner_id=record.owner_id,
+        note_type=record.note_type.value,
+        fields=dict(record.fields),
+        source_page=record.source_page,
+        created_at=record.created_at,
+    )
+
+
+def draft_from_row(row: DraftCardRow) -> DraftCardRecord:
+    return DraftCardRecord(
+        id=row.id,
+        job_id=row.job_id,
+        owner_id=row.owner_id,
+        note_type=NoteType(row.note_type),
+        fields=tuple(row.fields.items()),
+        source_page=row.source_page,
+        created_at=row.created_at,
     )
 
 

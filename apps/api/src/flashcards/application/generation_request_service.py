@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Starting and cancelling an AI generation job (F-AI-1, F-AI-10, F-AI-11)."""
+
+from __future__ import annotations
+
+import uuid
+
+from flashcards.application.deck_service import DeckService
+from flashcards.domain.ai import Thoroughness
+from flashcards.domain.jobs import AiJob, JobNotFound, new_generation_job
+from flashcards.domain.ports import (
+    AiJobRepository,
+    Clock,
+    DocumentExtractor,
+    JobQueue,
+    ObjectStore,
+    QuotaRepository,
+)
+from flashcards.domain.quotas import QuotaExceeded, billing_period
+from flashcards.domain.sources import TooManyPages
+
+
+class GenerationRequestService:
+    def __init__(
+        self,
+        decks: DeckService,
+        extractor: DocumentExtractor,
+        store: ObjectStore,
+        quotas: QuotaRepository,
+        jobs: AiJobRepository,
+        queue: JobQueue,
+        clock: Clock,
+        max_pages: int = 20,
+    ) -> None:
+        self._decks = decks
+        self._extractor = extractor
+        self._store = store
+        self._quotas = quotas
+        self._jobs = jobs
+        self._queue = queue
+        self._clock = clock
+        self._max_pages = max_pages
+
+    async def start(
+        self, *, owner_id: str, deck_id: str, data: bytes, thoroughness: Thoroughness
+    ) -> AiJob:
+        """Validate and enqueue a generation job; raises before spending quota on bad input."""
+        # Raises DeckNotFound if the deck is missing or not the caller's; the drafts
+        # are approved into this deck later (F-AI-4).
+        await self._decks.get(owner_id=owner_id, deck_id=deck_id)
+        # Raises UnsupportedMediaType on a disallowed type.
+        media = self._extractor.sniff(data)
+        pages = self._extractor.count_pages(data)
+        if pages > self._max_pages:
+            raise TooManyPages(f"{pages} pages (max {self._max_pages})")
+
+        now = self._clock.now()
+        if not await self._quotas.try_reserve_pages(owner_id, pages, billing_period(now)):
+            raise QuotaExceeded(f"{pages} pages exceeds the remaining quota")
+
+        source_id = str(uuid.uuid4())
+        await self._store.put(source_id, data, media)
+        job = new_generation_job(
+            owner_id=owner_id,
+            source_id=source_id,
+            draft_deck_id=deck_id,
+            thoroughness=thoroughness,
+            now=now,
+        )
+        await self._jobs.add(job)
+        await self._queue.enqueue(job.id)
+        return job
+
+    async def get(self, *, owner_id: str, job_id: str) -> AiJob:
+        job = await self._jobs.get(job_id)
+        if job is None or job.owner_id != owner_id:
+            raise JobNotFound(job_id)
+        return job
+
+    async def cancel(self, *, owner_id: str, job_id: str) -> None:
+        await self.get(owner_id=owner_id, job_id=job_id)  # ownership check
+        await self._jobs.request_cancel(job_id, self._clock.now())

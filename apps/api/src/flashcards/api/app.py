@@ -14,11 +14,16 @@ from fastapi.responses import JSONResponse
 from flashcards import __version__
 from flashcards.api.container import Container
 from flashcards.api.provider import in_memory_provider, sql_provider
-from flashcards.api.routers import admin, auth, cards, decks, review
+from flashcards.api.routers import admin, ai, auth, cards, decks, review
 from flashcards.config import Settings
+from flashcards.domain.ai import DraftNotFound
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.invites import Role
+from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
+from flashcards.domain.ports import LLMProvider
+from flashcards.domain.quotas import QuotaExceeded
+from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 
 logger = logging.getLogger("flashcards")
 
@@ -41,26 +46,51 @@ def _register_error_handlers(app: FastAPI) -> None:
             content={"detail": "A deck cannot be moved under itself or a descendant."},
         )
 
-    for not_found_error in (DeckNotFound, CardNotFound, NoteNotFound):
+    async def quota_exceeded(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=429, content={"detail": "AI page quota exceeded for this period."}
+        )
+
+    async def unsupported_media(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=415, content={"detail": "Unsupported file type."})
+
+    async def too_large(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=413, content={"detail": "The document has too many pages."}
+        )
+
+    for not_found_error in (DeckNotFound, CardNotFound, NoteNotFound, JobNotFound, DraftNotFound):
         app.add_exception_handler(not_found_error, not_found)
     app.add_exception_handler(InvalidDeckName, invalid_deck_name)
     app.add_exception_handler(InvalidNote, invalid_note)
     app.add_exception_handler(DeckCycle, conflict)
+    app.add_exception_handler(QuotaExceeded, quota_exceeded)
+    app.add_exception_handler(UnsupportedMediaType, unsupported_media)
+    app.add_exception_handler(TooManyPages, too_large)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = None) -> FastAPI:
     settings = settings or Settings()
+    configured_llm = llm if llm is not None else _llm_from_settings(settings)
 
     if settings.database_url:
-        engine, provider = sql_provider(settings.database_url)
+        engine, provider, job_queue = sql_provider(settings.database_url, llm=configured_llm)
         container = None
     else:
-        container, provider = in_memory_provider()
+        container, provider, job_queue = in_memory_provider(llm=configured_llm)
         engine = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        async def process(job_id: str) -> None:
+            # A fresh unit of work per job: in SQL mode this is its own session
+            # and transaction, committed when generation completes.
+            async for request_container in provider():
+                await request_container.card_generation.run(job_id)
+
+        job_queue.start(process)
         yield
+        await job_queue.stop()
         if engine is not None:
             await engine.dispose()
 
@@ -84,12 +114,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(decks.router)
     app.include_router(cards.router)
     app.include_router(review.router)
+    app.include_router(ai.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
     return app
+
+
+def _llm_from_settings(settings: Settings) -> LLMProvider:
+    """The real Anthropic provider when a key is configured, else a refusing stub."""
+    if settings.anthropic_api_key:
+        from flashcards.adapters.anthropic_llm import AnthropicLLMProvider
+
+        return AnthropicLLMProvider(
+            api_key=settings.anthropic_api_key, model=settings.anthropic_model
+        )
+    from flashcards.adapters.llm import NullLLMProvider
+
+    return NullLLMProvider()
 
 
 def _maybe_bootstrap_invite(settings: Settings, container: Container | None) -> str | None:

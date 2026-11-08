@@ -26,6 +26,10 @@ APP_TABLES = {
     "cards",
     "card_schedule",
     "review_logs",
+    "ai_jobs",
+    "draft_cards",
+    "ai_blobs",
+    "ai_quota",
 }
 
 

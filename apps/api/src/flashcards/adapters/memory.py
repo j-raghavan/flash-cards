@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
+from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
@@ -196,3 +199,93 @@ class InMemoryReviewLogRepository:
 
     async def delete_for_card(self, card_id: str) -> None:
         self._logs = [log for log in self._logs if log.card_id != card_id]
+
+
+class InMemoryObjectStore:
+    def __init__(self) -> None:
+        self._blobs: dict[str, bytes] = {}
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        self._blobs[key] = data
+
+    async def get(self, key: str) -> bytes | None:
+        return self._blobs.get(key)
+
+    async def delete(self, key: str) -> None:
+        self._blobs.pop(key, None)
+
+
+class InMemoryAiJobRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, AiJob] = {}
+
+    async def add(self, job: AiJob) -> None:
+        self._by_id[job.id] = job
+
+    async def get(self, job_id: str) -> AiJob | None:
+        return self._by_id.get(job_id)
+
+    async def update(self, job: AiJob) -> None:
+        self._by_id[job.id] = job
+
+    async def try_claim(self, job_id: str, now: datetime) -> AiJob | None:
+        job = self._by_id.get(job_id)
+        if job is None or job.status is not JobStatus.QUEUED:
+            return None
+        claimed = job.started(now)
+        self._by_id[job_id] = claimed
+        return claimed
+
+    async def request_cancel(self, job_id: str, now: datetime) -> bool:
+        job = self._by_id.get(job_id)
+        if job is None or job.is_terminal or job.cancel_requested:
+            return False
+        self._by_id[job_id] = job.with_cancel_requested(now)
+        return True
+
+    async def list_running(self) -> list[AiJob]:
+        return [j for j in self._by_id.values() if j.status is JobStatus.RUNNING]
+
+
+class InMemoryDraftCardRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, DraftCardRecord] = {}
+
+    async def add(self, record: DraftCardRecord) -> None:
+        self._by_id[record.id] = record
+
+    async def get(self, record_id: str) -> DraftCardRecord | None:
+        return self._by_id.get(record_id)
+
+    async def list_for_job(self, job_id: str) -> list[DraftCardRecord]:
+        records = [r for r in self._by_id.values() if r.job_id == job_id]
+        return sorted(records, key=lambda r: (r.created_at, r.source_page))
+
+    async def delete(self, record_id: str) -> None:
+        self._by_id.pop(record_id, None)
+
+    async def delete_for_job(self, job_id: str) -> None:
+        for record_id in [r.id for r in self._by_id.values() if r.job_id == job_id]:
+            del self._by_id[record_id]
+
+
+class InMemoryJobQueue:
+    def __init__(self) -> None:
+        self.enqueued: list[str] = []
+
+    async def enqueue(self, job_id: str) -> None:
+        self.enqueued.append(job_id)
+
+
+class InMemoryQuotaRepository:
+    def __init__(self, limit: int = DEFAULT_MONTHLY_PAGES) -> None:
+        self._limit = limit
+        self._used: dict[tuple[str, str], int] = {}
+
+    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+        key = (owner_id, period)
+        used = self._used.get(key, 0)
+        if used + pages > self._limit:
+            return False
+        self._used[key] = used + pages
+        return True

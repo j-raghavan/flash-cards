@@ -3,15 +3,31 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Protocol
 
+from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
+from flashcards.domain.jobs import AiJob
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
+from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.users import User
+
+
+class LLMProvider(Protocol):
+    async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
+        """Return JSON matching request.schema.
+
+        Implementations MUST pass request.documents as model data content (never
+        concatenated into request.instructions), declare no tools, constrain the
+        output to request.schema, and validate the parsed JSON (raising
+        flashcards.domain.ai.LlmError on transport or validation failure).
+        """
+        ...
 
 
 class Clock(Protocol):
@@ -167,4 +183,85 @@ class ReviewLogRepository(Protocol):
 
     async def delete_for_card(self, card_id: str) -> None:
         """Delete every review log for a card."""
+        ...
+
+
+class DocumentExtractor(Protocol):
+    def sniff(self, data: bytes) -> str:
+        """Return the real media type from content bytes, or raise UnsupportedMediaType.
+
+        The declared Content-Type and filename are never trusted.
+        """
+        ...
+
+    def count_pages(self, data: bytes) -> int:
+        """Return the page count cheaply (images are one page), for quota reservation."""
+        ...
+
+    def extract(
+        self, data: bytes, *, file_id: str, max_pages: int
+    ) -> AsyncIterator[ExtractedPage]:
+        """Yield one normalized page at a time (peak memory ~ one page).
+
+        Raise flashcards.domain.sources.TooManyPages when the real page count
+        exceeds max_pages, and never execute embedded content.
+        """
+        ...
+
+
+class ObjectStore(Protocol):
+    async def put(self, key: str, data: bytes, content_type: str) -> None: ...
+
+    async def get(self, key: str) -> bytes | None: ...
+
+    async def delete(self, key: str) -> None: ...
+
+
+class AiJobRepository(Protocol):
+    async def add(self, job: AiJob) -> None: ...
+
+    async def get(self, job_id: str) -> AiJob | None: ...
+
+    async def update(self, job: AiJob) -> None: ...
+
+    async def try_claim(self, job_id: str, now: datetime) -> AiJob | None:
+        """Atomically move a QUEUED job to RUNNING and return it; None if not claimable.
+
+        Only the single caller that wins the transition gets the job back, so a
+        job is never processed twice.
+        """
+        ...
+
+    async def request_cancel(self, job_id: str, now: datetime) -> bool:
+        """Flag a non-terminal job for cancellation; return whether it changed."""
+        ...
+
+    async def list_running(self) -> list[AiJob]:
+        """Jobs left RUNNING (e.g. by a crash), for boot-time requeue."""
+        ...
+
+
+class DraftCardRepository(Protocol):
+    async def add(self, record: DraftCardRecord) -> None: ...
+
+    async def get(self, record_id: str) -> DraftCardRecord | None: ...
+
+    async def list_for_job(self, job_id: str) -> list[DraftCardRecord]:
+        """Return a job's draft cards, oldest first."""
+        ...
+
+    async def delete(self, record_id: str) -> None: ...
+
+    async def delete_for_job(self, job_id: str) -> None: ...
+
+
+class JobQueue(Protocol):
+    async def enqueue(self, job_id: str) -> None:
+        """Hand a job id to the worker to be processed (idempotent)."""
+        ...
+
+
+class QuotaRepository(Protocol):
+    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+        """Atomically reserve pages against the owner's limit; True if within it."""
         ...

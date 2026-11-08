@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 license = { text = "AGPL-3.0-only" }
 dependencies = [
   "fastapi>=0.115",
+  "python-multipart>=0.0.9",
   "uvicorn>=0.30",
   "pydantic-settings>=2.4",
   "argon2-cffi>=23.1",
@@ -17,6 +18,9 @@ dependencies = [
   "asyncpg>=0.29",
   "alembic>=1.13",
   "fsrs>=6,<7",
+  "pymupdf>=1.24",
+  "puremagic>=2.1",
+  "anthropic>=2.6,<3",
 ]
 
 [project.scripts]
@@ -89,7 +93,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S", "SIM"]
+# ANN401 bans the literal typing.Any in annotations (project rule: strongly typed,
+# never Any). It is syntactic, so it never trips on Pydantic/FastAPI machinery.
+select = ["E", "F", "I", "UP", "B", "S", "SIM", "ANN401"]
 
 # FastAPI's dependency/parameter markers are meant to be called in argument
 # defaults, so they are not the mutable-default footgun B008 warns about.
@@ -115,3 +121,10 @@ extend-immutable-calls = [
 strict = true
 python_version = "3.12"
 mypy_path = "src"
+
+# PyMuPDF ships py.typed but with incomplete annotations (many Any/untyped
+# callables); treat it as untyped so strict's no-untyped-call does not fire on it.
+[[tool.mypy.overrides]]
+module = ["pymupdf.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true

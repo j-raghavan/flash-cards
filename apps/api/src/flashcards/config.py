@@ -20,3 +20,7 @@ class Settings(BaseSettings):
     dev_bootstrap_invite: bool = False
     # SQLAlchemy async URL (postgresql+asyncpg://...). Unset means in-memory mode.
     database_url: str | None = None
+    # AI generation backend. With no key the server wires a provider that refuses,
+    # so generation jobs fail cleanly instead of pretending to work.
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-opus-5-5"
