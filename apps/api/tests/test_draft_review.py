@@ -104,6 +104,12 @@ async def test_approve_a_subset_keeps_the_rest(fx: _Fixture) -> None:
     assert [d.id for d in remaining] == [drafts[1].id]
 
 
+async def test_delete_for_job_clears_all_drafts(fx: _Fixture) -> None:
+    job = await fx.job_with_drafts()
+    await fx.drafts.delete_for_job(job.id)
+    assert await fx.drafts.list_for_job(job.id) == []
+
+
 async def test_approve_foreign_job_is_not_found(fx: _Fixture) -> None:
     job = await fx.job_with_drafts()
     with pytest.raises(JobNotFound):
