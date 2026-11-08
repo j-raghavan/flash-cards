@@ -41,5 +41,12 @@ A vector-only design would leave document chat broken in the default configurati
   compatible later step: passages are already stored and can be embedded in place.
 - Image-only (scanned) pages are not searchable until their text is captured, for
   example by storing the vision model's transcription during card generation.
-- Chat answers do not count against the AI page quota, same as summaries and
-  AI-evaluation; a token-based spend cap (F-AI-11) would cover all of them.
+- Each chat answer that reaches the model is charged against the daily per-user
+  AI-call budget shared with summaries, mock exams and AI-evaluation, and the
+  synchronous AI routes share a small concurrency limit so slow model calls cannot
+  take every database connection.
+- Indexing runs inside the first chat request for a deck, and the extractor still
+  rasterizes image-only pages that chat then discards. Moving indexing into the
+  generation worker and adding a text-only extraction mode are deferred; each source
+  is capped at 2,000 passages and an unreadable source is recorded and skipped, so
+  the cost is bounded meanwhile.
