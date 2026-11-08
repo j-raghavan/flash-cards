@@ -51,4 +51,5 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_sender: str = "Flash-Cards <no-reply@localhost>"
-    smtp_starttls: bool = True
+    # "starttls" (port 587), "ssl" (port 465) or "none" (a local relay only; no login).
+    smtp_security: Literal["starttls", "ssl", "none"] = "starttls"

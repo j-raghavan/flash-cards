@@ -31,6 +31,7 @@ from flashcards.domain.ports import (
 from flashcards.domain.user_tokens import (
     PASSWORD_RESET_TTL,
     RESET_COOLDOWN,
+    VERIFICATION_COOLDOWN,
     VERIFICATION_TTL,
     InvalidUserToken,
     TokenPurpose,
@@ -64,11 +65,13 @@ class AccountEmailService:
         self._base_url = base_url.rstrip("/")
 
     async def verification_email(self, user: User) -> OutgoingEmail | None:
-        """A fresh verification email for `user`, or None when already verified."""
-        if user.is_verified:
+        """A fresh verification email, or None when verified or within the cooldown."""
+        if user.is_verified or await self._cooling_down(
+            user, TokenPurpose.EMAIL_VERIFICATION, VERIFICATION_COOLDOWN
+        ):
             return None
         raw = await self._issue(user, TokenPurpose.EMAIL_VERIFICATION, VERIFICATION_TTL)
-        link = f"{self._base_url}/verify-email?token={quote(raw)}"
+        link = self._link("verify-email", raw)
         return OutgoingEmail(
             to=user.email,
             subject="Confirm your email address",
@@ -99,12 +102,11 @@ class AccountEmailService:
         user = await self._users.get_by_email(normalize_email(email))
         if user is None or user.status() is UserStatus.SUSPENDED:
             return None
-        latest = await self._tokens.latest_for_user(user.id, TokenPurpose.PASSWORD_RESET)
-        if latest is not None and self._clock.now() - latest.created_at < RESET_COOLDOWN:
+        if await self._cooling_down(user, TokenPurpose.PASSWORD_RESET, RESET_COOLDOWN):
             return None
         raw = await self._issue(user, TokenPurpose.PASSWORD_RESET, PASSWORD_RESET_TTL)
         await self._audit.record(AuditAction.PASSWORD_RESET_REQUESTED, target_id=user.id)
-        link = f"{self._base_url}/reset-password?token={quote(raw)}"
+        link = self._link("reset-password", raw)
         return OutgoingEmail(
             to=user.email,
             subject="Reset your password",
@@ -128,6 +130,15 @@ class AccountEmailService:
         await self._audit.record(
             AuditAction.PASSWORD_RESET_COMPLETED, actor_id=user.id, target_id=user.id
         )
+
+    def _link(self, page: str, raw_token: str) -> str:
+        # The token rides in the fragment, which browsers never send to a server, so
+        # it stays out of access logs and Referer headers; the web client reads it.
+        return f"{self._base_url}/{page}#token={quote(raw_token)}"
+
+    async def _cooling_down(self, user: User, purpose: TokenPurpose, cooldown: timedelta) -> bool:
+        latest = await self._tokens.latest_for_user(user.id, purpose)
+        return latest is not None and self._clock.now() - latest.created_at < cooldown
 
     async def _issue(self, user: User, purpose: TokenPurpose, ttl: timedelta) -> str:
         now = self._clock.now()

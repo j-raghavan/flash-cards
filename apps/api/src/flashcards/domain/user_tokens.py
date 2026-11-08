@@ -14,9 +14,10 @@ from datetime import datetime, timedelta
 
 VERIFICATION_TTL = timedelta(hours=48)
 PASSWORD_RESET_TTL = timedelta(hours=1)
-# A new reset email is not sent within this long of the previous one, so the form
-# cannot be used to flood someone's inbox.
+# A new email of the same kind is not sent within this long of the previous one,
+# so neither form can be used to flood someone's inbox.
 RESET_COOLDOWN = timedelta(minutes=1)
+VERIFICATION_COOLDOWN = timedelta(minutes=1)
 
 
 class TokenPurpose(enum.StrEnum):

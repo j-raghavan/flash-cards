@@ -35,6 +35,13 @@ def test_validate_email_normalizes_case_and_whitespace() -> None:
 
 
 @pytest.mark.parametrize(
+    "good", ["first.last+tag@example.co.uk", "o'neil@mail.example.org", "x_1-2@a-b.io"]
+)
+def test_validate_email_accepts_ordinary_addresses(good: str) -> None:
+    assert validate_email(good) == good
+
+
+@pytest.mark.parametrize(
     "bad",
     [
         "no-at-sign.com",
@@ -43,6 +50,24 @@ def test_validate_email_normalizes_case_and_whitespace() -> None:
         "person@.leadingdot.com",
         "person@trailingdot.",
         "person@double..dot.com",
+        # Could add a recipient or a header to an email.
+        "a@example.com,b@example.com",
+        "a@example.com b@example.com",
+        "a@example.com\r\nBcc: b@example.com",
+        "Name <a@example.com>",
+        '"quoted"@example.com',
+        "a@b@example.com",
+        # Out of the plain address shape or its length limits.
+        ".dot@example.com",
+        "dot.@example.com",
+        "a..b@example.com",
+        "person@-dash.com",
+        "person@example.c",
+        "person@example.123",
+        "p\u00e9rson@example.com",
+        "a" * 65 + "@example.com",
+        "a@" + "b" * 64 + ".com",
+        "a@" + ("b" * 60 + ".") * 5 + "com",  # 310 characters
     ],
 )
 def test_validate_email_rejects_malformed(bad: str) -> None:

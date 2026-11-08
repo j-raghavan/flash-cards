@@ -216,6 +216,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     configured_llm = llm if llm is not None else _llm_from_settings(settings)
 
     mailer = _mailer_from_settings(settings)
+    _warn_on_local_links(settings)
     if settings.database_url:
         engine, provider, job_queue = sql_provider(
             settings.database_url,
@@ -322,11 +323,20 @@ def _mailer_from_settings(settings: Settings) -> Mailer:
             sender=settings.smtp_sender,
             username=settings.smtp_username,
             password=settings.smtp_password,
-            starttls=settings.smtp_starttls,
+            security=settings.smtp_security,
         )
     if settings.environment != "development":
         logger.warning("No SMTP server configured; verification and reset emails are not sent.")
     return LogMailer(show_content=settings.environment == "development")
+
+
+def _warn_on_local_links(settings: Settings) -> None:
+    """Emails would carry links nobody outside this machine can open."""
+    if settings.environment != "development" and "localhost" in settings.public_base_url:
+        logger.warning(
+            "FLASHCARDS_PUBLIC_BASE_URL is %s; links in emails will not work for users.",
+            settings.public_base_url,
+        )
 
 
 @runtime_checkable

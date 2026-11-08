@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
@@ -34,6 +35,7 @@ from flashcards.domain.sessions import Session
 from flashcards.domain.user_tokens import (
     PASSWORD_RESET_TTL,
     RESET_COOLDOWN,
+    VERIFICATION_COOLDOWN,
     VERIFICATION_TTL,
     InvalidUserToken,
     TokenPurpose,
@@ -67,7 +69,9 @@ class _Hasher:
 
 def _token_from(email: OutgoingEmail) -> str:
     link = next(word for word in email.body.split() if word.startswith("http"))
-    return parse_qs(urlparse(link).query)["token"][0]
+    parsed = urlparse(link)
+    assert parsed.query == ""  # the token never goes to a server in the query string
+    return parse_qs(parsed.fragment)["token"][0]
 
 
 def test_tokens_are_usable_once_for_their_purpose_until_they_expire() -> None:
@@ -81,10 +85,10 @@ def test_tokens_are_usable_once_for_their_purpose_until_they_expire() -> None:
 
 
 class _Rig:
-    def __init__(self) -> None:
+    def __init__(self, tokens: InMemoryUserTokenRepository | None = None) -> None:
         self.clock = _Clock()
         self.users = InMemoryUserRepository()
-        self.tokens = InMemoryUserTokenRepository()
+        self.tokens = tokens or InMemoryUserTokenRepository()
         self.sessions = InMemorySessionRepository()
         self.throttle = InMemoryLoginThrottleRepository()
         self.events = InMemoryAuditRepository()
@@ -113,7 +117,7 @@ async def test_verification_link_marks_the_email_verified_once() -> None:
     user = await rig.user()
     email = await rig.service.verification_email(user)
     assert email is not None and email.to == EMAIL
-    assert "https://cards.example.com/verify-email?token=" in email.body
+    assert "https://cards.example.com/verify-email#token=" in email.body
 
     verified = await rig.service.verify_email(_token_from(email))
 
@@ -131,6 +135,8 @@ async def test_a_new_verification_email_invalidates_the_previous_link() -> None:
     rig = _Rig()
     user = await rig.user()
     first = await rig.service.verification_email(user)
+    assert await rig.service.verification_email(user) is None  # within the cooldown
+    rig.clock.advance(VERIFICATION_COOLDOWN)
     second = await rig.service.verification_email(user)
     assert first is not None and second is not None
     with pytest.raises(InvalidUserToken):
@@ -178,9 +184,7 @@ class _LosesTheRace(InMemoryUserTokenRepository):
 
 
 async def test_a_concurrent_use_of_the_same_link_wins_once() -> None:
-    rig = _Rig()
-    rig.tokens = _LosesTheRace()
-    rig.service._tokens = rig.tokens  # the rig's service shares this repository
+    rig = _Rig(tokens=_LosesTheRace())
     user = await rig.user()
     email = await rig.service.verification_email(user)
     assert email is not None
@@ -210,7 +214,7 @@ async def test_password_reset_changes_the_password_and_ends_every_session() -> N
         )
     await rig.throttle.register_attempt(throttle_key(EMAIL), START)
     email = await rig.service.password_reset_email("  Person@Example.com ")
-    assert email is not None and "reset-password?token=" in email.body
+    assert email is not None and "reset-password#token=" in email.body
 
     await rig.service.reset_password(_token_from(email), "a-brand-new-password")
 
@@ -281,7 +285,8 @@ class _FakeSmtp:
     def __exit__(self, *exc: object) -> None:
         self.calls.append("quit")
 
-    def starttls(self) -> None:
+    def starttls(self, *, context: ssl.SSLContext) -> None:
+        assert context.verify_mode is ssl.CERT_REQUIRED and context.check_hostname
         self.calls.append("starttls")
 
     def login(self, username: str, password: str) -> None:
@@ -291,10 +296,18 @@ class _FakeSmtp:
         self.sent.append(str(message))
 
 
+class _FakeSmtpSsl(_FakeSmtp):
+    def __init__(self, host: str, port: int, timeout: float, context: ssl.SSLContext) -> None:
+        assert context.verify_mode is ssl.CERT_REQUIRED and context.check_hostname
+        super().__init__(host, port, timeout)
+        self.calls.append("tls")
+
+
 @pytest.fixture
 def fake_smtp(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_FakeSmtp]]:
     _FakeSmtp.instances = []
     monkeypatch.setattr("flashcards.adapters.mailers.smtplib.SMTP", _FakeSmtp)
+    monkeypatch.setattr("flashcards.adapters.mailers.smtplib.SMTP_SSL", _FakeSmtpSsl)
     yield _FakeSmtp
 
 
@@ -310,10 +323,25 @@ async def test_smtp_mailer_sends_with_tls_and_login(fake_smtp: type[_FakeSmtp]) 
     assert "Subject: Hello" in smtp.sent[0] and "To: person@example.com" in smtp.sent[0]
 
 
-async def test_smtp_mailer_without_tls_or_credentials(fake_smtp: type[_FakeSmtp]) -> None:
-    mailer = SmtpMailer(host="localhost", port=25, sender="a@b.c", starttls=False)
+async def test_smtp_mailer_with_implicit_tls(fake_smtp: type[_FakeSmtp]) -> None:
+    mailer = SmtpMailer(
+        host="smtp.example.com", port=465, sender="a@b.c", username="user", password="pw",
+        security="ssl",
+    )
+    await mailer.send(OutgoingEmail(to=EMAIL, subject="Hi", body="x"))
+    assert fake_smtp.instances[0].calls == ["tls", "login:user", "quit"]
+
+
+async def test_smtp_mailer_to_a_local_relay_without_tls(fake_smtp: type[_FakeSmtp]) -> None:
+    mailer = SmtpMailer(host="localhost", port=25, sender="a@b.c", security="none")
     await mailer.send(OutgoingEmail(to=EMAIL, subject="Hi", body="x"))
     assert fake_smtp.instances[0].calls == ["quit"]
+
+
+def test_smtp_mailer_never_sends_credentials_without_tls() -> None:
+    with pytest.raises(ValueError, match="without TLS"):
+        SmtpMailer(host="relay", port=25, sender="a@b.c", username="u", password="p",
+                   security="none")
 
 
 def test_mailer_selection_from_settings(caplog: pytest.LogCaptureFixture) -> None:
@@ -323,6 +351,20 @@ def test_mailer_selection_from_settings(caplog: pytest.LogCaptureFixture) -> Non
         assert isinstance(_mailer_from_settings(Settings(environment="production")), LogMailer)
     assert "No SMTP server configured" in caplog.text
     assert isinstance(_mailer_from_settings(Settings(environment="development")), LogMailer)
+
+
+def test_a_localhost_link_base_is_flagged_outside_development(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        create_app(Settings(environment="development"))
+    assert "PUBLIC_BASE_URL" not in caplog.text
+    with caplog.at_level(logging.WARNING):
+        create_app(Settings(environment="test", public_base_url="https://cards.example.com"))
+    assert "PUBLIC_BASE_URL" not in caplog.text
+    with caplog.at_level(logging.WARNING):
+        create_app(Settings(environment="test"))
+    assert "PUBLIC_BASE_URL" in caplog.text
 
 
 class _CapturingMailer:
