@@ -43,6 +43,7 @@ from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
 
@@ -696,6 +697,42 @@ def throttle_from_row(row: LoginThrottleRow) -> ThrottleState:
         failures=row.failures,
         window_started_at=row.window_started_at,
         locked_until=row.locked_until,
+    )
+
+
+class UserTokenRow(Base):
+    __tablename__ = "user_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    purpose: Mapped[str] = mapped_column(String)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def user_token_to_row(token: UserToken) -> UserTokenRow:
+    return UserTokenRow(
+        id=token.id,
+        user_id=token.user_id,
+        purpose=token.purpose.value,
+        token_hash=token.token_hash,
+        created_at=token.created_at,
+        expires_at=token.expires_at,
+        used_at=token.used_at,
+    )
+
+
+def user_token_from_row(row: UserTokenRow) -> UserToken:
+    return UserToken(
+        id=row.id,
+        user_id=row.user_id,
+        purpose=TokenPurpose(row.purpose),
+        token_hash=row.token_hash,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        used_at=row.used_at,
     )
 
 

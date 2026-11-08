@@ -37,6 +37,7 @@ APP_TABLES = {
     "share_links",
     "audit_events",
     "login_throttle",
+    "user_tokens",
 }
 
 

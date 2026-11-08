@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Authentication routes: signup, login, logout, current user, sessions."""
+"""Authentication routes: signup, login, logout, current user, sessions, email
+verification and password reset (F-AUTH-1, F-AUTH-2)."""
 
 from __future__ import annotations
 
 import math
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 
 from flashcards.api.container import Container
@@ -17,20 +18,40 @@ from flashcards.api.deps import (
     get_settings,
     set_session_cookie,
 )
-from flashcards.api.schemas import LoginRequest, SessionOut, SignupRequest, UserOut
+from flashcards.api.schemas import (
+    LoginRequest,
+    PasswordResetConfirmRequest,
+    PasswordResetRequest,
+    SessionOut,
+    SignupRequest,
+    TokenRequest,
+    UserOut,
+)
 from flashcards.application.auth_service import AccountSuspended, InvalidCredentials
 from flashcards.config import Settings
 from flashcards.domain.invites import InviteError
 from flashcards.domain.login_throttle import LoginLocked
+from flashcards.domain.mail import OutgoingEmail
+from flashcards.domain.ports import Mailer
+from flashcards.domain.user_tokens import InvalidUserToken
 from flashcards.domain.users import EmailAlreadyRegistered, InvalidEmail, WeakPassword
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_INVALID_LINK = "This link is invalid or has expired."
+
+
+def _send_later(tasks: BackgroundTasks, mailer: Mailer, email: OutgoingEmail | None) -> None:
+    """Send after the response, so known and unknown accounts take the same time."""
+    if email is not None:
+        tasks.add_task(mailer.send, email)
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED, response_model=UserOut)
 async def signup(
     body: SignupRequest,
     response: Response,
+    tasks: BackgroundTasks,
     container: Container = Depends(get_container),
     settings: Settings = Depends(get_settings),
 ) -> UserOut:
@@ -49,6 +70,7 @@ async def signup(
 
     issued = await container.auth.start_session(user)
     set_session_cookie(response, issued.raw_token, settings)
+    _send_later(tasks, container.mailer, await container.account_email.verification_email(user))
     return UserOut.from_user(user)
 
 
@@ -125,4 +147,51 @@ async def revoke_session(
     if session_id not in owned or not await container.auth.revoke_session(session_id):
         # Unknown to this user, or already revoked: either way nothing to revoke.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such session.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/verify-email", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email(
+    body: TokenRequest, container: Container = Depends(get_container)
+) -> Response:
+    try:
+        await container.account_email.verify_email(body.token)
+    except InvalidUserToken as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, _INVALID_LINK) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/verify-email/resend", status_code=status.HTTP_202_ACCEPTED)
+async def resend_verification(
+    tasks: BackgroundTasks,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container),
+) -> Response:
+    email = await container.account_email.verification_email(caller.user)
+    _send_later(tasks, container.mailer, email)
+    return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.post("/password-reset", status_code=status.HTTP_202_ACCEPTED)
+async def request_password_reset(
+    body: PasswordResetRequest,
+    tasks: BackgroundTasks,
+    container: Container = Depends(get_container),
+) -> Response:
+    # Always 202, whether or not the email has an account.
+    email = await container.account_email.password_reset_email(body.email)
+    _send_later(tasks, container.mailer, email)
+    return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def confirm_password_reset(
+    body: PasswordResetConfirmRequest, container: Container = Depends(get_container)
+) -> Response:
+    try:
+        await container.account_email.reset_password(body.token, body.password)
+    except WeakPassword as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except InvalidUserToken as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, _INVALID_LINK) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

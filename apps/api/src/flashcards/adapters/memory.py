@@ -26,6 +26,7 @@ from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 
@@ -86,6 +87,13 @@ class InMemoryUserRepository:
         user_id = self._email_to_id.get(email)
         return self._by_id.get(user_id) if user_id is not None else None
 
+    async def list_all(self) -> list[User]:
+        return sorted(self._by_id.values(), key=lambda u: u.created_at)
+
+    async def update(self, user: User) -> None:
+        if user.id in self._by_id:
+            self._by_id[user.id] = user
+
     async def delete(self, user_id: str) -> None:
         user = self._by_id.pop(user_id, None)
         if user is not None:
@@ -115,6 +123,11 @@ class InMemorySessionRepository:
             return False
         self._by_id[session_id] = session.with_revoked(now)
         return True
+
+    async def revoke_all_for_user(self, user_id: str, now: datetime) -> None:
+        for session in list(self._by_id.values()):
+            if session.user_id == user_id and session.revoked_at is None:
+                self._by_id[session.id] = session.with_revoked(now)
 
     async def delete_for_user(self, user_id: str) -> None:
         for session_id in [s.id for s in self._by_id.values() if s.user_id == user_id]:
@@ -474,7 +487,8 @@ class InMemoryAuditRepository:
         self, *, limit: int, before: datetime | None = None
     ) -> list[AuditEvent]:
         events = [e for e in self._events if before is None or e.created_at < before]
-        return sorted(events, key=lambda e: e.created_at, reverse=True)[:limit]
+        # Newest first; events recorded in the same instant keep reverse insertion order.
+        return sorted(events, key=lambda e: e.created_at)[::-1][:limit]
 
 
 class InMemoryLoginThrottleRepository:
@@ -489,3 +503,36 @@ class InMemoryLoginThrottleRepository:
 
     async def delete(self, key: str) -> None:
         self._by_key.pop(key, None)
+
+
+class InMemoryUserTokenRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, UserToken] = {}
+
+    async def add(self, token: UserToken) -> None:
+        self._by_id[token.id] = token
+
+    async def get_by_token_hash(self, token_hash: str) -> UserToken | None:
+        return next((t for t in self._by_id.values() if t.token_hash == token_hash), None)
+
+    async def latest_for_user(self, user_id: str, purpose: TokenPurpose) -> UserToken | None:
+        mine = [t for t in self._by_id.values() if t.user_id == user_id and t.purpose is purpose]
+        return max(mine, key=lambda t: t.created_at, default=None)
+
+    async def try_use(self, token_id: str, now: datetime) -> bool:
+        token = self._by_id.get(token_id)
+        if token is None or token.used_at is not None:
+            return False
+        self._by_id[token_id] = replace(token, used_at=now)
+        return True
+
+    async def invalidate_for_user(
+        self, user_id: str, purpose: TokenPurpose, now: datetime
+    ) -> None:
+        for token in list(self._by_id.values()):
+            if token.user_id == user_id and token.purpose is purpose and token.used_at is None:
+                self._by_id[token.id] = replace(token, used_at=now)
+
+    async def delete_for_user(self, user_id: str) -> None:
+        for token_id in [t.id for t in self._by_id.values() if t.user_id == user_id]:
+            del self._by_id[token_id]

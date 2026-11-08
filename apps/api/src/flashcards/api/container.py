@@ -14,6 +14,7 @@ from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
@@ -35,10 +36,12 @@ from flashcards.adapters.memory import (
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
     InMemoryUserRepository,
+    InMemoryUserTokenRepository,
     SystemClock,
 )
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
+from flashcards.application.account_email_service import AccountEmailService
 from flashcards.application.account_service import AccountService
 from flashcards.application.admin_service import AdminService
 from flashcards.application.ai_budget import AiCallBudget
@@ -78,6 +81,7 @@ from flashcards.domain.ports import (
     JobQueue,
     LLMProvider,
     LoginThrottleRepository,
+    Mailer,
     MediaRepository,
     MediaTypeSniffer,
     MockExamRepository,
@@ -94,6 +98,7 @@ from flashcards.domain.ports import (
     ShareLinkRepository,
     TranscriptProvider,
     UserRepository,
+    UserTokenRepository,
 )
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
@@ -131,7 +136,11 @@ class Repositories:
     clone_quota: QuotaRepository
     audit_events: AuditRepository
     login_throttle: LoginThrottleRepository
+    user_tokens: UserTokenRepository
+    mailer: Mailer
     dummy_hash: str | None = None
+    # Where links in emails point (the web client).
+    public_base_url: str = "http://localhost:5173"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +172,8 @@ class Container:
     audit: AuditService
     admin: AdminService
     sign_in: SignInService
+    account_email: AccountEmailService
+    mailer: Mailer
 
 
 def build_services(repos: Repositories) -> Container:
@@ -229,6 +240,7 @@ def build_services(repos: Repositories) -> Container:
         repos.share_links,
         repos.clone_quota,
         repos.login_throttle,
+        repos.user_tokens,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -274,6 +286,16 @@ def build_services(repos: Repositories) -> Container:
     audit = AuditService(repos.audit_events, repos.clock)
     admin = AdminService(invites, audit)
     sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
+    account_email = AccountEmailService(
+        repos.users,
+        repos.user_tokens,
+        repos.sessions,
+        repos.login_throttle,
+        repos.hasher,
+        audit,
+        repos.clock,
+        base_url=repos.public_base_url,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -302,6 +324,8 @@ def build_services(repos: Repositories) -> Container:
         audit=audit,
         admin=admin,
         sign_in=sign_in,
+        account_email=account_email,
+        mailer=repos.mailer,
     )
 
 
@@ -310,6 +334,8 @@ def build_container(
     llm: LLMProvider | None = None,
     job_queue: JobQueue | None = None,
     transcripts: TranscriptProvider | None = None,
+    mailer: Mailer | None = None,
+    public_base_url: str = "http://localhost:5173",
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -348,5 +374,8 @@ def build_container(
             clone_quota=InMemoryQuotaRepository(limit=DEFAULT_DAILY_CLONE_CARDS),
             audit_events=InMemoryAuditRepository(),
             login_throttle=InMemoryLoginThrottleRepository(),
+            user_tokens=InMemoryUserTokenRepository(),
+            mailer=mailer or LogMailer(show_content=True),
+            public_base_url=public_base_url,
         )
     )

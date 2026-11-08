@@ -24,6 +24,7 @@ from flashcards.adapters.db import (
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import InMemoryJobQueue, SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
@@ -47,6 +48,7 @@ from flashcards.adapters.sql import (
     SqlSessionRepository,
     SqlShareLinkRepository,
     SqlUserRepository,
+    SqlUserTokenRepository,
 )
 from flashcards.adapters.transcripts import NullTranscriptProvider
 from flashcards.api.app import create_app
@@ -93,6 +95,8 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         clone_quota=SqlQuotaRepository(session, limit=50_000),
         audit_events=SqlAuditRepository(session),
         login_throttle=SqlLoginThrottleRepository(session),
+        user_tokens=SqlUserTokenRepository(session),
+        mailer=LogMailer(show_content=False),
     )
 
 PASSWORD = "correct-horse-battery"

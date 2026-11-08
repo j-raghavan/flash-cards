@@ -36,6 +36,7 @@ from flashcards.domain.ports import (
     SessionRepository,
     ShareLinkRepository,
     UserRepository,
+    UserTokenRepository,
 )
 from flashcards.domain.scheduling import CardSchedule, ReviewLog
 from flashcards.domain.sharing import ShareLink
@@ -79,6 +80,7 @@ class AccountService:
         share_links: ShareLinkRepository,
         clone_quota: QuotaRepository,
         login_throttle: LoginThrottleRepository,
+        user_tokens: UserTokenRepository,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -100,6 +102,7 @@ class AccountService:
         self._share_links = share_links
         self._clone_quota = clone_quota
         self._login_throttle = login_throttle
+        self._user_tokens = user_tokens
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -153,5 +156,6 @@ class AccountService:
         await self._clone_quota.delete_for_owner(owner_id)
         # The throttle key is derived from the email, so it goes with the account.
         await self._login_throttle.delete(throttle_key(user.email))
+        await self._user_tokens.delete_for_user(owner_id)
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)

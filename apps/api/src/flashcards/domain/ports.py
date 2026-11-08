@@ -16,6 +16,7 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
 from flashcards.domain.login_throttle import ThrottleState
+from flashcards.domain.mail import OutgoingEmail
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -24,6 +25,7 @@ from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.transcripts import Transcript
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
 
@@ -69,6 +71,14 @@ class UserRepository(Protocol):
 
     async def get_by_email(self, email: str) -> User | None: ...
 
+    async def list_all(self) -> list[User]:
+        """Every user, oldest first (admin user management)."""
+        ...
+
+    async def update(self, user: User) -> None:
+        """Replace the stored user (the email is never changed this way)."""
+        ...
+
     async def delete(self, user_id: str) -> None:
         """Delete the user row (account deletion, F-IMP-5)."""
         ...
@@ -85,6 +95,10 @@ class SessionRepository(Protocol):
 
     async def revoke(self, session_id: str, now: datetime) -> bool:
         """Mark an active session revoked; return whether it changed."""
+        ...
+
+    async def revoke_all_for_user(self, user_id: str, now: datetime) -> None:
+        """Revoke every active session for a user (password reset, suspension)."""
         ...
 
     async def delete_for_user(self, user_id: str) -> None:
@@ -455,3 +469,29 @@ class LoginThrottleRepository(Protocol):
         ...
 
     async def delete(self, key: str) -> None: ...
+
+
+class Mailer(Protocol):
+    async def send(self, email: OutgoingEmail) -> None: ...
+
+
+class UserTokenRepository(Protocol):
+    async def add(self, token: UserToken) -> None: ...
+
+    async def get_by_token_hash(self, token_hash: str) -> UserToken | None: ...
+
+    async def latest_for_user(self, user_id: str, purpose: TokenPurpose) -> UserToken | None:
+        """The most recently created token of this purpose, used or not."""
+        ...
+
+    async def try_use(self, token_id: str, now: datetime) -> bool:
+        """Mark an unused token used, atomically; False if it was already used."""
+        ...
+
+    async def invalidate_for_user(
+        self, user_id: str, purpose: TokenPurpose, now: datetime
+    ) -> None:
+        """Mark every unused token of this purpose used (a newer one replaces them)."""
+        ...
+
+    async def delete_for_user(self, user_id: str) -> None: ...

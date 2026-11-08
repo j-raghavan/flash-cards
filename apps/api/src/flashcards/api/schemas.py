@@ -43,6 +43,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class TokenRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(max_length=320)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    password: str = Field(max_length=1_000)
+
+
 class InviteCreateRequest(BaseModel):
     email: str | None = None
     role: Role = Role.MEMBER
@@ -53,10 +66,13 @@ class UserOut(BaseModel):
     id: str
     email: str
     role: Role
+    email_verified: bool
 
     @classmethod
     def from_user(cls, user: User) -> UserOut:
-        return cls(id=user.id, email=user.email, role=user.role)
+        return cls(
+            id=user.id, email=user.email, role=user.role, email_verified=user.is_verified
+        )
 
 
 class CreatedInviteOut(BaseModel):

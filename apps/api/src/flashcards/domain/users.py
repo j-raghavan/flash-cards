@@ -85,3 +85,12 @@ class User:
 
     def with_suspended(self, now: datetime) -> User:
         return replace(self, suspended_at=now)
+
+    def with_unsuspended(self) -> User:
+        return replace(self, suspended_at=None)
+
+    def with_password_hash(self, password_hash: str) -> User:
+        return replace(self, password_hash=password_hash)
+
+    def with_role(self, role: Role) -> User:
+        return replace(self, role=role)

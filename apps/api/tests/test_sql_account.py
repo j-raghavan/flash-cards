@@ -395,3 +395,74 @@ async def test_login_throttle_repository(engine: AsyncEngine) -> None:
         await SqlLoginThrottleRepository(s).delete("k")
     async with sm() as s:
         assert await SqlLoginThrottleRepository(s).get("k") is None
+
+
+async def test_user_token_user_and_session_updates(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlUserTokenRepository
+    from flashcards.domain.user_tokens import TokenPurpose, UserToken
+
+    def token(tid: str, minutes: int, purpose: TokenPurpose) -> UserToken:
+        return UserToken(
+            id=tid, user_id="u1", purpose=purpose, token_hash=f"h-{tid}",
+            created_at=NOW + timedelta(minutes=minutes), expires_at=NOW + timedelta(hours=1),
+        )
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlUserRepository(s).add(
+            User(id="u1", email="u@e.com", password_hash="h", role=Role.MEMBER, created_at=NOW)
+        )
+        await SqlUserRepository(s).add(
+            User(
+                id="u2", email="v@e.com", password_hash="h", role=Role.MEMBER,
+                created_at=NOW + timedelta(minutes=1),
+            )
+        )
+        for sid in ("s1", "s2"):
+            await SqlSessionRepository(s).add(
+                Session(
+                    id=sid, user_id="u1", token_hash=f"t-{sid}", created_at=NOW,
+                    expires_at=NOW + timedelta(days=1), revoked_at=None,
+                )
+            )
+        tokens = SqlUserTokenRepository(s)
+        await tokens.add(token("a", 0, TokenPurpose.PASSWORD_RESET))
+        await tokens.add(token("b", 1, TokenPurpose.PASSWORD_RESET))
+        await tokens.add(token("c", 2, TokenPurpose.EMAIL_VERIFICATION))
+
+    async with sm() as s, s.begin():
+        users = SqlUserRepository(s)
+        assert [u.id for u in await users.list_all()] == ["u1", "u2"]
+        current = await users.get("u1")
+        assert current is not None
+        await users.update(current.with_verified(NOW).with_password_hash("new"))
+        await users.update(
+            User(id="ghost", email="g@e.com", password_hash="h", role=Role.MEMBER, created_at=NOW)
+        )  # updating a missing user is a no-op
+        await SqlSessionRepository(s).revoke_all_for_user("u1", NOW)
+        tokens = SqlUserTokenRepository(s)
+        latest = await tokens.latest_for_user("u1", TokenPurpose.PASSWORD_RESET)
+        assert latest is not None and latest.id == "b"
+        assert await tokens.try_use("b", NOW) is True
+        assert await tokens.try_use("b", NOW) is False
+        await tokens.invalidate_for_user("u1", TokenPurpose.PASSWORD_RESET, NOW)
+
+    async with sm() as s:
+        stored = await SqlUserRepository(s).get("u1")
+        assert stored is not None and stored.is_verified and stored.password_hash == "new"
+        assert await SqlUserRepository(s).get("ghost") is None
+        sessions = await SqlSessionRepository(s).list_for_user("u1")
+        assert all(x.revoked_at is not None for x in sessions)
+        tokens = SqlUserTokenRepository(s)
+        a = await tokens.get_by_token_hash("h-a")
+        c = await tokens.get_by_token_hash("h-c")
+        assert a is not None and a.used_at is not None  # invalidated
+        assert c is not None and c.used_at is None  # other purpose untouched
+        assert await tokens.get_by_token_hash("missing") is None
+
+    async with sm() as s, s.begin():
+        await SqlUserTokenRepository(s).delete_for_user("u1")
+    async with sm() as s:
+        assert await SqlUserTokenRepository(s).latest_for_user(
+            "u1", TokenPurpose.EMAIL_VERIFICATION
+        ) is None

@@ -36,6 +36,7 @@ from flashcards.adapters.db import (
     SessionRow,
     ShareLinkRow,
     UserRow,
+    UserTokenRow,
     aijob_from_row,
     aijob_to_row,
     audit_from_row,
@@ -69,6 +70,8 @@ from flashcards.adapters.db import (
     throttle_to_row,
     user_from_row,
     user_to_row,
+    user_token_from_row,
+    user_token_to_row,
 )
 from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.audit import AuditEvent
@@ -85,6 +88,7 @@ from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 _TERMINAL = (JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value)
@@ -163,6 +167,15 @@ class SqlUserRepository:
         row = await self._session.scalar(select(UserRow).where(UserRow.email == email))
         return user_from_row(row) if row is not None else None
 
+    async def list_all(self) -> list[User]:
+        rows = await self._session.scalars(select(UserRow).order_by(UserRow.created_at))
+        return [user_from_row(row) for row in rows]
+
+    async def update(self, user: User) -> None:
+        if await self._session.get(UserRow, user.id) is not None:
+            await self._session.merge(user_to_row(user))
+            await self._session.flush()
+
     async def delete(self, user_id: str) -> None:
         await self._session.execute(delete(UserRow).where(UserRow.id == user_id))
 
@@ -196,6 +209,13 @@ class SqlSessionRepository:
             .values(revoked_at=now)
         )
         return _changed_one(result)
+
+    async def revoke_all_for_user(self, user_id: str, now: datetime) -> None:
+        await self._session.execute(
+            update(SessionRow)
+            .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
 
     async def delete_for_user(self, user_id: str) -> None:
         await self._session.execute(delete(SessionRow).where(SessionRow.user_id == user_id))
@@ -700,3 +720,52 @@ class SqlLoginThrottleRepository:
 
     async def delete(self, key: str) -> None:
         await self._session.execute(delete(LoginThrottleRow).where(LoginThrottleRow.key == key))
+
+
+class SqlUserTokenRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, token: UserToken) -> None:
+        self._session.add(user_token_to_row(token))
+        await self._session.flush()
+
+    async def get_by_token_hash(self, token_hash: str) -> UserToken | None:
+        row = await self._session.scalar(
+            select(UserTokenRow).where(UserTokenRow.token_hash == token_hash)
+        )
+        return user_token_from_row(row) if row is not None else None
+
+    async def latest_for_user(self, user_id: str, purpose: TokenPurpose) -> UserToken | None:
+        row = await self._session.scalar(
+            select(UserTokenRow)
+            .where(UserTokenRow.user_id == user_id, UserTokenRow.purpose == purpose.value)
+            .order_by(UserTokenRow.created_at.desc())
+            .limit(1)
+        )
+        return user_token_from_row(row) if row is not None else None
+
+    async def try_use(self, token_id: str, now: datetime) -> bool:
+        used = await self._session.scalar(
+            update(UserTokenRow)
+            .where(UserTokenRow.id == token_id, UserTokenRow.used_at.is_(None))
+            .values(used_at=now)
+            .returning(UserTokenRow.id)
+        )
+        return used is not None
+
+    async def invalidate_for_user(
+        self, user_id: str, purpose: TokenPurpose, now: datetime
+    ) -> None:
+        await self._session.execute(
+            update(UserTokenRow)
+            .where(
+                UserTokenRow.user_id == user_id,
+                UserTokenRow.purpose == purpose.value,
+                UserTokenRow.used_at.is_(None),
+            )
+            .values(used_at=now)
+        )
+
+    async def delete_for_user(self, user_id: str) -> None:
+        await self._session.execute(delete(UserTokenRow).where(UserTokenRow.user_id == user_id))

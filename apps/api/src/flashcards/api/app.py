@@ -41,7 +41,7 @@ from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
 from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
-from flashcards.domain.ports import LLMProvider
+from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sharing import (
     CloneLimitReached,
@@ -206,11 +206,19 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     settings = settings or Settings()
     configured_llm = llm if llm is not None else _llm_from_settings(settings)
 
+    mailer = _mailer_from_settings(settings)
     if settings.database_url:
-        engine, provider, job_queue = sql_provider(settings.database_url, llm=configured_llm)
+        engine, provider, job_queue = sql_provider(
+            settings.database_url,
+            llm=configured_llm,
+            mailer=mailer,
+            public_base_url=settings.public_base_url,
+        )
         container = None
     else:
-        container, provider, job_queue = in_memory_provider(llm=configured_llm)
+        container, provider, job_queue = in_memory_provider(
+            llm=configured_llm, mailer=mailer, public_base_url=settings.public_base_url
+        )
         engine = None
 
     @asynccontextmanager
@@ -292,6 +300,24 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
         )
     logger.warning("No AI backend is configured; AI requests will be refused.")
     return NullLLMProvider()
+
+
+def _mailer_from_settings(settings: Settings) -> Mailer:
+    """SMTP when configured; otherwise a log-only mailer (full content in development)."""
+    from flashcards.adapters.mailers import LogMailer, SmtpMailer
+
+    if settings.smtp_host:
+        return SmtpMailer(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            sender=settings.smtp_sender,
+            username=settings.smtp_username,
+            password=settings.smtp_password,
+            starttls=settings.smtp_starttls,
+        )
+    if settings.environment != "development":
+        logger.warning("No SMTP server configured; verification and reset emails are not sent.")
+    return LogMailer(show_content=settings.environment == "development")
 
 
 @runtime_checkable

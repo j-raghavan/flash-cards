@@ -22,6 +22,7 @@ from flashcards.adapters.memory import (
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
     InMemoryUserRepository,
+    InMemoryUserTokenRepository,
 )
 from flashcards.application.account_service import AccountService
 from flashcards.application.deck_service import DeckService
@@ -40,6 +41,7 @@ from flashcards.domain.notes import NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
@@ -76,6 +78,7 @@ class _Fixture:
         self.share_links = InMemoryShareLinkRepository()
         self.clone_quota = InMemoryQuotaRepository(limit=100)
         self.throttle = InMemoryLoginThrottleRepository()
+        self.user_tokens = InMemoryUserTokenRepository()
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -89,6 +92,7 @@ class _Fixture:
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
             self.passages, self.ai_calls, self.share_links, self.clone_quota, self.throttle,
+            self.user_tokens,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -200,6 +204,12 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     await fx.throttle.save(
         ThrottleState(key=throttle_key(ALICE.email), failures=2, window_started_at=NOW)
     )
+    await fx.user_tokens.add(
+        UserToken(
+            id="tok", user_id=ALICE.id, purpose=TokenPurpose.PASSWORD_RESET, token_hash="h",
+            created_at=NOW, expires_at=NOW + timedelta(hours=1),
+        )
+    )
     await fx.service.delete(user=ALICE)
     await fx.users.delete("ghost")  # deleting a missing user is a no-op
 
@@ -215,6 +225,7 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.mock_exams.get("exam-alice") is None
     assert await fx.share_links.get("share-alice") is None
     assert await fx.throttle.get(throttle_key(ALICE.email)) is None
+    assert await fx.user_tokens.latest_for_user(ALICE.id, TokenPurpose.PASSWORD_RESET) is None
     assert await fx.share_links.get("share-bob") is not None
     assert await fx.passages.indexed_files(fx_alice_deck) == set()
     assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset
