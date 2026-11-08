@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Callable
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from flashcards.adapters.apkg import ApkgReader
 from flashcards.adapters.db import create_engine, create_sessionmaker
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
@@ -71,6 +72,7 @@ def sql_provider(
     dummy_hash = hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
     # Stateless/process-level singletons, shared across requests.
     extractor = PyMuPDFExtractor()
+    package_reader = ApkgReader()
     job_queue = InProcessJobQueue()
     provider_llm = llm or NullLLMProvider()
 
@@ -98,6 +100,7 @@ def sql_provider(
                     job_queue=job_queue,
                     llm=provider_llm,
                     goals=SqlGoalRepository(session),
+                    package_reader=package_reader,
                 )
             )
 

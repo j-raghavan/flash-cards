@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from flashcards.adapters.apkg import ApkgReader
 from flashcards.adapters.db import (
     Base,
     create_engine,
@@ -72,6 +73,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         job_queue=InMemoryJobQueue(),
         llm=NullLLMProvider(),
         goals=SqlGoalRepository(session),
+        package_reader=ApkgReader(),
     )
 
 PASSWORD = "correct-horse-battery"

@@ -13,6 +13,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.anki import ImportReport
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
@@ -310,4 +311,18 @@ class StudyPlanOut(BaseModel):
             reviews_per_day=plan.reviews_per_day,
             readiness=plan.readiness,
             on_track=plan.on_track,
+        )
+
+
+class ImportReportOut(BaseModel):
+    decks_created: int
+    notes_imported: int
+    notes_skipped: int
+
+    @classmethod
+    def from_report(cls, report: ImportReport) -> ImportReportOut:
+        return cls(
+            decks_created=report.decks_created,
+            notes_imported=report.notes_imported,
+            notes_skipped=report.notes_skipped,
         )
