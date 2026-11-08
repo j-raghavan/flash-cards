@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
@@ -377,3 +378,21 @@ class InMemoryMockExamRepository:
     async def delete_for_owner(self, owner_id: str) -> None:
         for exam_id in [e.id for e in self._by_id.values() if e.owner_id == owner_id]:
             del self._by_id[exam_id]
+
+
+class InMemoryPassageRepository:
+    def __init__(self) -> None:
+        self._rows: list[Passage] = []
+
+    async def add_many(self, passages: list[Passage]) -> None:
+        self._rows.extend(passages)
+
+    async def list_for_deck(self, deck_id: str) -> list[Passage]:
+        owned = [p for p in self._rows if p.deck_id == deck_id]
+        return sorted(owned, key=lambda p: (p.file_id, p.page, p.ordinal))
+
+    async def indexed_files(self, deck_id: str) -> set[str]:
+        return {p.file_id for p in self._rows if p.deck_id == deck_id}
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        self._rows = [p for p in self._rows if p.owner_id != owner_id]

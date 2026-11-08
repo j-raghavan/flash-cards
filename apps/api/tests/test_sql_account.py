@@ -160,6 +160,42 @@ async def test_mock_exam_roundtrip_and_owner_delete(engine: AsyncEngine) -> None
         assert await SqlMockExamRepository(s).get("e2") is not None  # Bob's exam survives
 
 
+async def test_passage_repository(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlPassageRepository
+    from flashcards.domain.chat import Passage
+
+    def passage(pid: str, owner: str, deck: str, file_id: str, page: int, ordinal: int) -> Passage:
+        return Passage(
+            id=pid, owner_id=owner, deck_id=deck, file_id=file_id, page=page,
+            ordinal=ordinal, text=f"text {pid}",
+        )
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlPassageRepository(s).add_many(
+            [
+                passage("p3", "alice", "d1", "f2", 1, 0),
+                passage("p2", "alice", "d1", "f1", 2, 0),
+                passage("p1", "alice", "d1", "f1", 1, 1),
+                passage("p0", "alice", "d1", "f1", 1, 0),
+                passage("pb", "bob", "d9", "fb", 1, 0),
+            ]
+        )
+
+    async with sm() as s:
+        repo = SqlPassageRepository(s)
+        assert [p.id for p in await repo.list_for_deck("d1")] == ["p0", "p1", "p2", "p3"]
+        assert await repo.indexed_files("d1") == {"f1", "f2"}
+        assert await repo.indexed_files("none") == set()
+
+    async with sm() as s, s.begin():
+        await SqlPassageRepository(s).delete_for_owner("alice")
+
+    async with sm() as s:
+        assert await SqlPassageRepository(s).list_for_deck("d1") == []
+        assert [p.id for p in await SqlPassageRepository(s).list_for_deck("d9")] == ["pb"]
+
+
 async def test_media_roundtrip(engine: AsyncEngine) -> None:
     from flashcards.adapters.sql import SqlMediaRepository
     from flashcards.domain.media import MediaAsset

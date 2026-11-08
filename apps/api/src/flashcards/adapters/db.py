@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.ext.asyncio import (
@@ -29,6 +30,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
+from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
@@ -562,6 +564,42 @@ def mock_exam_from_row(row: MockExamRow) -> MockExam:
             )
             for q in row.questions
         ),
+    )
+
+
+class PassageRow(Base):
+    __tablename__ = "document_passages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    deck_id: Mapped[str] = mapped_column(String, index=True)
+    file_id: Mapped[str] = mapped_column(String)
+    page: Mapped[int] = mapped_column(Integer)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+
+
+def passage_to_row(passage: Passage) -> PassageRow:
+    return PassageRow(
+        id=passage.id,
+        owner_id=passage.owner_id,
+        deck_id=passage.deck_id,
+        file_id=passage.file_id,
+        page=passage.page,
+        ordinal=passage.ordinal,
+        text=passage.text,
+    )
+
+
+def passage_from_row(row: PassageRow) -> Passage:
+    return Passage(
+        id=row.id,
+        owner_id=row.owner_id,
+        deck_id=row.deck_id,
+        file_id=row.file_id,
+        page=row.page,
+        ordinal=row.ordinal,
+        text=row.text,
     )
 
 

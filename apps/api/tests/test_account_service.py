@@ -14,6 +14,7 @@ from flashcards.adapters.memory import (
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
+    InMemoryPassageRepository,
     InMemoryQuotaRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
@@ -26,6 +27,7 @@ from flashcards.application.goal_service import GoalService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
+from flashcards.domain.chat import Passage
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import new_generation_job
 from flashcards.domain.media import MediaAsset
@@ -64,6 +66,7 @@ class _Fixture:
         self.media = InMemoryMediaRepository()
         self.quotas = InMemoryQuotaRepository()
         self.mock_exams = InMemoryMockExamRepository()
+        self.passages = InMemoryPassageRepository()
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -75,6 +78,7 @@ class _Fixture:
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
+            self.passages,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -134,6 +138,14 @@ class _Fixture:
                 questions=(ExamQuestion(id="q", prompt="p", reference="r", topic="t"),),
             )
         )
+        await self.passages.add_many(
+            [
+                Passage(
+                    id=f"passage-{owner}", owner_id=owner, deck_id=deck.id, file_id="f",
+                    page=1, ordinal=0, text="indexed source text",
+                )
+            ]
+        )
         await self.quotas.try_reserve_pages(owner, 1, "2026-11")
 
 
@@ -155,7 +167,7 @@ async def test_export_gathers_everything_the_user_owns() -> None:
 async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> None:
     fx = _Fixture()
     await fx.seed_full_account(ALICE.id)
-    alice_job, alice_source = fx._job_id, fx._source
+    alice_job, alice_source, fx_alice_deck = fx._job_id, fx._source, fx._deck_id
     # A nested deck, so deletion walks the subtree (and skips the child in the loop).
     await fx.decks.create(owner_id=ALICE.id, name="child", parent_id=fx._deck_id)
     await fx.sessions.add(
@@ -179,8 +191,10 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.log_repo.list_for_owner(ALICE.id) == []
     assert await fx.media.list_for_owner(ALICE.id) == []
     assert await fx.mock_exams.get("exam-alice") is None
+    assert await fx.passages.indexed_files(fx_alice_deck) == set()
     assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset
     # Bob keeps his deck, his media and his mock exam.
     assert len(await fx.decks.list_decks(owner_id=BOB)) == 1
     assert [m.id for m in await fx.media.list_for_owner(BOB)] == ["media-bob"]
     assert await fx.mock_exams.get("exam-bob") is not None
+    assert await fx.passages.indexed_files(fx._deck_id) == {"f"}  # Bob's, seeded last

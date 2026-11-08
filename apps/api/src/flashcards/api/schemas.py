@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from flashcards.application.account_service import AccountExport
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
+from flashcards.domain.chat import ChatAnswer
 from flashcards.domain.decks import Deck
 from flashcards.domain.evaluation import AnswerEvaluation
 from flashcards.domain.goals import Goal
@@ -197,6 +198,27 @@ class DeckSummaryOut(BaseModel):
     @classmethod
     def from_summary(cls, summary: DeckSummary) -> DeckSummaryOut:
         return cls(summary=summary.summary, key_points=list(summary.key_points))
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2_000)
+
+
+class CitationOut(BaseModel):
+    file_id: str
+    page: int
+
+
+class ChatAnswerOut(BaseModel):
+    answer: str
+    citations: list[CitationOut]
+
+    @classmethod
+    def from_answer(cls, answer: ChatAnswer) -> ChatAnswerOut:
+        return cls(
+            answer=answer.answer,
+            citations=[CitationOut(file_id=c.file_id, page=c.page) for c in answer.citations],
+        )
 
 
 class MockExamCreateRequest(BaseModel):

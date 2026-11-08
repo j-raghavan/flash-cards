@@ -29,6 +29,7 @@ from flashcards.adapters.db import (
     MediaRow,
     MockExamRow,
     NoteRow,
+    PassageRow,
     ReviewLogRow,
     SessionRow,
     UserRow,
@@ -50,6 +51,8 @@ from flashcards.adapters.db import (
     mock_exam_to_row,
     note_from_row,
     note_to_row,
+    passage_from_row,
+    passage_to_row,
     review_log_from_row,
     review_log_to_row,
     schedule_from_row,
@@ -60,6 +63,7 @@ from flashcards.adapters.db import (
     user_to_row,
 )
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
@@ -529,3 +533,29 @@ class SqlMockExamRepository:
         await self._session.execute(
             delete(MockExamRow).where(MockExamRow.owner_id == owner_id)
         )
+
+
+class SqlPassageRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add_many(self, passages: list[Passage]) -> None:
+        self._session.add_all([passage_to_row(p) for p in passages])
+        await self._session.flush()
+
+    async def list_for_deck(self, deck_id: str) -> list[Passage]:
+        rows = await self._session.scalars(
+            select(PassageRow)
+            .where(PassageRow.deck_id == deck_id)
+            .order_by(PassageRow.file_id, PassageRow.page, PassageRow.ordinal)
+        )
+        return [passage_from_row(row) for row in rows]
+
+    async def indexed_files(self, deck_id: str) -> set[str]:
+        rows = await self._session.scalars(
+            select(PassageRow.file_id).where(PassageRow.deck_id == deck_id).distinct()
+        )
+        return set(rows)
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(delete(PassageRow).where(PassageRow.owner_id == owner_id))

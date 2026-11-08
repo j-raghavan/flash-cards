@@ -26,6 +26,7 @@ from flashcards.adapters.memory import (
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
+    InMemoryPassageRepository,
     InMemoryQuotaRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
@@ -39,6 +40,7 @@ from flashcards.application.account_service import AccountService
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.auth_service import AuthService
 from flashcards.application.card_generation_service import CardGenerationService
+from flashcards.application.chat_service import ChatService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
 from flashcards.application.evaluation_service import EvaluationService
@@ -72,6 +74,7 @@ from flashcards.domain.ports import (
     NoteRepository,
     ObjectStore,
     PackageReader,
+    PassageRepository,
     PasswordHasher,
     QuotaRepository,
     ReviewLogRepository,
@@ -110,6 +113,7 @@ class Repositories:
     media_sniffer: MediaTypeSniffer
     mock_exams: MockExamRepository
     transcripts: TranscriptProvider
+    passages: PassageRepository
     dummy_hash: str | None = None
 
 
@@ -137,6 +141,7 @@ class Container:
     summary: SummaryService
     mock_exam: MockExamService
     transcript_import: TranscriptImportService
+    chat: ChatService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -195,6 +200,7 @@ def build_services(repos: Repositories) -> Container:
         repos.media,
         repos.quotas,
         repos.mock_exams,
+        repos.passages,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     evaluation = EvaluationService(notes, repos.llm)
@@ -211,6 +217,14 @@ def build_services(repos: Repositories) -> Container:
         unlock_cards=DEFAULT_MOCK_EXAM_UNLOCK_CARDS,
     )
     transcript_import = TranscriptImportService(decks, generation, repos.transcripts)
+    chat = ChatService(
+        decks,
+        repos.ai_jobs,
+        repos.object_store,
+        repos.extractor,
+        repos.passages,
+        repos.llm,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -234,6 +248,7 @@ def build_services(repos: Repositories) -> Container:
         summary=summary,
         mock_exam=mock_exam,
         transcript_import=transcript_import,
+        chat=chat,
     )
 
 
@@ -274,5 +289,6 @@ def build_container(
             media_sniffer=PuremagicMediaSniffer(),
             mock_exams=InMemoryMockExamRepository(),
             transcripts=transcripts or NullTranscriptProvider(),
+            passages=InMemoryPassageRepository(),
         )
     )

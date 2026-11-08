@@ -20,6 +20,7 @@ from flashcards.api.routers import (
     ai,
     auth,
     cards,
+    chat,
     decks,
     goals,
     imports,
@@ -30,6 +31,7 @@ from flashcards.api.routers import (
 from flashcards.config import Settings
 from flashcards.domain.ai import DraftNotFound, LlmError
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
+from flashcards.domain.chat import NoChatSources
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
@@ -109,6 +111,12 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def invalid_transcript(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
+    async def no_chat_sources(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "This deck has no source documents with text to chat with."},
+        )
+
     async def ai_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
         # A synchronous AI call failed or is not configured (the async generation
         # worker captures its own errors onto the job and never reaches here).
@@ -142,6 +150,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidVideoUrl, invalid_video_url)
     app.add_exception_handler(TranscriptUnavailable, no_transcript)
     app.add_exception_handler(InvalidTranscript, invalid_transcript)
+    app.add_exception_handler(NoChatSources, no_chat_sources)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
     # Catches InvalidEvaluation, InvalidSummary and InvalidExam too (all LlmError).
@@ -199,6 +208,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(account.router)
     app.include_router(media.router)
     app.include_router(mock_exams.router)
+    app.include_router(chat.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

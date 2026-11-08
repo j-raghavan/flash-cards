@@ -9,6 +9,7 @@ from typing import Protocol
 
 from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
 from flashcards.domain.anki import AnkiPackage
+from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
@@ -368,4 +369,20 @@ class TranscriptProvider(Protocol):
         Best-effort by design: transcript access is unreliable, so callers offer a
         manual paste as the fallback.
         """
+        ...
+
+
+class PassageRepository(Protocol):
+    async def add_many(self, passages: list[Passage]) -> None: ...
+
+    async def list_for_deck(self, deck_id: str) -> list[Passage]:
+        """Return the deck's indexed passages in file, page and ordinal order."""
+        ...
+
+    async def indexed_files(self, deck_id: str) -> set[str]:
+        """The source file ids already indexed for the deck."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every passage the owner has (account deletion)."""
         ...
