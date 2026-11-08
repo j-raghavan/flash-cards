@@ -241,6 +241,7 @@ def build_services(repos: Repositories) -> Container:
         repos.clone_quota,
         repos.login_throttle,
         repos.user_tokens,
+        invites,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -285,7 +286,14 @@ def build_services(repos: Repositories) -> Container:
     )
     audit = AuditService(repos.audit_events, repos.clock)
     admin = AdminService(
-        invites, audit, repos.users, repos.sessions, account, repos.login_throttle, repos.clock
+        invites,
+        audit,
+        repos.users,
+        repos.sessions,
+        account,
+        repos.login_throttle,
+        repos.user_tokens,
+        repos.clock,
     )
     sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
     account_email = AccountEmailService(

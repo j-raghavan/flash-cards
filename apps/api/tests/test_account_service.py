@@ -10,6 +10,7 @@ from flashcards.adapters.memory import (
     InMemoryDeckRepository,
     InMemoryDraftCardRepository,
     InMemoryGoalRepository,
+    InMemoryInviteRepository,
     InMemoryLoginThrottleRepository,
     InMemoryMediaRepository,
     InMemoryMockExamRepository,
@@ -27,6 +28,7 @@ from flashcards.adapters.memory import (
 from flashcards.application.account_service import AccountService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.goal_service import GoalService
+from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
 from flashcards.application.sign_in_service import throttle_key
@@ -78,6 +80,8 @@ class _Fixture:
         self.clone_quota = InMemoryQuotaRepository(limit=100)
         self.throttle = InMemoryLoginThrottleRepository()
         self.user_tokens = InMemoryUserTokenRepository()
+        self.invite_repo = InMemoryInviteRepository()
+        self.invites = InviteService(self.invite_repo, clock)
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -91,7 +95,7 @@ class _Fixture:
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
             self.passages, self.ai_calls, self.share_links, self.clone_quota, self.throttle,
-            self.user_tokens,
+            self.user_tokens, self.invites,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -207,8 +211,17 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
             created_at=NOW, expires_at=NOW + timedelta(hours=1),
         )
     )
-    await fx.service.delete(user=ALICE)
+    sent = await fx.invites.create(created_by=ALICE.id, role=Role.MEMBER)
+    others = await fx.invites.create(created_by=BOB, role=Role.MEMBER)
+
+    assert await fx.service.delete(user=ALICE) == [sent.invite.id]
+
     await fx.users.delete("ghost")  # deleting a missing user is a no-op
+    # Invites Alice sent stop working; everyone else's still work.
+    alice_invite = await fx.invite_repo.get(sent.invite.id)
+    assert alice_invite is not None and alice_invite.revoked_at is not None
+    bob_invite = await fx.invite_repo.get(others.invite.id)
+    assert bob_invite is not None and bob_invite.revoked_at is None
 
     assert await fx.users.get(ALICE.id) is None
     assert await fx.sessions.list_for_user(ALICE.id) == []

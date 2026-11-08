@@ -16,6 +16,16 @@ class AuditService:
         self._events = events
         self._clock = clock
 
+    async def invites_revoked(self, invite_ids: list[str], *, actor_id: str | None) -> None:
+        """Record invites revoked because their creator lost admin rights or left."""
+        for invite_id in invite_ids:
+            await self.record(
+                AuditAction.INVITE_REVOKED,
+                actor_id=actor_id,
+                target_id=invite_id,
+                detail={"reason": "creator removed"},
+            )
+
     async def record(
         self,
         action: AuditAction,

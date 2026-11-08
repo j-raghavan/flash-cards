@@ -4,8 +4,12 @@ F-ADMIN-5).
 
 Invite management and user management (suspend, unsuspend, role, delete). Every
 change leaves an audit event. An admin cannot suspend, demote or delete their own
-account, which also guarantees that at least one active admin always remains.
-There is no impersonation.
+account, and an admin who was demoted or suspended while a request was in flight
+cannot act (AdminRequired). Changes take the admin rows' locks first, so
+concurrent ones apply in turn; with both rules, the acting admin always remains,
+so there is always at least one active admin. An admin who is suspended,
+demoted or deleted loses the unredeemed invites they sent. There is no
+impersonation.
 """
 
 from __future__ import annotations
@@ -23,8 +27,16 @@ from flashcards.domain.ports import (
     LoginThrottleRepository,
     SessionRepository,
     UserRepository,
+    UserTokenRepository,
 )
-from flashcards.domain.users import AdminSelfAction, User, UserNotFound, UserStatus
+from flashcards.domain.user_tokens import TokenPurpose
+from flashcards.domain.users import (
+    AdminRequired,
+    AdminSelfAction,
+    User,
+    UserNotFound,
+    UserStatus,
+)
 
 
 class AdminService:
@@ -36,6 +48,7 @@ class AdminService:
         sessions: SessionRepository,
         account: AccountService,
         throttle: LoginThrottleRepository,
+        tokens: UserTokenRepository,
         clock: Clock,
     ) -> None:
         self._invites = invites
@@ -44,6 +57,7 @@ class AdminService:
         self._sessions = sessions
         self._account = account
         self._throttle = throttle
+        self._tokens = tokens
         self._clock = clock
 
     async def create_invite(
@@ -75,6 +89,7 @@ class AdminService:
         return await self._users.list_all()
 
     async def suspend_user(self, *, admin_id: str, user_id: str) -> User:
+        await self._lock_admins(admin_id)
         user = await self._target(admin_id, user_id)
         if user.status() is UserStatus.SUSPENDED:
             return user
@@ -82,10 +97,15 @@ class AdminService:
         suspended = user.with_suspended(now)
         await self._users.update(suspended)
         await self._sessions.revoke_all_for_user(user_id, now)  # signed out everywhere
+        # Links already emailed must not work if the account is unsuspended later.
+        for purpose in TokenPurpose:
+            await self._tokens.invalidate_for_user(user_id, purpose, now)
         await self._audit.record(AuditAction.USER_SUSPENDED, actor_id=admin_id, target_id=user_id)
+        await self._revoke_invites(admin_id, user)
         return suspended
 
     async def unsuspend_user(self, *, admin_id: str, user_id: str) -> User:
+        await self._lock_admins(admin_id)
         user = await self._target(admin_id, user_id)
         if user.status() is not UserStatus.SUSPENDED:
             return user
@@ -97,6 +117,7 @@ class AdminService:
         return restored
 
     async def set_role(self, *, admin_id: str, user_id: str, role: Role) -> User:
+        await self._lock_admins(admin_id)
         user = await self._target(admin_id, user_id)
         if user.role is role:
             return user
@@ -108,6 +129,7 @@ class AdminService:
             target_id=user_id,
             detail={"from": user.role.value, "to": role.value},
         )
+        await self._revoke_invites(admin_id, user)
         return changed
 
     async def unlock_user(self, *, admin_id: str, user_id: str) -> User:
@@ -120,14 +142,32 @@ class AdminService:
         return user
 
     async def delete_user(self, *, admin_id: str, user_id: str) -> None:
+        await self._lock_admins(admin_id)
         user = await self._target(admin_id, user_id)
-        await self._account.delete(user=user)
+        revoked = await self._account.delete(user=user)  # refuses the last active admin
         await self._audit.record(AuditAction.USER_DELETED, actor_id=admin_id, target_id=user_id)
+        await self._audit.invites_revoked(revoked, actor_id=admin_id)
+
+    async def _lock_admins(self, admin_id: str) -> None:
+        # Admin rows first, then the target's: one lock order for every change, so
+        # concurrent changes wait for each other instead of deadlocking, and each
+        # sees who is still an admin once the other has committed. The acting admin
+        # must still be one, and never targets themselves, so they always remain.
+        admins = await self._users.lock_active_admins()
+        if all(admin.id != admin_id for admin in admins):
+            raise AdminRequired(admin_id)  # demoted or suspended meanwhile
 
     async def _target(self, admin_id: str, user_id: str) -> User:
         if user_id == admin_id:
             raise AdminSelfAction(user_id)
-        user = await self._users.get(user_id)
+        user = await self._users.get_for_update(user_id)
         if user is None:
             raise UserNotFound(user_id)
         return user
+
+    async def _revoke_invites(self, admin_id: str, user: User) -> None:
+        """An admin who loses their rights also loses the invites they sent."""
+        if user.role is Role.ADMIN:
+            revoked = await self._invites.revoke_created_by(user.id)
+            await self._audit.invites_revoked(revoked, actor_id=admin_id)
+

@@ -166,7 +166,9 @@ class AccountEmailService:
         return token
 
     async def _live_user(self, user_id: str) -> User:
-        user = await self._users.get(user_id)
+        # Locked, because the caller writes the user back: a suspension or role
+        # change committing in between must not be overwritten.
+        user = await self._users.get_for_update(user_id)
         if user is None or user.status() is UserStatus.SUSPENDED:
             raise InvalidUserToken()
         return user

@@ -71,6 +71,22 @@ class UserRepository(Protocol):
 
     async def get_by_email(self, email: str) -> User | None: ...
 
+    async def get_for_update(self, user_id: str) -> User | None:
+        """Read the user and lock the row until the transaction ends.
+
+        Use it before changing a user, so concurrent changes apply one after the
+        other instead of overwriting each other (SELECT ... FOR UPDATE).
+        """
+        ...
+
+    async def lock_active_admins(self) -> list[User]:
+        """Every active admin, with their rows locked until the transaction ends.
+
+        Taken before any change that could remove an admin, so two such changes
+        cannot both see another admin remaining. Rows are locked in id order.
+        """
+        ...
+
     async def list_all(self) -> list[User]:
         """Every user, oldest first (admin user management)."""
         ...
@@ -128,6 +144,10 @@ class InviteRepository(Protocol):
 
     async def try_revoke(self, invite_id: str, now: datetime) -> bool:
         """Mark an unredeemed, unrevoked invite revoked; return whether it changed."""
+        ...
+
+    async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
+        """Revoke every unredeemed, unrevoked invite the user created; return their ids."""
         ...
 
 

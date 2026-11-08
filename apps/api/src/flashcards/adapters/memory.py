@@ -68,6 +68,10 @@ class InMemoryInviteRepository:
         self._by_id[invite_id] = invite.with_revoked(now)
         return True
 
+    async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
+        ids = sorted(i.id for i in self._by_id.values() if i.created_by == user_id)
+        return [invite_id for invite_id in ids if await self.try_revoke(invite_id, now)]
+
 
 class InMemoryUserRepository:
     def __init__(self) -> None:
@@ -87,8 +91,14 @@ class InMemoryUserRepository:
         user_id = self._email_to_id.get(email)
         return self._by_id.get(user_id) if user_id is not None else None
 
+    async def get_for_update(self, user_id: str) -> User | None:
+        return self._by_id.get(user_id)  # one event loop: nothing runs in between
+
+    async def lock_active_admins(self) -> list[User]:
+        return sorted((u for u in self._by_id.values() if u.is_active_admin), key=lambda u: u.id)
+
     async def list_all(self) -> list[User]:
-        return sorted(self._by_id.values(), key=lambda u: u.created_at)
+        return sorted(self._by_id.values(), key=lambda u: (u.created_at, u.id))
 
     async def update(self, user: User) -> None:
         if user.id in self._by_id:

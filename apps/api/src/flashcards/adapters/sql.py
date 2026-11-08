@@ -77,7 +77,7 @@ from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
-from flashcards.domain.invites import Invite
+from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.login_throttle import (
     FAILURE_WINDOW,
@@ -152,6 +152,19 @@ class SqlInviteRepository:
         )
         return _changed_one(result)
 
+    async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
+        revoked = await self._session.scalars(
+            update(InviteRow)
+            .where(
+                InviteRow.created_by == user_id,
+                InviteRow.redeemed_at.is_(None),
+                InviteRow.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+            .returning(InviteRow.id)
+        )
+        return sorted(revoked)
+
 
 class SqlUserRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -172,8 +185,25 @@ class SqlUserRepository:
         row = await self._session.scalar(select(UserRow).where(UserRow.email == email))
         return user_from_row(row) if row is not None else None
 
+    async def get_for_update(self, user_id: str) -> User | None:
+        row = await self._session.scalar(
+            select(UserRow).where(UserRow.id == user_id).with_for_update()
+        )
+        return user_from_row(row) if row is not None else None
+
+    async def lock_active_admins(self) -> list[User]:
+        rows = await self._session.scalars(
+            select(UserRow)
+            .where(UserRow.role == Role.ADMIN.value, UserRow.suspended_at.is_(None))
+            .order_by(UserRow.id)
+            .with_for_update()
+        )
+        return [user_from_row(row) for row in rows]
+
     async def list_all(self) -> list[User]:
-        rows = await self._session.scalars(select(UserRow).order_by(UserRow.created_at))
+        rows = await self._session.scalars(
+            select(UserRow).order_by(UserRow.created_at, UserRow.id)
+        )
         return [user_from_row(row) for row in rows]
 
     async def update(self, user: User) -> None:

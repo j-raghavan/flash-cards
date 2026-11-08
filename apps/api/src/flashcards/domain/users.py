@@ -46,6 +46,14 @@ class AdminSelfAction(UserError):
     """An admin tried to suspend, demote or delete their own account."""
 
 
+class LastActiveAdmin(UserError):
+    """The change would leave the instance with no active admin."""
+
+
+class AdminRequired(UserError):
+    """The caller stopped being an active admin before the change could apply."""
+
+
 class EmailAlreadyRegistered(UserError):
     """Raised when creating a user whose email already exists."""
 
@@ -91,6 +99,10 @@ class User:
         if self.suspended_at is not None:
             return UserStatus.SUSPENDED
         return UserStatus.ACTIVE
+
+    @property
+    def is_active_admin(self) -> bool:
+        return self.role is Role.ADMIN and self.status() is UserStatus.ACTIVE
 
     @property
     def is_verified(self) -> bool:

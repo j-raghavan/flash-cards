@@ -35,7 +35,8 @@ async def delete_account(
     container: Container = Depends(get_container, scope="function"),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    await container.account.delete(user=caller.user)
+    revoked = await container.account.delete(user=caller.user)
+    await container.audit.invites_revoked(revoked, actor_id=caller.user.id)
     await container.audit.record(
         AuditAction.ACCOUNT_DELETED, actor_id=caller.user.id, target_id=caller.user.id
     )

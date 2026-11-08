@@ -3,10 +3,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from flashcards.adapters.memory import InMemoryUserRepository
+from flashcards.api.container import Container
+from flashcards.domain.invites import Role
+from flashcards.domain.users import AdminRequired
 
 PASSWORD = "correct-horse-battery"
 MEMBER = "member@example.com"
@@ -150,3 +157,111 @@ def test_admin_can_clear_a_sign_in_lockout(
     assert TestClient(app).post("/auth/login", json=right).status_code == 200
     assert ("user.unlocked", member_id) in _actions(admin_client)
     assert admin_client.post("/admin/users/missing/unlock").status_code == 404
+
+
+def _promoted_admin(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> tuple[TestClient, str, dict[str, str]]:
+    """A member promoted to admin, who then sends an invite."""
+    other, other_id = _member(app, seed_invite)
+    admin_client.patch(f"/admin/users/{other_id}", json={"role": "admin"})
+    invite: dict[str, str] = other.post("/admin/invites", json={}).json()
+    return other, other_id, invite
+
+
+def _redeemable(app: FastAPI, token: str) -> bool:
+    body = {"token": token, "email": "newcomer@example.com", "password": PASSWORD}
+    return TestClient(app).post("/auth/signup", json=body).status_code == 201
+
+
+def test_a_demoted_admin_loses_the_invites_they_sent(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    _other, other_id, invite = _promoted_admin(app, admin_client, seed_invite)
+    kept = admin_client.post("/admin/invites", json={}).json()
+
+    admin_client.patch(f"/admin/users/{other_id}", json={"role": "member"})
+
+    assert not _redeemable(app, invite["token"])
+    events = admin_client.get("/admin/audit").json()
+    event = next(e for e in events if e["target_id"] == invite["id"])
+    assert event["action"] == "invite.revoked" and event["detail"] == {"reason": "creator removed"}
+    assert _redeemable(app, kept["token"])  # other admins' invites are untouched
+
+
+def test_a_suspended_or_deleted_admin_loses_the_invites_they_sent(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    _other, other_id, invite = _promoted_admin(app, admin_client, seed_invite)
+    admin_client.post(f"/admin/users/{other_id}/suspend")
+    assert not _redeemable(app, invite["token"])
+
+    admin_client.post(f"/admin/users/{other_id}/unsuspend")
+    sender = TestClient(app)  # signed in again after the suspension
+    assert sender.post("/auth/login", json={"email": MEMBER, "password": PASSWORD}).is_success
+    second: dict[str, str] = sender.post("/admin/invites", json={}).json()
+    admin_client.delete(f"/admin/users/{other_id}")
+    assert not _redeemable(app, second["token"])
+    assert ("invite.revoked", second["id"]) in _actions(admin_client)
+
+
+def test_the_last_active_admin_cannot_delete_their_account(admin_client: TestClient) -> None:
+    refused = admin_client.delete("/account")
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "At least one active admin must remain."
+    assert admin_client.get("/auth/me").json()["role"] == "admin"
+
+
+def test_an_admin_can_delete_their_account_while_another_remains(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    other, other_id, invite = _promoted_admin(app, admin_client, seed_invite)
+    assert other.delete("/account").status_code == 204
+    assert not _redeemable(app, invite["token"])
+    assert ("invite.revoked", invite["id"]) in _actions(admin_client)
+
+
+def test_an_admin_demoted_mid_request_cannot_act(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    container: Container = app.state.container
+    _other, other_id, _invite = _promoted_admin(app, admin_client, seed_invite)
+    me = _admin_id(admin_client)
+    # Two admins demote each other at the same time: the second applies after the
+    # first has committed, when its admin is no longer one, so one admin remains.
+    asyncio.run(container.admin.set_role(admin_id=me, user_id=other_id, role=Role.MEMBER))
+    with pytest.raises(AdminRequired):
+        asyncio.run(container.admin.set_role(admin_id=other_id, user_id=me, role=Role.MEMBER))
+    assert admin_client.get("/auth/me").json()["role"] == "admin"
+
+
+def test_suspension_voids_links_already_emailed(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    container: Container = app.state.container
+    _member_client, member_id = _member(app, seed_invite)
+    email = asyncio.run(container.account_email.password_reset_email(MEMBER))
+    assert email is not None
+    token = email.body.split("#token=")[1].split()[0]
+
+    admin_client.post(f"/admin/users/{member_id}/suspend")
+    admin_client.post(f"/admin/users/{member_id}/unsuspend")
+
+    confirm = {"token": token, "password": "a-brand-new-password"}
+    assert TestClient(app).post("/auth/password-reset/confirm", json=confirm).status_code == 422
+
+
+def test_an_admin_demoted_mid_request_gets_403(
+    app: FastAPI,
+    admin_client: TestClient,
+    seed_invite: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _member_client, member_id = _member(app, seed_invite)
+
+    async def no_admins_left(_self: InMemoryUserRepository) -> list[object]:
+        return []  # the caller passed require_admin, then lost the role
+
+    monkeypatch.setattr(InMemoryUserRepository, "lock_active_admins", no_admins_left)
+    refused = admin_client.post(f"/admin/users/{member_id}/suspend")
+    assert refused.status_code == 403 and refused.json()["detail"] == "Admin only."

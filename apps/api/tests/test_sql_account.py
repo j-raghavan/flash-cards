@@ -478,3 +478,60 @@ async def test_user_token_user_and_session_updates(engine: AsyncEngine) -> None:
         assert await SqlUserTokenRepository(s).latest_for_user(
             "u1", TokenPurpose.EMAIL_VERIFICATION
         ) is None
+
+
+async def test_admin_row_locks_serialize_admin_changes(engine: AsyncEngine) -> None:
+    import asyncio
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        for uid, role in (("a1", Role.ADMIN), ("a2", Role.ADMIN), ("m1", Role.MEMBER)):
+            await SqlUserRepository(s).add(
+                User(id=uid, email=f"{uid}@e.com", password_hash="h", role=role, created_at=NOW)
+            )
+
+    async def second_admins() -> list[str]:
+        async with sm() as s, s.begin():
+            return [u.id for u in await SqlUserRepository(s).lock_active_admins()]
+
+    async with sm() as s, s.begin():
+        users = SqlUserRepository(s)
+        assert [u.id for u in await users.lock_active_admins()] == ["a1", "a2"]
+        target = await users.get_for_update("a2")
+        assert target is not None
+        waiting = asyncio.create_task(second_admins())
+        await asyncio.sleep(0.2)
+        assert not waiting.done()  # blocked on the first transaction's locks
+        await users.update(target.with_role(Role.MEMBER))
+    # Once the demotion commits, the waiting transaction sees one admin left.
+    assert await waiting == ["a1"]
+
+    async with sm() as s:
+        assert await SqlUserRepository(s).get_for_update("missing") is None
+
+
+async def test_invites_revoked_by_creator(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlInviteRepository
+    from flashcards.domain.invites import Invite
+
+    def invite(iid: str, creator: str) -> Invite:
+        return Invite(
+            id=iid, token_hash=f"h-{iid}", role=Role.MEMBER, created_by=creator,
+            created_at=NOW, expires_at=NOW + timedelta(days=7),
+        )
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        repo = SqlInviteRepository(s)
+        for iid, creator in (("i1", "a1"), ("i2", "a1"), ("i3", "a1"), ("i4", "a2")):
+            await repo.add(invite(iid, creator))
+        assert await repo.try_redeem("i2", NOW)
+        assert await repo.try_revoke("i3", NOW)
+
+    async with sm() as s, s.begin():
+        # Only the live invite of that creator changes.
+        assert await SqlInviteRepository(s).revoke_created_by("a1", NOW) == ["i1"]
+        assert await SqlInviteRepository(s).revoke_created_by("a1", NOW) == []
+    async with sm() as s:
+        other = await SqlInviteRepository(s).get("i4")
+        assert other is not None and other.revoked_at is None
