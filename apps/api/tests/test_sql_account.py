@@ -348,3 +348,27 @@ async def test_share_link_repository(engine: AsyncEngine) -> None:
         repo = SqlShareLinkRepository(s)
         assert await repo.list_for_owner("alice") == []
         assert [x.id for x in await repo.list_for_owner("bob")] == ["lb"]
+
+
+async def test_audit_repository(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlAuditRepository
+    from flashcards.domain.audit import AuditAction, AuditEvent
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        repo = SqlAuditRepository(s)
+        await repo.append(AuditEvent(id="e1", action=AuditAction.LOGIN_FAILED, created_at=NOW))
+        await repo.append(
+            AuditEvent(
+                id="e2", action=AuditAction.USER_SUSPENDED, created_at=NOW + timedelta(minutes=1),
+                actor_id="admin", target_id="u1", detail=(("reason", "abuse"),),
+            )
+        )
+    async with sm() as s:
+        repo = SqlAuditRepository(s)
+        recent = await repo.list_recent(limit=10)
+        assert [e.id for e in recent] == ["e2", "e1"]
+        assert recent[0].detail == (("reason", "abuse"),) and recent[0].actor_id == "admin"
+        assert [e.id for e in await repo.list_recent(limit=1)] == ["e2"]
+        older = await repo.list_recent(limit=10, before=NOW + timedelta(minutes=1))
+        assert [e.id for e in older] == ["e1"]

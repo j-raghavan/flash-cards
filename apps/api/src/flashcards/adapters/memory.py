@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
@@ -459,3 +460,17 @@ class InMemoryShareLinkRepository:
     async def delete_for_owner(self, owner_id: str) -> None:
         for link_id in [x.id for x in self._by_id.values() if x.owner_id == owner_id]:
             del self._by_id[link_id]
+
+
+class InMemoryAuditRepository:
+    def __init__(self) -> None:
+        self._events: list[AuditEvent] = []
+
+    async def append(self, event: AuditEvent) -> None:
+        self._events.append(event)
+
+    async def list_recent(
+        self, *, limit: int, before: datetime | None = None
+    ) -> list[AuditEvent]:
+        events = [e for e in self._events if before is None or e.created_at < before]
+        return sorted(events, key=lambda e: e.created_at, reverse=True)[:limit]

@@ -9,6 +9,7 @@ from typing import Protocol
 
 from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
 from flashcards.domain.anki import AnkiPackage
+from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
@@ -432,4 +433,14 @@ class ShareLinkRepository(Protocol):
 
     async def delete_for_owner(self, owner_id: str) -> None:
         """Delete every link the owner created (account deletion)."""
+        ...
+
+
+class AuditRepository(Protocol):
+    async def append(self, event: AuditEvent) -> None: ...
+
+    async def list_recent(
+        self, *, limit: int, before: datetime | None = None
+    ) -> list[AuditEvent]:
+        """Newest first; only events strictly older than `before` when given."""
         ...

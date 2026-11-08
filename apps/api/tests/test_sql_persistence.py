@@ -29,6 +29,7 @@ from flashcards.adapters.memory import InMemoryJobQueue, SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
     SqlAiJobRepository,
+    SqlAuditRepository,
     SqlCardRepository,
     SqlDeckRepository,
     SqlDraftCardRepository,
@@ -89,6 +90,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         ai_calls=SqlQuotaRepository(session, limit=200),
         share_links=SqlShareLinkRepository(session),
         clone_quota=SqlQuotaRepository(session, limit=50_000),
+        audit_events=SqlAuditRepository(session),
     )
 
 PASSWORD = "correct-horse-battery"

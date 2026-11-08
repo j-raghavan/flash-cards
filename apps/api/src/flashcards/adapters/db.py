@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
+from flashcards.domain.audit import AuditAction, AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
@@ -634,6 +635,39 @@ def share_link_from_row(row: ShareLinkRow) -> ShareLink:
         allow_clone=row.allow_clone,
         created_at=row.created_at,
         revoked_at=row.revoked_at,
+    )
+
+
+class AuditEventRow(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    action: Mapped[str] = mapped_column(String, index=True)
+    actor_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    target_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    detail: Mapped[dict[str, str]] = mapped_column(JSON)
+
+
+def audit_to_row(event: AuditEvent) -> AuditEventRow:
+    return AuditEventRow(
+        id=event.id,
+        action=event.action.value,
+        actor_id=event.actor_id,
+        target_id=event.target_id,
+        created_at=event.created_at,
+        detail=dict(event.detail),
+    )
+
+
+def audit_from_row(row: AuditEventRow) -> AuditEvent:
+    return AuditEvent(
+        id=row.id,
+        action=AuditAction(row.action),
+        actor_id=row.actor_id,
+        target_id=row.target_id,
+        created_at=row.created_at,
+        detail=tuple(sorted(row.detail.items())),
     )
 
 

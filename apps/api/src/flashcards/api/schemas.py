@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from flashcards.application.account_service import AccountExport
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
+from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import ChatAnswer
 from flashcards.domain.decks import Deck
 from flashcards.domain.evaluation import AnswerEvaluation
@@ -219,6 +220,26 @@ class ChatAnswerOut(BaseModel):
         return cls(
             answer=answer.answer,
             citations=[CitationOut(file_id=c.file_id, page=c.page) for c in answer.citations],
+        )
+
+
+class AuditEventOut(BaseModel):
+    id: str
+    action: str
+    created_at: datetime
+    actor_id: str | None
+    target_id: str | None
+    detail: dict[str, str]
+
+    @classmethod
+    def from_event(cls, event: AuditEvent) -> AuditEventOut:
+        return cls(
+            id=event.id,
+            action=event.action.value,
+            created_at=event.created_at,
+            actor_id=event.actor_id,
+            target_id=event.target_id,
+            detail=dict(event.detail),
         )
 
 

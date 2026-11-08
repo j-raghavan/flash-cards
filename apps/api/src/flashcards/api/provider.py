@@ -24,6 +24,7 @@ from flashcards.adapters.memory import SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
     SqlAiJobRepository,
+    SqlAuditRepository,
     SqlCardRepository,
     SqlDeckRepository,
     SqlDraftCardRepository,
@@ -119,6 +120,7 @@ def sql_provider(
                     ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
                     share_links=SqlShareLinkRepository(session),
                     clone_quota=SqlQuotaRepository(session, limit=DEFAULT_DAILY_CLONE_CARDS),
+                    audit_events=SqlAuditRepository(session),
                 )
             )
 

@@ -17,6 +17,7 @@ from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
+    InMemoryAuditRepository,
     InMemoryCardRepository,
     InMemoryDeckRepository,
     InMemoryDraftCardRepository,
@@ -38,8 +39,10 @@ from flashcards.adapters.memory import (
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.application.account_service import AccountService
+from flashcards.application.admin_service import AdminService
 from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.apkg_import_service import ApkgImportService
+from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import AuthService
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.chat_service import ChatService
@@ -62,6 +65,7 @@ from flashcards.application.transcript_import_service import TranscriptImportSer
 from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
 from flashcards.domain.ports import (
     AiJobRepository,
+    AuditRepository,
     CardRepository,
     Clock,
     DeckRepository,
@@ -122,6 +126,7 @@ class Repositories:
     ai_calls: QuotaRepository
     share_links: ShareLinkRepository
     clone_quota: QuotaRepository
+    audit_events: AuditRepository
     dummy_hash: str | None = None
 
 
@@ -151,6 +156,8 @@ class Container:
     transcript_import: TranscriptImportService
     chat: ChatService
     sharing: SharingService
+    audit: AuditService
+    admin: AdminService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -258,6 +265,8 @@ def build_services(repos: Repositories) -> Container:
         repos.clone_quota,
         repos.clock,
     )
+    audit = AuditService(repos.audit_events, repos.clock)
+    admin = AdminService(invites, audit)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -283,6 +292,8 @@ def build_services(repos: Repositories) -> Container:
         transcript_import=transcript_import,
         chat=chat,
         sharing=sharing,
+        audit=audit,
+        admin=admin,
     )
 
 
@@ -327,5 +338,6 @@ def build_container(
             ai_calls=InMemoryQuotaRepository(limit=DEFAULT_DAILY_AI_CALLS),
             share_links=InMemoryShareLinkRepository(),
             clone_quota=InMemoryQuotaRepository(limit=DEFAULT_DAILY_CLONE_CARDS),
+            audit_events=InMemoryAuditRepository(),
         )
     )

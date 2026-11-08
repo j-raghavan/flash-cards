@@ -20,6 +20,7 @@ from flashcards.adapters.db import (
     AiBlobRow,
     AiJobRow,
     AiQuotaRow,
+    AuditEventRow,
     CardRow,
     CardScheduleRow,
     DeckRow,
@@ -36,6 +37,8 @@ from flashcards.adapters.db import (
     UserRow,
     aijob_from_row,
     aijob_to_row,
+    audit_from_row,
+    audit_to_row,
     card_from_row,
     card_to_row,
     deck_from_row,
@@ -65,6 +68,7 @@ from flashcards.adapters.db import (
     user_to_row,
 )
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
@@ -658,3 +662,21 @@ class SqlShareLinkRepository:
         await self._session.execute(
             delete(ShareLinkRow).where(ShareLinkRow.owner_id == owner_id)
         )
+
+
+class SqlAuditRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def append(self, event: AuditEvent) -> None:
+        self._session.add(audit_to_row(event))
+        await self._session.flush()
+
+    async def list_recent(
+        self, *, limit: int, before: datetime | None = None
+    ) -> list[AuditEvent]:
+        query = select(AuditEventRow).order_by(AuditEventRow.created_at.desc()).limit(limit)
+        if before is not None:
+            query = query.where(AuditEventRow.created_at < before)
+        rows = await self._session.scalars(query)
+        return [audit_from_row(row) for row in rows]

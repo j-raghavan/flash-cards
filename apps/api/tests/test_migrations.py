@@ -35,6 +35,7 @@ APP_TABLES = {
     "mock_exams",
     "document_passages",
     "share_links",
+    "audit_events",
 }
 
 
