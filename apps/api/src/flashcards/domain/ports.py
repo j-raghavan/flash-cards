@@ -9,6 +9,7 @@ from typing import Protocol
 
 from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
 from flashcards.domain.decks import Deck
+from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
 from flashcards.domain.notes import Card, Note
@@ -265,3 +266,17 @@ class QuotaRepository(Protocol):
     async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
         """Atomically reserve pages against the owner's limit; True if within it."""
         ...
+
+
+class GoalRepository(Protocol):
+    async def add(self, goal: Goal) -> None: ...
+
+    async def get(self, goal_id: str) -> Goal | None: ...
+
+    async def list_for_owner(self, owner_id: str) -> list[Goal]:
+        """Return the owner's goals, newest first."""
+        ...
+
+    async def update(self, goal: Goal) -> None: ...
+
+    async def delete(self, goal_id: str) -> None: ...
