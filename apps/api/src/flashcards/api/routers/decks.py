@@ -12,9 +12,20 @@ from flashcards.api.schemas import (
     DeckMoveRequest,
     DeckOut,
     DeckRenameRequest,
+    DeckSummaryOut,
 )
 
 router = APIRouter(prefix="/decks", tags=["decks"])
+
+
+@router.post("/{deck_id}/summary", response_model=DeckSummaryOut)
+async def summarize_deck(
+    deck_id: str,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container),
+) -> DeckSummaryOut:
+    summary = await container.summary.summarize(owner_id=caller.user.id, deck_id=deck_id)
+    return DeckSummaryOut.from_summary(summary)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=DeckOut)

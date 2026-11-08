@@ -49,6 +49,7 @@ from flashcards.application.note_service import NoteService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
+from flashcards.application.summary_service import SummaryService
 from flashcards.domain.ports import (
     AiJobRepository,
     CardRepository,
@@ -73,6 +74,7 @@ from flashcards.domain.ports import (
     SessionRepository,
     UserRepository,
 )
+from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +125,7 @@ class Container:
     account: AccountService
     media: MediaService
     evaluation: EvaluationService
+    summary: SummaryService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -183,6 +186,9 @@ def build_services(repos: Repositories) -> Container:
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     evaluation = EvaluationService(notes, repos.llm)
+    summary = SummaryService(
+        decks, repos.notes, repos.cards, repos.llm, unlock_cards=DEFAULT_SUMMARY_UNLOCK_CARDS
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -203,6 +209,7 @@ def build_services(repos: Repositories) -> Container:
         account=account,
         media=media,
         evaluation=evaluation,
+        summary=summary,
     )
 
 

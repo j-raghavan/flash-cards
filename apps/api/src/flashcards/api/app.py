@@ -38,6 +38,7 @@ from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import QuotaExceeded
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
+from flashcards.domain.summary import SummaryLocked
 
 logger = logging.getLogger("flashcards")
 
@@ -82,6 +83,10 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def media_too_large(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=413, content={"detail": "The media file is too large."})
 
+    async def summary_locked(_request: Request, exc: Exception) -> JSONResponse:
+        detail = str(exc) if isinstance(exc, SummaryLocked) else "Summary is locked."
+        return JSONResponse(status_code=409, content={"detail": detail})
+
     async def ai_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
         # A synchronous AI call failed or is not configured (the async generation
         # worker captures its own errors onto the job and never reaches here).
@@ -111,7 +116,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
     app.add_exception_handler(TooManyPages, too_large)
-    # Catches InvalidEvaluation too (it subclasses LlmError).
+    app.add_exception_handler(SummaryLocked, summary_locked)
+    # Catches InvalidEvaluation and InvalidSummary too (both subclass LlmError).
     app.add_exception_handler(LlmError, ai_unavailable)
 
 

@@ -24,6 +24,7 @@ from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.planner import StudyPlan
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
+from flashcards.domain.summary import DeckSummary
 from flashcards.domain.users import User
 
 
@@ -186,6 +187,15 @@ class EvaluationOut(BaseModel):
             score=evaluation.score,
             explanation=evaluation.explanation,
         )
+
+
+class DeckSummaryOut(BaseModel):
+    summary: str
+    key_points: list[str]
+
+    @classmethod
+    def from_summary(cls, summary: DeckSummary) -> DeckSummaryOut:
+        return cls(summary=summary.summary, key_points=list(summary.key_points))
 
 
 class CardScheduleOut(BaseModel):
