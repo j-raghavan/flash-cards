@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Protocol
 
-from flashcards.domain.ai import StructuredRequest, StructuredResult
+from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
@@ -235,3 +235,15 @@ class AiJobRepository(Protocol):
     async def list_running(self) -> list[AiJob]:
         """Jobs left RUNNING (e.g. by a crash), for boot-time requeue."""
         ...
+
+
+class DraftCardRepository(Protocol):
+    async def add(self, record: DraftCardRecord) -> None: ...
+
+    async def get(self, record_id: str) -> DraftCardRecord | None: ...
+
+    async def list_for_job(self, job_id: str) -> list[DraftCardRecord]:
+        """Return a job's draft cards, oldest first."""
+        ...
+
+    async def delete_for_job(self, job_id: str) -> None: ...

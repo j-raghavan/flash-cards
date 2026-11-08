@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
@@ -243,3 +244,22 @@ class InMemoryAiJobRepository:
 
     async def list_running(self) -> list[AiJob]:
         return [j for j in self._by_id.values() if j.status is JobStatus.RUNNING]
+
+
+class InMemoryDraftCardRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, DraftCardRecord] = {}
+
+    async def add(self, record: DraftCardRecord) -> None:
+        self._by_id[record.id] = record
+
+    async def get(self, record_id: str) -> DraftCardRecord | None:
+        return self._by_id.get(record_id)
+
+    async def list_for_job(self, job_id: str) -> list[DraftCardRecord]:
+        records = [r for r in self._by_id.values() if r.job_id == job_id]
+        return sorted(records, key=lambda r: r.created_at)
+
+    async def delete_for_job(self, job_id: str) -> None:
+        for record_id in [r.id for r in self._by_id.values() if r.job_id == job_id]:
+            del self._by_id[record_id]

@@ -12,6 +12,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 
 from flashcards.domain.notes import Fields, InvalidNote, NoteType, card_ordinals
 
@@ -64,6 +65,19 @@ class DraftCard:
     note_type: NoteType
     fields: Fields
     source_page: int  # the 1-based page we sent, for the card's source reference (F-AI-5)
+
+
+@dataclass(frozen=True, slots=True)
+class DraftCardRecord:
+    """A generated draft card awaiting the user's review (F-AI-4)."""
+
+    id: str
+    job_id: str
+    owner_id: str
+    note_type: NoteType
+    fields: Fields
+    source_page: int
+    created_at: datetime
 
 
 # The JSON Schema a provider is told to produce. Kept framework-free so an
