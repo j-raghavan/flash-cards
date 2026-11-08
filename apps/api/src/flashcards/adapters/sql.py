@@ -32,6 +32,7 @@ from flashcards.adapters.db import (
     PassageRow,
     ReviewLogRow,
     SessionRow,
+    ShareLinkRow,
     UserRow,
     aijob_from_row,
     aijob_to_row,
@@ -58,6 +59,8 @@ from flashcards.adapters.db import (
     schedule_to_row,
     session_from_row,
     session_to_row,
+    share_link_from_row,
+    share_link_to_row,
     user_from_row,
     user_to_row,
 )
@@ -73,6 +76,7 @@ from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
+from flashcards.domain.sharing import ShareLink
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 _TERMINAL = (JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value)
@@ -600,3 +604,50 @@ class SqlPassageRepository:
 
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(delete(PassageRow).where(PassageRow.owner_id == owner_id))
+
+
+class SqlShareLinkRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, link: ShareLink) -> None:
+        self._session.add(share_link_to_row(link))
+        await self._session.flush()
+
+    async def get(self, link_id: str) -> ShareLink | None:
+        row = await self._session.get(ShareLinkRow, link_id)
+        return share_link_from_row(row) if row is not None else None
+
+    async def get_by_token_hash(self, token_hash: str) -> ShareLink | None:
+        row = await self._session.scalar(
+            select(ShareLinkRow).where(ShareLinkRow.token_hash == token_hash)
+        )
+        return share_link_from_row(row) if row is not None else None
+
+    async def list_for_deck(self, deck_id: str) -> list[ShareLink]:
+        rows = await self._session.scalars(
+            select(ShareLinkRow)
+            .where(ShareLinkRow.deck_id == deck_id)
+            .order_by(ShareLinkRow.created_at)
+        )
+        return [share_link_from_row(row) for row in rows]
+
+    async def list_for_owner(self, owner_id: str) -> list[ShareLink]:
+        rows = await self._session.scalars(
+            select(ShareLinkRow)
+            .where(ShareLinkRow.owner_id == owner_id)
+            .order_by(ShareLinkRow.created_at)
+        )
+        return [share_link_from_row(row) for row in rows]
+
+    async def update(self, link: ShareLink) -> None:
+        await self._session.merge(share_link_to_row(link))
+        await self._session.flush()
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        await self._session.execute(delete(ShareLinkRow).where(ShareLinkRow.deck_id == deck_id))
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(
+            delete(ShareLinkRow).where(ShareLinkRow.owner_id == owner_id)
+        )

@@ -23,6 +23,7 @@ from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
+from flashcards.domain.sharing import ShareLink
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 
@@ -421,3 +422,36 @@ class InMemoryPassageRepository:
 
     async def delete_for_owner(self, owner_id: str) -> None:
         self._rows = [p for p in self._rows if p.owner_id != owner_id]
+
+
+class InMemoryShareLinkRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, ShareLink] = {}
+
+    async def add(self, link: ShareLink) -> None:
+        self._by_id[link.id] = link
+
+    async def get(self, link_id: str) -> ShareLink | None:
+        return self._by_id.get(link_id)
+
+    async def get_by_token_hash(self, token_hash: str) -> ShareLink | None:
+        return next((x for x in self._by_id.values() if x.token_hash == token_hash), None)
+
+    async def list_for_deck(self, deck_id: str) -> list[ShareLink]:
+        links = [x for x in self._by_id.values() if x.deck_id == deck_id]
+        return sorted(links, key=lambda x: x.created_at)
+
+    async def list_for_owner(self, owner_id: str) -> list[ShareLink]:
+        links = [x for x in self._by_id.values() if x.owner_id == owner_id]
+        return sorted(links, key=lambda x: x.created_at)
+
+    async def update(self, link: ShareLink) -> None:
+        self._by_id[link.id] = link
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        for link_id in [x.id for x in self._by_id.values() if x.deck_id == deck_id]:
+            del self._by_id[link_id]
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for link_id in [x.id for x in self._by_id.values() if x.owner_id == owner_id]:
+            del self._by_id[link_id]

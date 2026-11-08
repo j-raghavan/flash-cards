@@ -31,6 +31,7 @@ from flashcards.adapters.memory import (
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemorySessionRepository,
+    InMemoryShareLinkRepository,
     InMemoryUserRepository,
     SystemClock,
 )
@@ -55,6 +56,7 @@ from flashcards.application.note_service import NoteService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
+from flashcards.application.sharing_service import SharingService
 from flashcards.application.summary_service import SummaryService
 from flashcards.application.transcript_import_service import TranscriptImportService
 from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
@@ -82,6 +84,7 @@ from flashcards.domain.ports import (
     Scheduler,
     ScheduleRepository,
     SessionRepository,
+    ShareLinkRepository,
     TranscriptProvider,
     UserRepository,
 )
@@ -117,6 +120,7 @@ class Repositories:
     transcripts: TranscriptProvider
     passages: PassageRepository
     ai_calls: QuotaRepository
+    share_links: ShareLinkRepository
     dummy_hash: str | None = None
 
 
@@ -145,6 +149,7 @@ class Container:
     mock_exam: MockExamService
     transcript_import: TranscriptImportService
     chat: ChatService
+    sharing: SharingService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -167,6 +172,7 @@ def build_services(repos: Repositories) -> Container:
         repos.review_logs,
         repos.passages,
         repos.mock_exams,
+        repos.share_links,
     )
     generation = GenerationRequestService(
         decks,
@@ -207,6 +213,7 @@ def build_services(repos: Repositories) -> Container:
         repos.mock_exams,
         repos.passages,
         repos.ai_calls,
+        repos.share_links,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -239,6 +246,7 @@ def build_services(repos: Repositories) -> Container:
         repos.llm,
         ai_budget,
     )
+    sharing = SharingService(decks, notes, repos.notes, repos.share_links, repos.clock)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -263,6 +271,7 @@ def build_services(repos: Repositories) -> Container:
         mock_exam=mock_exam,
         transcript_import=transcript_import,
         chat=chat,
+        sharing=sharing,
     )
 
 
@@ -305,5 +314,6 @@ def build_container(
             transcripts=transcripts or NullTranscriptProvider(),
             passages=InMemoryPassageRepository(),
             ai_calls=InMemoryQuotaRepository(limit=DEFAULT_DAILY_AI_CALLS),
+            share_links=InMemoryShareLinkRepository(),
         )
     )

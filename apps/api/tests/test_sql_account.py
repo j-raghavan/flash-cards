@@ -300,3 +300,48 @@ async def test_owner_scoped_deletes(engine: AsyncEngine) -> None:
         assert await SqlQuotaRepository(s).try_reserve_pages("alice", 1, "2026-11") is True
         # Bob's media untouched.
         assert [m.id for m in await SqlMediaRepository(s).list_for_owner("bob")] == ["m2"]
+
+
+async def test_share_link_repository(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlShareLinkRepository
+    from flashcards.domain.sharing import ShareLink
+
+    def link(lid: str, owner: str, deck: str, minutes: int) -> ShareLink:
+        return ShareLink(
+            id=lid, owner_id=owner, deck_id=deck, token_hash=f"hash-{lid}",
+            allow_clone=False, created_at=NOW + timedelta(minutes=minutes),
+        )
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        repo = SqlShareLinkRepository(s)
+        await repo.add(link("l2", "alice", "d1", 2))
+        await repo.add(link("l1", "alice", "d1", 1))
+        await repo.add(link("l3", "alice", "d2", 3))
+        await repo.add(link("lb", "bob", "d9", 0))
+
+    async with sm() as s:
+        repo = SqlShareLinkRepository(s)
+        assert [x.id for x in await repo.list_for_deck("d1")] == ["l1", "l2"]
+        assert [x.id for x in await repo.list_for_owner("alice")] == ["l1", "l2", "l3"]
+        found = await repo.get_by_token_hash("hash-l3")
+        assert found is not None and found.deck_id == "d2"
+        assert await repo.get_by_token_hash("nope") is None
+        assert await repo.get("missing") is None
+
+    async with sm() as s, s.begin():
+        repo = SqlShareLinkRepository(s)
+        current = await repo.get("l1")
+        assert current is not None
+        await repo.update(current.with_allow_clone(True).revoked(NOW))
+    async with sm() as s:
+        updated = await SqlShareLinkRepository(s).get("l1")
+        assert updated is not None and updated.allow_clone and updated.revoked_at == NOW
+
+    async with sm() as s, s.begin():
+        await SqlShareLinkRepository(s).delete_for_deck("d1")
+        await SqlShareLinkRepository(s).delete_for_owner("alice")
+    async with sm() as s:
+        repo = SqlShareLinkRepository(s)
+        assert await repo.list_for_owner("alice") == []
+        assert [x.id for x in await repo.list_for_owner("bob")] == ["lb"]

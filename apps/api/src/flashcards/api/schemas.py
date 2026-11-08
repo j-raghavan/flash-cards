@@ -26,6 +26,7 @@ from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.planner import StudyPlan
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
+from flashcards.domain.sharing import SharedDeckPreview, ShareLink
 from flashcards.domain.summary import DeckSummary
 from flashcards.domain.users import User
 
@@ -218,6 +219,66 @@ class ChatAnswerOut(BaseModel):
         return cls(
             answer=answer.answer,
             citations=[CitationOut(file_id=c.file_id, page=c.page) for c in answer.citations],
+        )
+
+
+class ShareCreateRequest(BaseModel):
+    allow_clone: bool = False
+
+
+class ShareUpdateRequest(BaseModel):
+    allow_clone: bool
+
+
+class ShareLinkOut(BaseModel):
+    id: str
+    deck_id: str
+    allow_clone: bool
+    created_at: datetime
+    revoked_at: datetime | None
+
+    @classmethod
+    def from_link(cls, link: ShareLink) -> ShareLinkOut:
+        return cls(
+            id=link.id,
+            deck_id=link.deck_id,
+            allow_clone=link.allow_clone,
+            created_at=link.created_at,
+            revoked_at=link.revoked_at,
+        )
+
+
+class CreatedShareLinkOut(ShareLinkOut):
+    # Shown once: only a hash of the token is stored.
+    token: str
+
+
+class SharedNoteOut(BaseModel):
+    deck_path: list[str]
+    note_type: NoteType
+    fields: dict[str, str]
+
+
+class SharedDeckOut(BaseModel):
+    name: str
+    decks: list[list[str]]
+    notes: list[SharedNoteOut]
+    note_count: int
+    allow_clone: bool
+
+    @classmethod
+    def from_preview(cls, preview: SharedDeckPreview) -> SharedDeckOut:
+        return cls(
+            name=preview.name,
+            decks=[list(node.path) for node in preview.decks],
+            notes=[
+                SharedNoteOut(
+                    deck_path=list(n.deck_path), note_type=n.note_type, fields=dict(n.fields)
+                )
+                for n in preview.notes
+            ],
+            note_count=preview.note_count,
+            allow_clone=preview.allow_clone,
         )
 
 
@@ -557,6 +618,7 @@ class AccountExportOut(BaseModel):
     goals: list[GoalExportOut]
     media: list[MediaExportOut]
     mock_exams: list[MockExamExportOut]
+    share_links: list[ShareLinkOut]
 
     @classmethod
     def from_export(cls, export: AccountExport) -> AccountExportOut:
@@ -641,4 +703,5 @@ class AccountExportOut(BaseModel):
                 )
                 for e in export.mock_exams
             ],
+            share_links=[ShareLinkOut.from_link(link) for link in export.share_links],
         )

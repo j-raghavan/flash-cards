@@ -43,6 +43,7 @@ from flashcards.adapters.sql import (
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
+    SqlShareLinkRepository,
     SqlUserRepository,
 )
 from flashcards.adapters.transcripts import NullTranscriptProvider
@@ -85,6 +86,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         transcripts=NullTranscriptProvider(),
         passages=SqlPassageRepository(session),
         ai_calls=SqlQuotaRepository(session, limit=200),
+        share_links=SqlShareLinkRepository(session),
     )
 
 PASSWORD = "correct-horse-battery"
@@ -544,6 +546,7 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
             SqlReviewLogRepository(s),
             SqlPassageRepository(s),
             SqlMockExamRepository(s),
+            SqlShareLinkRepository(s),
         )
         await library.delete_deck(owner_id="alice", deck_id="d1")
     async with sm() as s:

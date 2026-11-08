@@ -40,6 +40,7 @@ from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
+from flashcards.domain.sharing import ShareLink
 from flashcards.domain.users import User
 
 
@@ -597,6 +598,42 @@ def passage_from_row(row: PassageRow) -> Passage:
         page=row.page,
         ordinal=row.ordinal,
         text=row.text,
+    )
+
+
+class ShareLinkRow(Base):
+    __tablename__ = "share_links"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    deck_id: Mapped[str] = mapped_column(String, index=True)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    allow_clone: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def share_link_to_row(link: ShareLink) -> ShareLinkRow:
+    return ShareLinkRow(
+        id=link.id,
+        owner_id=link.owner_id,
+        deck_id=link.deck_id,
+        token_hash=link.token_hash,
+        allow_clone=link.allow_clone,
+        created_at=link.created_at,
+        revoked_at=link.revoked_at,
+    )
+
+
+def share_link_from_row(row: ShareLinkRow) -> ShareLink:
+    return ShareLink(
+        id=row.id,
+        owner_id=row.owner_id,
+        deck_id=row.deck_id,
+        token_hash=row.token_hash,
+        allow_clone=row.allow_clone,
+        created_at=row.created_at,
+        revoked_at=row.revoked_at,
     )
 
 

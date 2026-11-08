@@ -38,6 +38,7 @@ from flashcards.adapters.sql import (
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
+    SqlShareLinkRepository,
     SqlUserRepository,
 )
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
@@ -116,6 +117,7 @@ def sql_provider(
                     passages=SqlPassageRepository(session),
                     # Same counter table as page quota, separate daily period keys.
                     ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
+                    share_links=SqlShareLinkRepository(session),
                 )
             )
 

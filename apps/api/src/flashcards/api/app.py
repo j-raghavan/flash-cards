@@ -28,6 +28,7 @@ from flashcards.api.routers import (
     media,
     mock_exams,
     review,
+    sharing,
 )
 from flashcards.config import Settings
 from flashcards.domain.ai import DraftNotFound, InvalidModelOutput, LlmError
@@ -42,6 +43,7 @@ from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
+from flashcards.domain.sharing import CloneNotAllowed, CloneTooLarge, ShareNotFound
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 from flashcards.domain.summary import SummaryLocked
 from flashcards.domain.transcripts import (
@@ -117,6 +119,16 @@ def _register_error_handlers(app: FastAPI) -> None:
             status_code=429, content={"detail": "Daily AI request limit reached."}
         )
 
+    async def clone_not_allowed(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=403, content={"detail": "Cloning is not allowed for this link."}
+        )
+
+    async def clone_too_large(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=413, content={"detail": "The shared deck is too large to clone."}
+        )
+
     async def exam_closed(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
@@ -151,6 +163,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         GoalNotFound,
         MediaNotFound,
         ExamNotFound,
+        ShareNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -170,6 +183,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidTranscript, invalid_transcript)
     app.add_exception_handler(NoChatSources, no_chat_sources)
     app.add_exception_handler(ExamClosed, exam_closed)
+    app.add_exception_handler(CloneNotAllowed, clone_not_allowed)
+    app.add_exception_handler(CloneTooLarge, clone_too_large)
     app.add_exception_handler(AiCallLimitReached, ai_call_limit)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
@@ -232,6 +247,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(media.router)
     app.include_router(mock_exams.router)
     app.include_router(chat.router)
+    app.include_router(sharing.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
