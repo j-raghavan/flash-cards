@@ -79,6 +79,11 @@ class InMemoryUserRepository:
         user_id = self._email_to_id.get(email)
         return self._by_id.get(user_id) if user_id is not None else None
 
+    async def delete(self, user_id: str) -> None:
+        user = self._by_id.pop(user_id, None)
+        if user is not None:
+            self._email_to_id.pop(user.email, None)
+
 
 class InMemorySessionRepository:
     def __init__(self) -> None:
@@ -103,6 +108,10 @@ class InMemorySessionRepository:
             return False
         self._by_id[session_id] = session.with_revoked(now)
         return True
+
+    async def delete_for_user(self, user_id: str) -> None:
+        for session_id in [s.id for s in self._by_id.values() if s.user_id == user_id]:
+            del self._by_id[session_id]
 
 
 class InMemoryDeckRepository:
@@ -254,6 +263,12 @@ class InMemoryAiJobRepository:
 
     async def list_running(self) -> list[AiJob]:
         return [j for j in self._by_id.values() if j.status is JobStatus.RUNNING]
+
+    async def list_for_owner(self, owner_id: str) -> list[AiJob]:
+        return [j for j in self._by_id.values() if j.owner_id == owner_id]
+
+    async def delete(self, job_id: str) -> None:
+        self._by_id.pop(job_id, None)
 
 
 class InMemoryDraftCardRepository:

@@ -56,3 +56,14 @@ def test_export_returns_all_the_users_data(member: TestClient) -> None:
 
 def test_export_requires_auth(client: TestClient) -> None:
     assert client.get("/account/export").status_code == 401
+
+
+def test_delete_account_revokes_access(member: TestClient) -> None:
+    member.post("/decks", json={"name": "Spanish"})
+    assert member.delete("/account").status_code == 204
+    # The account is gone, so the session no longer authenticates.
+    assert member.get("/decks").status_code == 401
+
+
+def test_delete_requires_auth(client: TestClient) -> None:
+    assert client.delete("/account").status_code == 401

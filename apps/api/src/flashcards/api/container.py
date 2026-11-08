@@ -156,12 +156,18 @@ def build_services(repos: Repositories) -> Container:
     planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)
     apkg_import = ApkgImportService(repos.package_reader, decks, notes)
     account = AccountService(
+        library,
         repos.decks,
         repos.notes,
         repos.cards,
         repos.schedules,
         repos.review_logs,
         repos.goals,
+        repos.ai_jobs,
+        repos.draft_cards,
+        repos.object_store,
+        repos.sessions,
+        repos.users,
     )
     return Container(
         clock=repos.clock,

@@ -11,14 +11,22 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from flashcards.adapters.db import Base, create_engine, create_sessionmaker
 from flashcards.adapters.sql import (
+    SqlAiJobRepository,
     SqlCardRepository,
     SqlDeckRepository,
     SqlNoteRepository,
     SqlReviewLogRepository,
+    SqlSessionRepository,
+    SqlUserRepository,
 )
+from flashcards.domain.ai import Thoroughness
 from flashcards.domain.decks import Deck
+from flashcards.domain.invites import Role
+from flashcards.domain.jobs import new_generation_job
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import Rating, ReviewLog
+from flashcards.domain.sessions import Session
+from flashcards.domain.users import User
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
 
@@ -77,3 +85,40 @@ async def test_note_list_for_deck_and_review_log_list_for_owner(engine: AsyncEng
         owner_logs = await SqlReviewLogRepository(s).list_for_owner("alice")
         assert [log.id for log in owner_logs] == ["r1", "r2"]
         assert owner_logs[0].rating is Rating.AGAIN
+
+
+async def test_user_session_and_aijob_deletion(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlUserRepository(s).add(
+            User(id="u1", email="u@e.com", password_hash="h", role=Role.MEMBER, created_at=NOW)
+        )
+        sessions = SqlSessionRepository(s)
+        for sid, token in (("s1", "t1"), ("s2", "t2")):
+            await sessions.add(
+                Session(
+                    id=sid, user_id="u1", token_hash=token, created_at=NOW,
+                    expires_at=NOW + timedelta(days=1), revoked_at=None,
+                )
+            )
+        await SqlAiJobRepository(s).add(
+            new_generation_job(
+                owner_id="u1", source_id="src", draft_deck_id="d",
+                thoroughness=Thoroughness.STANDARD, now=NOW,
+            )
+        )
+
+    async with sm() as s:
+        assert len(await SqlAiJobRepository(s).list_for_owner("u1")) == 1
+
+    async with sm() as s, s.begin():
+        await SqlSessionRepository(s).delete_for_user("u1")
+        jobs = SqlAiJobRepository(s)
+        for job in await jobs.list_for_owner("u1"):
+            await jobs.delete(job.id)
+        await SqlUserRepository(s).delete("u1")
+
+    async with sm() as s:
+        assert await SqlUserRepository(s).get("u1") is None
+        assert await SqlSessionRepository(s).list_for_user("u1") == []
+        assert await SqlAiJobRepository(s).list_for_owner("u1") == []

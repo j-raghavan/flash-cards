@@ -140,6 +140,9 @@ class SqlUserRepository:
         row = await self._session.scalar(select(UserRow).where(UserRow.email == email))
         return user_from_row(row) if row is not None else None
 
+    async def delete(self, user_id: str) -> None:
+        await self._session.execute(delete(UserRow).where(UserRow.id == user_id))
+
 
 class SqlSessionRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -170,6 +173,9 @@ class SqlSessionRepository:
             .values(revoked_at=now)
         )
         return _changed_one(result)
+
+    async def delete_for_user(self, user_id: str) -> None:
+        await self._session.execute(delete(SessionRow).where(SessionRow.user_id == user_id))
 
 
 class SqlDeckRepository:
@@ -354,6 +360,15 @@ class SqlAiJobRepository:
             select(AiJobRow).where(AiJobRow.status == JobStatus.RUNNING.value)
         )
         return [aijob_from_row(row) for row in rows]
+
+    async def list_for_owner(self, owner_id: str) -> list[AiJob]:
+        rows = await self._session.scalars(
+            select(AiJobRow).where(AiJobRow.owner_id == owner_id)
+        )
+        return [aijob_from_row(row) for row in rows]
+
+    async def delete(self, job_id: str) -> None:
+        await self._session.execute(delete(AiJobRow).where(AiJobRow.id == job_id))
 
 
 class SqlDraftCardRepository:
