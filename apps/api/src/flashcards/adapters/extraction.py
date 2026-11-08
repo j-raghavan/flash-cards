@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""PyMuPDF document extractor (F-AI-1).
+
+Born-digital PDF pages yield their text (authoritative, with an exact page ref);
+text-less pages and uploaded images are rasterized/passed through for the vision
+model. Content type is sniffed from the bytes, never trusted from the client.
+The synchronous PyMuPDF work runs in a worker thread so SSE progress stays live.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+import anyio
+import puremagic
+import pymupdf
+
+from flashcards.domain.sources import (
+    ExtractedPage,
+    PageKind,
+    SourceRef,
+    TooManyPages,
+    UnsupportedMediaType,
+)
+
+_ALLOWED = {"application/pdf", "image/png", "image/jpeg"}
+# A page with at least this much extracted text is treated as born-digital text.
+_TEXT_THRESHOLD = 16
+_RASTER_DPI = 150
+
+
+class PyMuPDFExtractor:
+    def sniff(self, data: bytes) -> str:
+        try:
+            media = str(puremagic.from_string(data, mime=True))
+        except puremagic.PureError as exc:
+            raise UnsupportedMediaType("could not identify file type") from exc
+        if media not in _ALLOWED:
+            raise UnsupportedMediaType(media)
+        return media
+
+    async def extract(
+        self, data: bytes, *, file_id: str, max_pages: int
+    ) -> AsyncIterator[ExtractedPage]:
+        media = self.sniff(data)
+        if media != "application/pdf":
+            yield ExtractedPage(
+                ref=SourceRef(file_id=file_id, page=1),
+                kind=PageKind.IMAGE,
+                image=data,
+                image_media_type=media,
+            )
+            return
+
+        doc = await anyio.to_thread.run_sync(
+            lambda: pymupdf.open(stream=data, filetype="pdf")
+        )
+        try:
+            page_count = int(doc.page_count)
+            if page_count > max_pages:
+                raise TooManyPages(f"{page_count} pages (max {max_pages})")
+            for index in range(page_count):
+                yield await anyio.to_thread.run_sync(self._render_page, doc, index, file_id)
+        finally:
+            doc.close()
+
+    def _render_page(self, doc: object, index: int, file_id: str) -> ExtractedPage:
+        page = doc[index]  # type: ignore[index]
+        text = str(page.get_text()).strip()
+        ref = SourceRef(file_id=file_id, page=index + 1)
+        if len(text) >= _TEXT_THRESHOLD:
+            return ExtractedPage(ref=ref, kind=PageKind.TEXT, text=text)
+        png = bytes(page.get_pixmap(dpi=_RASTER_DPI).tobytes("png"))
+        return ExtractedPage(
+            ref=ref, kind=PageKind.IMAGE, image=png, image_media_type="image/png"
+        )

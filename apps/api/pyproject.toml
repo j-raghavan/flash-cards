@@ -17,6 +17,8 @@ dependencies = [
   "asyncpg>=0.29",
   "alembic>=1.13",
   "fsrs>=6,<7",
+  "pymupdf>=1.24",
+  "puremagic>=2.1",
 ]
 
 [project.scripts]
@@ -115,3 +117,10 @@ extend-immutable-calls = [
 strict = true
 python_version = "3.12"
 mypy_path = "src"
+
+# PyMuPDF ships py.typed but with incomplete annotations (many Any/untyped
+# callables); treat it as untyped so strict's no-untyped-call does not fire on it.
+[[tool.mypy.overrides]]
+module = ["pymupdf.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true

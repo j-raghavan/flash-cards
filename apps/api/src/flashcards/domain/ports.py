@@ -3,16 +3,18 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Protocol
 
 from flashcards.domain.ai import StructuredRequest, StructuredResult
 from flashcards.domain.decks import Deck
-from flashcards.domain.jobs import AiJob
 from flashcards.domain.invites import Invite
+from flashcards.domain.jobs import AiJob
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
+from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.users import User
 
 
@@ -181,6 +183,25 @@ class ReviewLogRepository(Protocol):
 
     async def delete_for_card(self, card_id: str) -> None:
         """Delete every review log for a card."""
+        ...
+
+
+class DocumentExtractor(Protocol):
+    def sniff(self, data: bytes) -> str:
+        """Return the real media type from content bytes, or raise UnsupportedMediaType.
+
+        The declared Content-Type and filename are never trusted.
+        """
+        ...
+
+    def extract(
+        self, data: bytes, *, file_id: str, max_pages: int
+    ) -> AsyncIterator[ExtractedPage]:
+        """Yield one normalized page at a time (peak memory ~ one page).
+
+        Raise flashcards.domain.sources.TooManyPages when the real page count
+        exceeds max_pages, and never execute embedded content.
+        """
         ...
 
 
