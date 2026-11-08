@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 
 import httpx
@@ -12,11 +13,27 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from flashcards.domain.ai import DraftCardRecord
+from flashcards.api.app import create_app
+from flashcards.config import Settings
+from flashcards.domain.ai import (
+    DraftCardRecord,
+    StructuredRequest,
+    StructuredResult,
+    TokenUsage,
+)
 from flashcards.domain.invites import Role
 from flashcards.domain.notes import NoteType
 
 PASSWORD = "correct-horse-battery"
+
+
+class _FakeLLM:
+    async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
+        return StructuredResult(
+            data={"cards": [{"type": "basic", "fields": {"front": "Q", "back": "A"}}]},
+            usage=TokenUsage(1, 1),
+            model="fake",
+        )
 
 
 def _pdf(pages: int = 1) -> bytes:
@@ -184,3 +201,39 @@ def test_approve_validation_and_unknown_draft(member: tuple[TestClient, str]) ->
     # An unknown draft id is not found.
     bad = client.post(f"/ai/jobs/{job_id}/approve", json={"draft_ids": ["nope"]})
     assert bad.status_code == 404
+
+
+def _poll_status(client: TestClient, job_id: str, tries: int = 200) -> str:
+    for _ in range(tries):
+        status: str = client.get(f"/ai/jobs/{job_id}").json()["status"]
+        if status in ("succeeded", "failed", "cancelled"):
+            return status
+        time.sleep(0.02)
+    raise AssertionError("job did not reach a terminal state")
+
+
+def test_generate_end_to_end_through_the_worker() -> None:
+    app = create_app(
+        Settings(environment="test", session_cookie_secure=False), llm=_FakeLLM()
+    )
+    with TestClient(app) as client:  # the context manager runs the lifespan worker
+        token = asyncio.run(
+            app.state.container.invites.create(created_by="test", role=Role.ADMIN)
+        ).raw_token
+        signup = client.post(
+            "/auth/signup",
+            json={"token": token, "email": "e2e@example.com", "password": PASSWORD},
+        )
+        assert signup.status_code == 201
+        deck_id = _make_deck(client)
+
+        job_id = _upload(client, deck_id, _pdf(2)).json()["id"]
+        assert _poll_status(client, job_id) == "succeeded"
+
+        drafts = client.get(f"/ai/jobs/{job_id}/drafts").json()
+        assert len(drafts) == 2  # one card per page
+        approved = client.post(
+            f"/ai/jobs/{job_id}/approve", json={"draft_ids": [d["id"] for d in drafts]}
+        )
+        assert approved.status_code == 201
+        assert len(client.get(f"/decks/{deck_id}/cards").json()) == 2

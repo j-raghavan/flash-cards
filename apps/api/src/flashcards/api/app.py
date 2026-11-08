@@ -21,6 +21,7 @@ from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
+from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import QuotaExceeded
 from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 
@@ -68,19 +69,27 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(TooManyPages, too_large)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = None) -> FastAPI:
     settings = settings or Settings()
 
     if settings.database_url:
-        engine, provider = sql_provider(settings.database_url)
+        engine, provider, job_queue = sql_provider(settings.database_url)
         container = None
     else:
-        container, provider = in_memory_provider()
+        container, provider, job_queue = in_memory_provider(llm=llm)
         engine = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        async def process(job_id: str) -> None:
+            # A fresh unit of work per job: in SQL mode this is its own session
+            # and transaction, committed when generation completes.
+            async for request_container in provider():
+                await request_container.card_generation.run(job_id)
+
+        job_queue.start(process)
         yield
+        await job_queue.stop()
         if engine is not None:
             await engine.dispose()
 

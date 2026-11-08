@@ -11,13 +11,14 @@ from dataclasses import dataclass
 
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
+from flashcards.adapters.job_queue import InProcessJobQueue
+from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
     InMemoryCardRepository,
     InMemoryDeckRepository,
     InMemoryDraftCardRepository,
     InMemoryInviteRepository,
-    InMemoryJobQueue,
     InMemoryNoteRepository,
     InMemoryObjectStore,
     InMemoryQuotaRepository,
@@ -29,6 +30,7 @@ from flashcards.adapters.memory import (
 )
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.application.auth_service import AuthService
+from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
 from flashcards.application.generation_request_service import GenerationRequestService
@@ -46,6 +48,7 @@ from flashcards.domain.ports import (
     DraftCardRepository,
     InviteRepository,
     JobQueue,
+    LLMProvider,
     NoteRepository,
     ObjectStore,
     PasswordHasher,
@@ -77,6 +80,7 @@ class Repositories:
     quotas: QuotaRepository
     extractor: DocumentExtractor
     job_queue: JobQueue
+    llm: LLMProvider
     dummy_hash: str | None = None
 
 
@@ -94,6 +98,7 @@ class Container:
     library: LibraryService
     generation: GenerationRequestService
     draft_review: DraftReviewService
+    card_generation: CardGenerationService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -125,6 +130,14 @@ def build_services(repos: Repositories) -> Container:
         repos.clock,
     )
     draft_review = DraftReviewService(repos.ai_jobs, repos.draft_cards, notes)
+    card_generation = CardGenerationService(
+        repos.ai_jobs,
+        repos.draft_cards,
+        repos.object_store,
+        repos.extractor,
+        repos.llm,
+        repos.clock,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -138,11 +151,18 @@ def build_services(repos: Repositories) -> Container:
         library=library,
         generation=generation,
         draft_review=draft_review,
+        card_generation=card_generation,
     )
 
 
-def build_container() -> Container:
-    """Build an in-memory container (default for dev and tests)."""
+def build_container(
+    *, llm: LLMProvider | None = None, job_queue: JobQueue | None = None
+) -> Container:
+    """Build an in-memory container (default for dev and tests).
+
+    llm and job_queue can be supplied so a caller can inject a real LLM or share
+    one worker queue; both default to the no-op/in-process implementations.
+    """
     return build_services(
         Repositories(
             clock=SystemClock(),
@@ -161,6 +181,7 @@ def build_container() -> Container:
             object_store=InMemoryObjectStore(),
             quotas=InMemoryQuotaRepository(),
             extractor=PyMuPDFExtractor(),
-            job_queue=InMemoryJobQueue(),
+            job_queue=job_queue or InProcessJobQueue(),
+            llm=llm or NullLLMProvider(),
         )
     )

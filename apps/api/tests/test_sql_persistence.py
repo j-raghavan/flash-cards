@@ -22,6 +22,7 @@ from flashcards.adapters.db import (
 )
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
+from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.memory import InMemoryJobQueue, SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
@@ -68,6 +69,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         quotas=SqlQuotaRepository(session),
         extractor=PyMuPDFExtractor(),
         job_queue=InMemoryJobQueue(),
+        llm=NullLLMProvider(),
     )
 
 PASSWORD = "correct-horse-battery"

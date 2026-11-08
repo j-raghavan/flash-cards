@@ -30,7 +30,7 @@ async def start_generation(
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large."
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File too large."
         )
     job = await container.generation.start(
         owner_id=caller.user.id, deck_id=deck_id, data=data, thoroughness=thoroughness
