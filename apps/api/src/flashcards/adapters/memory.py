@@ -8,6 +8,7 @@ what the invite single-use guarantee relies on here.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from flashcards.domain.ai import DraftCardRecord
@@ -374,6 +375,17 @@ class InMemoryMockExamRepository:
 
     async def get(self, exam_id: str) -> MockExam | None:
         return self._by_id.get(exam_id)
+
+    async def list_for_owner(self, owner_id: str) -> list[MockExam]:
+        owned = [e for e in self._by_id.values() if e.owner_id == owner_id]
+        return sorted(owned, key=lambda e: e.created_at)
+
+    async def try_mark_submitted(self, exam_id: str, now: datetime) -> bool:
+        exam = self._by_id.get(exam_id)
+        if exam is None or exam.submitted_at is not None:
+            return False
+        self._by_id[exam_id] = replace(exam, submitted_at=now)
+        return True
 
     async def delete_for_deck(self, deck_id: str) -> None:
         for exam_id in [e.id for e in self._by_id.values() if e.deck_id == deck_id]:

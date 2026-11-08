@@ -109,6 +109,20 @@ async def test_summary_unlocks_at_the_threshold() -> None:
     assert b"Q0" in request.documents[0].data and "Q0" not in request.instructions
 
 
+async def test_summary_counts_subdeck_cards() -> None:
+    llm = _FakeLLM()
+    service, decks, notes = _service(llm, unlock_cards=2)
+    parent = await decks.create(owner_id="alice", name="Parent")
+    child = await _add_cards(notes, decks, "alice", 2)
+    await decks.move(owner_id="alice", deck_id=child, new_parent_id=parent.id)
+
+    result = await service.summarize(owner_id="alice", deck_id=parent.id)
+
+    assert result.summary == "A summary."
+    request = llm.last_request
+    assert request is not None and b"Q1" in request.documents[0].data
+
+
 async def test_summary_is_owner_scoped() -> None:
     service, decks, notes = _service(_FakeLLM(), unlock_cards=1)
     deck_id = await _add_cards(notes, decks, "alice", 1)

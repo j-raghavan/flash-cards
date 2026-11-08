@@ -23,14 +23,18 @@ from flashcards.domain.mock_exam import (
     GRADE_SCHEMA,
     MAX_EXAM_QUESTIONS,
     MAX_EXAM_SOURCE_CHARS,
+    ExamClosed,
     ExamLocked,
     ExamNotFound,
     ExamQuestion,
     ExamResult,
     MockExam,
     grade_exam,
+    grading_key,
+    numbered_answers,
     parse_exam_questions,
     parse_grades,
+    scores_for_answered,
 )
 from flashcards.domain.notes import Note
 from flashcards.domain.ports import (
@@ -70,13 +74,15 @@ class MockExamService:
         question_count: int,
         time_limit_seconds: int | None,
     ) -> MockExam:
-        # Raises DeckNotFound if the deck is missing or not the caller's.
-        await self._decks.get(owner_id=owner_id, deck_id=deck_id)
-        card_count = len(await self._cards.list_for_deck(deck_id))
+        # The deck counts with its subdecks. Raises DeckNotFound if the deck is
+        # missing or not the caller's.
+        deck_ids = await self._decks.subtree_ids(owner_id=owner_id, deck_id=deck_id)
+        card_count = sum([len(await self._cards.list_for_deck(d)) for d in deck_ids])
         if card_count < self._unlock_cards:
             raise ExamLocked(required=self._unlock_cards, have=card_count)
         limit = max(1, min(question_count, MAX_EXAM_QUESTIONS))
-        source = _collect_source(await self._notes.list_for_deck(deck_id))
+        notes = [n for d in deck_ids for n in await self._notes.list_for_deck(d)]
+        source = _collect_source(notes)
         request = StructuredRequest(
             instructions=exam_prompt(limit),
             documents=(LlmDocument(media_type="text/plain", data=source.encode("utf-8")),),
@@ -102,26 +108,41 @@ class MockExamService:
     async def grade(
         self, *, owner_id: str, exam_id: str, answers: Mapping[str, str]
     ) -> ExamResult:
+        """Grade one submission. An exam is submitted once, within its time limit.
+
+        The submission is recorded before the model call, so concurrent submits
+        cannot both be graded. In SQL mode a failed model call rolls that record
+        back with the rest of the request.
+        """
         exam = await self._exams.get(exam_id)
         if exam is None or exam.owner_id != owner_id:
             raise ExamNotFound(exam_id)
-        valid_ids = {question.id for question in exam.questions}
-        submitted = {qid: text for qid, text in answers.items() if qid in valid_ids}
-        if not submitted:
+        now = self._clock.now()
+        reason = exam.closed_reason(now)
+        if reason is not None:
+            raise ExamClosed(reason)
+        if not await self._exams.try_mark_submitted(exam.id, now):
+            raise ExamClosed("this exam was already submitted")
+        answered = numbered_answers(exam, answers)
+        if not answered:
             # Nothing to grade: every question scores zero.
             return grade_exam(exam, {})
         request = StructuredRequest(
-            instructions=exam_grading_prompt(_questions_text(exam.questions)),
+            instructions=exam_grading_prompt(),
             documents=(
+                LlmDocument(media_type="text/plain", data=grading_key(exam).encode("utf-8")),
                 LlmDocument(
-                    media_type="text/plain", data=json.dumps(submitted).encode("utf-8")
+                    media_type="text/plain",
+                    data=json.dumps({str(n): text for n, text in answered.items()}).encode(
+                        "utf-8"
+                    ),
                 ),
             ),
             schema=GRADE_SCHEMA,
             max_output_tokens=GRADE_MAX_OUTPUT_TOKENS,
         )
         result = await self._llm.generate_structured(request)
-        return grade_exam(exam, parse_grades(result.data))
+        return grade_exam(exam, scores_for_answered(exam, answered, parse_grades(result.data)))
 
 
 def _collect_source(notes: list[Note]) -> str:
@@ -136,8 +157,3 @@ def _collect_source(notes: list[Note]) -> str:
             lines.append(line)
     return "\n".join(lines)
 
-
-def _questions_text(questions: tuple[ExamQuestion, ...]) -> str:
-    return "\n".join(
-        f"[{q.id}] (topic: {q.topic}) {q.prompt}\nreference: {q.reference}" for q in questions
-    )

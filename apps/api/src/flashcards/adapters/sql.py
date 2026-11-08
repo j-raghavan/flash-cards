@@ -528,6 +528,24 @@ class SqlMockExamRepository:
         row = await self._session.get(MockExamRow, exam_id)
         return mock_exam_from_row(row) if row is not None else None
 
+    async def list_for_owner(self, owner_id: str) -> list[MockExam]:
+        rows = await self._session.scalars(
+            select(MockExamRow)
+            .where(MockExamRow.owner_id == owner_id)
+            .order_by(MockExamRow.created_at)
+        )
+        return [mock_exam_from_row(row) for row in rows]
+
+    async def try_mark_submitted(self, exam_id: str, now: datetime) -> bool:
+        # A conditional update, so two concurrent submits cannot both succeed.
+        marked = await self._session.scalar(
+            update(MockExamRow)
+            .where(MockExamRow.id == exam_id, MockExamRow.submitted_at.is_(None))
+            .values(submitted_at=now)
+            .returning(MockExamRow.id)
+        )
+        return marked is not None
+
     async def delete_for_deck(self, deck_id: str) -> None:
         await self._session.execute(delete(MockExamRow).where(MockExamRow.deck_id == deck_id))
 

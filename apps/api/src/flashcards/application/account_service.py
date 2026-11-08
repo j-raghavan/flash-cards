@@ -15,6 +15,7 @@ from flashcards.application.library_service import LibraryService
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.media import MediaAsset
+from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.ports import (
     AiJobRepository,
@@ -47,6 +48,7 @@ class AccountExport:
     review_logs: tuple[ReviewLog, ...]
     goals: tuple[Goal, ...]
     media: tuple[MediaAsset, ...]
+    mock_exams: tuple[MockExam, ...]
 
 
 class AccountService:
@@ -108,6 +110,7 @@ class AccountService:
             review_logs=tuple(await self._review_logs.list_for_owner(user.id)),
             goals=tuple(await self._goals.list_for_owner(user.id)),
             media=tuple(await self._media.list_for_owner(user.id)),
+            mock_exams=tuple(await self._mock_exams.list_for_owner(user.id)),
         )
 
     async def delete(self, *, user: User) -> None:

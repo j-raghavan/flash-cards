@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -80,7 +82,7 @@ def test_create_and_submit_a_mock_exam() -> None:
     first_q = body["questions"][0]["id"]
 
     # The same scripted LLM backs the app, so queue the grade response for the submit call.
-    llm._responses.append({"grades": [{"question_id": first_q, "score": 1.0}]})
+    llm._responses.append({"grades": [{"question": 1, "score": 1.0}]})
     submitted = client.post(
         f"/mock-exams/{exam_id}/submit",
         json={"answers": [{"question_id": first_q, "answer": "4"}]},
@@ -90,6 +92,38 @@ def test_create_and_submit_a_mock_exam() -> None:
     assert result["topics"][0]["topic"] == "Math"
     scores = {qs["question_id"]: qs["score"] for qs in result["question_scores"]}
     assert scores[first_q] == 1.0
+
+    # One submission per exam.
+    again = client.post(f"/mock-exams/{exam_id}/submit", json={"answers": []})
+    assert again.status_code == 409
+    assert again.json()["detail"] == "this exam was already submitted"
+
+
+def test_created_exam_reports_its_timer() -> None:
+    client = _member(_app(_ScriptedLLM([EXAM_DATA])))
+    deck_id = _deck(client)
+    _add_twenty_cards(client, deck_id)
+    body = client.post(
+        f"/decks/{deck_id}/mock-exam", json={"question_count": 2, "time_limit_seconds": 600}
+    ).json()
+    assert body["time_limit_seconds"] == 600 and body["submitted_at"] is None
+    created = datetime.fromisoformat(body["created_at"])
+    assert datetime.fromisoformat(body["deadline"]) == created + timedelta(seconds=600)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"question_count": 0},
+        {"question_count": 51},
+        {"time_limit_seconds": 0},
+        {"time_limit_seconds": 86_401},
+    ],
+)
+def test_mock_exam_request_bounds(payload: dict[str, int]) -> None:
+    client = _member(_app(_ScriptedLLM([EXAM_DATA])))
+    deck_id = _deck(client)
+    assert client.post(f"/decks/{deck_id}/mock-exam", json=payload).status_code == 422
 
 
 def test_mock_exam_is_locked_for_a_small_deck() -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flashcards.domain.ai import LlmError
 
@@ -22,6 +22,8 @@ MAX_EXAM_QUESTIONS = 50
 EXAM_MAX_OUTPUT_TOKENS = 4096
 GRADE_MAX_OUTPUT_TOKENS = 2048
 MAX_EXAM_SOURCE_CHARS = 100_000
+# Slack after the time limit for network latency and an auto-submit at zero.
+SUBMIT_GRACE_SECONDS = 120
 _DEFAULT_TOPIC = "General"
 
 
@@ -36,6 +38,10 @@ class ExamLocked(Exception):
 
 class ExamNotFound(Exception):
     """A mock exam that does not exist or is not the caller's."""
+
+
+class ExamClosed(Exception):
+    """The exam was already submitted, or its time limit has passed."""
 
 
 class InvalidExam(LlmError):
@@ -58,6 +64,22 @@ class MockExam:
     created_at: datetime
     time_limit_seconds: int | None
     questions: tuple[ExamQuestion, ...]
+    submitted_at: datetime | None = None
+
+    @property
+    def deadline(self) -> datetime | None:
+        if self.time_limit_seconds is None:
+            return None
+        return self.created_at + timedelta(seconds=self.time_limit_seconds)
+
+    def closed_reason(self, now: datetime) -> str | None:
+        """Why the exam can no longer be submitted at `now`, or None if it can."""
+        if self.submitted_at is not None:
+            return "this exam was already submitted"
+        deadline = self.deadline
+        if deadline is not None and now > deadline + timedelta(seconds=SUBMIT_GRACE_SECONDS):
+            return "the time limit for this exam has passed"
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,10 +133,10 @@ GRADE_SCHEMA: Mapping[str, object] = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "question_id": {"type": "string"},
+                    "question": {"type": "integer"},
                     "score": {"type": "number"},
                 },
-                "required": ["question_id", "score"],
+                "required": ["question", "score"],
             },
         }
     },
@@ -143,22 +165,55 @@ def parse_exam_questions(raw: Mapping[str, object], *, limit: int) -> list[tuple
     return out
 
 
-def parse_grades(raw: Mapping[str, object]) -> dict[str, float]:
-    """Map question_id -> clamped score. Malformed entries are skipped, not fatal."""
+def parse_grades(raw: Mapping[str, object]) -> dict[int, float]:
+    """Map question number (1-based) -> clamped score; malformed entries are skipped.
+
+    Questions are numbered for the model rather than identified by their UUIDs, so
+    a mistyped id can never silently zero a question.
+    """
     grades = raw.get("grades")
     if not isinstance(grades, list):
         raise InvalidExam("grades are missing or not a list")
-    result: dict[str, float] = {}
+    result: dict[int, float] = {}
     for item in grades:
         if not isinstance(item, dict):
             continue
-        question_id = item.get("question_id")
+        number = item.get("question")
         score = item.get("score")
-        if not isinstance(question_id, str) or isinstance(score, bool):
+        if isinstance(number, bool) or not isinstance(number, int) or isinstance(score, bool):
             continue
         if isinstance(score, int | float):
-            result[question_id] = min(1.0, max(0.0, float(score)))
+            result[number] = min(1.0, max(0.0, float(score)))
     return result
+
+
+def grading_key(exam: MockExam) -> str:
+    """The numbered questions with their references: the grader's key, sent as data."""
+    return "\n\n".join(
+        f"[{n}] (topic: {q.topic}) {q.prompt}\nreference: {q.reference}"
+        for n, q in enumerate(exam.questions, start=1)
+    )
+
+
+def numbered_answers(exam: MockExam, answers: Mapping[str, str]) -> dict[int, str]:
+    """The non-blank answers to this exam's questions, keyed by question number."""
+    out: dict[int, str] = {}
+    for n, question in enumerate(exam.questions, start=1):
+        text = answers.get(question.id, "").strip()
+        if text:
+            out[n] = text
+    return out
+
+
+def scores_for_answered(
+    exam: MockExam, answered: Mapping[int, str], scores: Mapping[int, float]
+) -> dict[str, float]:
+    """Keep the model's scores only for questions the student actually answered."""
+    return {
+        question.id: scores[n]
+        for n, question in enumerate(exam.questions, start=1)
+        if n in answered and n in scores
+    }
 
 
 def grade_exam(exam: MockExam, scores_by_id: Mapping[str, float]) -> ExamResult:

@@ -235,7 +235,11 @@ class ExamQuestionOut(BaseModel):
 class MockExamOut(BaseModel):
     id: str
     deck_id: str
+    created_at: datetime
     time_limit_seconds: int | None
+    # When the timer runs out, so a client that reloads can rebuild it.
+    deadline: datetime | None
+    submitted_at: datetime | None
     questions: list[ExamQuestionOut]
 
     @classmethod
@@ -244,7 +248,10 @@ class MockExamOut(BaseModel):
         return cls(
             id=exam.id,
             deck_id=exam.deck_id,
+            created_at=exam.created_at,
             time_limit_seconds=exam.time_limit_seconds,
+            deadline=exam.deadline,
+            submitted_at=exam.submitted_at,
             questions=[
                 ExamQuestionOut(id=q.id, prompt=q.prompt, topic=q.topic) for q in exam.questions
             ],
@@ -519,6 +526,21 @@ class GoalExportOut(BaseModel):
     created_at: datetime
 
 
+class MockExamQuestionExportOut(BaseModel):
+    prompt: str
+    reference: str
+    topic: str
+
+
+class MockExamExportOut(BaseModel):
+    id: str
+    deck_id: str
+    created_at: datetime
+    time_limit_seconds: int | None
+    submitted_at: datetime | None
+    questions: list[MockExamQuestionExportOut]
+
+
 class MediaExportOut(BaseModel):
     id: str
     content_type: str
@@ -534,6 +556,7 @@ class AccountExportOut(BaseModel):
     review_logs: list[ReviewLogExportOut]
     goals: list[GoalExportOut]
     media: list[MediaExportOut]
+    mock_exams: list[MockExamExportOut]
 
     @classmethod
     def from_export(cls, export: AccountExport) -> AccountExportOut:
@@ -601,5 +624,21 @@ class AccountExportOut(BaseModel):
             media=[
                 MediaExportOut(id=m.id, content_type=m.content_type, created_at=m.created_at)
                 for m in export.media
+            ],
+            mock_exams=[
+                MockExamExportOut(
+                    id=e.id,
+                    deck_id=e.deck_id,
+                    created_at=e.created_at,
+                    time_limit_seconds=e.time_limit_seconds,
+                    submitted_at=e.submitted_at,
+                    questions=[
+                        MockExamQuestionExportOut(
+                            prompt=q.prompt, reference=q.reference, topic=q.topic
+                        )
+                        for q in e.questions
+                    ],
+                )
+                for e in export.mock_exams
             ],
         )

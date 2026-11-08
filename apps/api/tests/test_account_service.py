@@ -163,6 +163,7 @@ async def test_export_gathers_everything_the_user_owns() -> None:
     assert len(export.review_logs) == 1
     assert len(export.goals) == 1
     assert [m.id for m in export.media] == ["media-alice"]
+    assert [e.id for e in export.mock_exams] == ["exam-alice"]
 
 
 async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> None:

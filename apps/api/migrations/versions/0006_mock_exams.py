@@ -25,6 +25,7 @@ def upgrade() -> None:
         sa.Column("deck_id", sa.String(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("time_limit_seconds", sa.Integer(), nullable=True),
+        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("questions", sa.JSON(), nullable=False),
     )
     op.create_index("ix_mock_exams_owner_id", "mock_exams", ["owner_id"])

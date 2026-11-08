@@ -37,7 +37,7 @@ from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
-from flashcards.domain.mock_exam import ExamLocked, ExamNotFound
+from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
 from flashcards.domain.ports import LLMProvider
 from flashcards.domain.quotas import QuotaExceeded
@@ -111,6 +111,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def invalid_transcript(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
+    async def exam_closed(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
     async def no_chat_sources(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(
             status_code=409,
@@ -151,6 +154,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(TranscriptUnavailable, no_transcript)
     app.add_exception_handler(InvalidTranscript, invalid_transcript)
     app.add_exception_handler(NoChatSources, no_chat_sources)
+    app.add_exception_handler(ExamClosed, exam_closed)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
     # Catches InvalidEvaluation, InvalidSummary and InvalidExam too (all LlmError).

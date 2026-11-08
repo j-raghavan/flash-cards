@@ -148,7 +148,17 @@ async def test_mock_exam_roundtrip_and_owner_delete(engine: AsyncEngine) -> None
     async with sm() as s:
         loaded = await SqlMockExamRepository(s).get("e1")
         assert loaded is not None
-        assert loaded.time_limit_seconds == 600
+        assert loaded.time_limit_seconds == 600 and loaded.submitted_at is None
+        assert [e.id for e in await SqlMockExamRepository(s).list_for_owner("alice")] == ["e1"]
+
+    async with sm() as s, s.begin():
+        # A conditional update: only the first submission is recorded.
+        assert await SqlMockExamRepository(s).try_mark_submitted("e1", NOW) is True
+        assert await SqlMockExamRepository(s).try_mark_submitted("e1", NOW) is False
+        assert await SqlMockExamRepository(s).try_mark_submitted("missing", NOW) is False
+    async with sm() as s:
+        marked = await SqlMockExamRepository(s).get("e1")
+        assert marked is not None and marked.submitted_at == NOW
         assert [q.reference for q in loaded.questions] == ["r1", "r2"]
         assert await SqlMockExamRepository(s).get("missing") is None
 

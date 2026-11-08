@@ -357,6 +357,14 @@ class MockExamRepository(Protocol):
 
     async def get(self, exam_id: str) -> MockExam | None: ...
 
+    async def list_for_owner(self, owner_id: str) -> list[MockExam]:
+        """Return the owner's mock exams, oldest first (account export)."""
+        ...
+
+    async def try_mark_submitted(self, exam_id: str, now: datetime) -> bool:
+        """Record the one submission atomically; False if it was already submitted."""
+        ...
+
     async def delete_for_deck(self, deck_id: str) -> None:
         """Delete a deck's mock exams (deck deletion)."""
         ...

@@ -533,6 +533,7 @@ class MockExamRow(Base):
     deck_id: Mapped[str] = mapped_column(String, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     time_limit_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The full question set, references included, as a list of flat string maps.
     questions: Mapped[list[dict[str, str]]] = mapped_column(JSON)
 
@@ -544,6 +545,7 @@ def mock_exam_to_row(exam: MockExam) -> MockExamRow:
         deck_id=exam.deck_id,
         created_at=exam.created_at,
         time_limit_seconds=exam.time_limit_seconds,
+        submitted_at=exam.submitted_at,
         questions=[
             {"id": q.id, "prompt": q.prompt, "reference": q.reference, "topic": q.topic}
             for q in exam.questions
@@ -558,6 +560,7 @@ def mock_exam_from_row(row: MockExamRow) -> MockExam:
         deck_id=row.deck_id,
         created_at=row.created_at,
         time_limit_seconds=row.time_limit_seconds,
+        submitted_at=row.submitted_at,
         questions=tuple(
             ExamQuestion(
                 id=q["id"], prompt=q["prompt"], reference=q["reference"], topic=q["topic"]

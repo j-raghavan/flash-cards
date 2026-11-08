@@ -40,12 +40,14 @@ class SummaryService:
         self._unlock_cards = unlock_cards
 
     async def summarize(self, *, owner_id: str, deck_id: str) -> DeckSummary:
-        # Raises DeckNotFound if the deck is missing or not the caller's.
-        await self._decks.get(owner_id=owner_id, deck_id=deck_id)
-        card_count = len(await self._cards.list_for_deck(deck_id))
+        # The deck counts with its subdecks. Raises DeckNotFound if the deck is
+        # missing or not the caller's.
+        deck_ids = await self._decks.subtree_ids(owner_id=owner_id, deck_id=deck_id)
+        card_count = sum([len(await self._cards.list_for_deck(d)) for d in deck_ids])
         if card_count < self._unlock_cards:
             raise SummaryLocked(required=self._unlock_cards, have=card_count)
-        source = _collect_source(await self._notes.list_for_deck(deck_id))
+        notes = [n for d in deck_ids for n in await self._notes.list_for_deck(d)]
+        source = _collect_source(notes)
         request = StructuredRequest(
             instructions=summary_prompt(),
             documents=(LlmDocument(media_type="text/plain", data=source.encode("utf-8")),),
