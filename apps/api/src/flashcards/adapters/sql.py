@@ -24,6 +24,7 @@ from flashcards.adapters.db import (
     CardScheduleRow,
     DeckRow,
     DraftCardRow,
+    GoalRow,
     InviteRow,
     NoteRow,
     ReviewLogRow,
@@ -37,6 +38,8 @@ from flashcards.adapters.db import (
     deck_to_row,
     draft_from_row,
     draft_to_row,
+    goal_from_row,
+    goal_to_row,
     invite_from_row,
     invite_to_row,
     note_from_row,
@@ -51,6 +54,7 @@ from flashcards.adapters.db import (
 )
 from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.decks import Deck
+from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.notes import Card, Note
@@ -410,3 +414,32 @@ class SqlQuotaRepository:
             .returning(AiQuotaRow.used_pages)
         )
         return await self._session.scalar(stmt) is not None
+
+
+class SqlGoalRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, goal: Goal) -> None:
+        self._session.add(goal_to_row(goal))
+        await self._session.flush()
+
+    async def get(self, goal_id: str) -> Goal | None:
+        row = await self._session.get(GoalRow, goal_id)
+        return goal_from_row(row) if row is not None else None
+
+    async def list_for_owner(self, owner_id: str) -> list[Goal]:
+        rows = await self._session.scalars(
+            select(GoalRow).where(GoalRow.owner_id == owner_id).order_by(GoalRow.created_at.desc())
+        )
+        return [goal_from_row(row) for row in rows]
+
+    async def update(self, goal: Goal) -> None:
+        await self._session.merge(goal_to_row(goal))
+        await self._session.flush()
+
+    async def delete(self, goal_id: str) -> None:
+        row = await self._session.get(GoalRow, goal_id)
+        if row is not None:
+            await self._session.delete(row)
+            await self._session.flush()
