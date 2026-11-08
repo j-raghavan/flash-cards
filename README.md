@@ -2,19 +2,26 @@
 
 Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, photos of notes or a YouTube link, review the generated cards, set an exam date and target grade, and follow a daily plan.
 
-> **Status:** pre-alpha. The product requirements are written; implementation is starting at milestone M0. See [docs/PRD.md](docs/PRD.md).
+> **Status:** pre-alpha. I've built the backend API through milestone M5. There is no web app yet, so for now it's an API you drive directly. See [docs/PRD.md](docs/PRD.md) for the full plan.
 
-## Planned capabilities
+## What the API does today
 
-- AI card generation from PDF, PNG, JPEG and YouTube, with mandatory review and a source reference on every card
-- Basic, Cloze, Image Occlusion and custom note types
-- Anki `.apkg` import and export
-- FSRS-based adaptive scheduling, exam-date planner and readiness forecast
-- Self-evaluated and AI-evaluated study modes, summaries, mock exams and document chat
+- Invite-only accounts with sessions; admins create and revoke invites
+- Nested decks, Basic and Cloze cards, image and audio attachments
+- FSRS-based scheduling with self-evaluated reviews, deck stats and proficiency
+- AI card generation from PDF, PNG and JPEG, or a pasted transcript, as an async job with a draft deck to review and approve, a source page on every card, and a monthly page quota
+- Exam goals with a daily study plan and a readiness forecast
+- Anki `.apkg` import, full account export and account deletion
+- AI grading of typed answers, deck summaries, timed mock exams with a per-topic breakdown, and chat with a deck's source documents that cites the page
+- Anthropic by default, or any OpenAI-compatible endpoint, including a local model
+
+## Still to come
+
+- The web app: an installable PWA with offline review
 - Deck sharing by revocable link, with optional cloning
-- Invite-only access with an admin console, quotas and audit log
-- Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint including local models
-- Installable PWA with offline review
+- Email verification, password reset, an admin console for users and quotas, and an audit log
+- Image Occlusion, custom note types, and `.apkg` export
+- Fetching YouTube transcripts automatically (for now you paste the transcript)
 
 ## Stack
 
