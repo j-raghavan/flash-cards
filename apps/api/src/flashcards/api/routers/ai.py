@@ -7,8 +7,12 @@ and approve the draft cards it produced into a real deck.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from collections.abc import AsyncIterator
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.sse import EventSourceResponse
+
+from flashcards.api import job_events as events
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
 from flashcards.api.schemas import (
@@ -20,6 +24,7 @@ from flashcards.api.schemas import (
     YouTubeGenerateRequest,
 )
 from flashcards.domain.ai import Thoroughness
+from flashcards.domain.jobs import AiJob, JobNotFound
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -96,6 +101,63 @@ async def cancel_job(
 ) -> JobOut:
     await container.generation.cancel(owner_id=caller.user.id, job_id=job_id)
     return JobOut.from_job(await container.generation.get(owner_id=caller.user.id, job_id=job_id))
+
+
+@router.get(
+    "/jobs/{job_id}/events",
+    # The handler returns the stream itself (after checking ownership in its own
+    # short transaction), so it does not use FastAPI's yield-style SSE routes.
+    responses={
+        200: {
+            "description": "progress and done events",
+            "content": {"text/event-stream": {}},
+        },
+        404: {"description": "No such job"},
+        429: {"description": "Too many open event streams"},
+    },
+)
+async def job_progress_events(
+    job_id: str,
+    request: Request,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> EventSourceResponse:
+    """Stream the job's progress (ADR 0012).
+
+    Ownership is checked here, in this request's own short transaction, which
+    ends before streaming starts. The stream then reads the job in a fresh unit
+    of work on every poll, so no database connection is held while it runs.
+    """
+    owner_id = caller.user.id
+    await container.generation.get(owner_id=owner_id, job_id=job_id)  # JobNotFound: 404
+    slots: events.StreamSlots = request.app.state.event_stream_slots
+    token = slots.acquire(owner_id)
+    if token is None:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many open event streams.")
+    provider = request.app.state.services_provider
+
+    async def load() -> AiJob | None:
+        found: AiJob | None = None
+        async for unit in provider():
+            try:
+                found = await unit.generation.get(owner_id=owner_id, job_id=job_id)
+            except JobNotFound:
+                found = None
+        return found
+
+    async def stream() -> AsyncIterator[bytes]:
+        try:
+            async for frame in events.job_events(
+                load,
+                poll_seconds=events.POLL_SECONDS,
+                keepalive_seconds=events.KEEPALIVE_SECONDS,
+                max_seconds=events.MAX_STREAM_SECONDS,
+            ):
+                yield frame
+        finally:
+            slots.release(owner_id, token)
+
+    return EventSourceResponse(stream(), headers={"Cache-Control": "no-cache"})
 
 
 @router.post("/jobs/{job_id}/retry", response_model=JobOut)
