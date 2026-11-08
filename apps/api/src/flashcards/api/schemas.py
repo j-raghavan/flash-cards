@@ -12,8 +12,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite, InviteStatus, Role
+from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
@@ -203,3 +205,49 @@ class DeckStatsOut(BaseModel):
             due=stats.due,
             proficiency=stats.proficiency,
         )
+
+
+class JobOut(BaseModel):
+    id: str
+    status: JobStatus
+    progress: float
+    total_units: int
+    completed_units: int
+    cancel_requested: bool
+    error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_job(cls, job: AiJob) -> JobOut:
+        return cls(
+            id=job.id,
+            status=job.status,
+            progress=job.progress,
+            total_units=job.total_units,
+            completed_units=job.completed_units,
+            cancel_requested=job.cancel_requested,
+            error=job.error,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+
+
+class DraftOut(BaseModel):
+    id: str
+    note_type: NoteType
+    fields: dict[str, str]
+    source_page: int
+
+    @classmethod
+    def from_record(cls, record: DraftCardRecord) -> DraftOut:
+        return cls(
+            id=record.id,
+            note_type=record.note_type,
+            fields=dict(record.fields),
+            source_page=record.source_page,
+        )
+
+
+class ApproveDraftsRequest(BaseModel):
+    draft_ids: list[str] = Field(min_length=1, max_length=500)

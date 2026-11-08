@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 license = { text = "AGPL-3.0-only" }
 dependencies = [
   "fastapi>=0.115",
+  "python-multipart>=0.0.9",
   "uvicorn>=0.30",
   "pydantic-settings>=2.4",
   "argon2-cffi>=23.1",

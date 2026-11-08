@@ -14,11 +14,15 @@ from fastapi.responses import JSONResponse
 from flashcards import __version__
 from flashcards.api.container import Container
 from flashcards.api.provider import in_memory_provider, sql_provider
-from flashcards.api.routers import admin, auth, cards, decks, review
+from flashcards.api.routers import admin, ai, auth, cards, decks, review
 from flashcards.config import Settings
+from flashcards.domain.ai import DraftNotFound
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.invites import Role
+from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
+from flashcards.domain.quotas import QuotaExceeded
+from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
 
 logger = logging.getLogger("flashcards")
 
@@ -41,11 +45,27 @@ def _register_error_handlers(app: FastAPI) -> None:
             content={"detail": "A deck cannot be moved under itself or a descendant."},
         )
 
-    for not_found_error in (DeckNotFound, CardNotFound, NoteNotFound):
+    async def quota_exceeded(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=429, content={"detail": "AI page quota exceeded for this period."}
+        )
+
+    async def unsupported_media(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=415, content={"detail": "Unsupported file type."})
+
+    async def too_large(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=413, content={"detail": "The document has too many pages."}
+        )
+
+    for not_found_error in (DeckNotFound, CardNotFound, NoteNotFound, JobNotFound, DraftNotFound):
         app.add_exception_handler(not_found_error, not_found)
     app.add_exception_handler(InvalidDeckName, invalid_deck_name)
     app.add_exception_handler(InvalidNote, invalid_note)
     app.add_exception_handler(DeckCycle, conflict)
+    app.add_exception_handler(QuotaExceeded, quota_exceeded)
+    app.add_exception_handler(UnsupportedMediaType, unsupported_media)
+    app.add_exception_handler(TooManyPages, too_large)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -84,6 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(decks.router)
     app.include_router(cards.router)
     app.include_router(review.router)
+    app.include_router(ai.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
