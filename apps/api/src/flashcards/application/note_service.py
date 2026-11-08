@@ -81,9 +81,15 @@ class NoteService:
         return cards
 
     async def cards_of(self, note: Note) -> list[Card]:
-        """The note's cards, by ordinal (they always live in the note's deck)."""
-        cards = await self._cards.list_for_deck(note.deck_id)
-        return sorted((c for c in cards if c.note_id == note.id), key=lambda c: c.ordinal)
+        """The note's cards, by ordinal."""
+        return await self._cards.list_for_notes([note.id])
+
+    async def lock_note(self, *, owner_id: str, note_id: str) -> Note:
+        """The caller's note, locked against concurrent changes; raises NoteNotFound."""
+        locked = await self._notes.lock_many([note_id])
+        if not locked or locked[0].owner_id != owner_id:
+            raise NoteNotFound(note_id)
+        return locked[0]
 
     async def list_cards(self, *, owner_id: str, deck_id: str) -> list[Card]:
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)

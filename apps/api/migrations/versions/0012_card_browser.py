@@ -25,9 +25,12 @@ def upgrade() -> None:
         "cards", sa.Column("flag", sa.Integer(), nullable=False, server_default=sa.text("0"))
     )
     op.add_column("cards", sa.Column("buried_until", sa.DateTime(timezone=True), nullable=True))
+    # Concurrent edits of one note can never create two cards for the same ordinal.
+    op.create_unique_constraint("uq_cards_note_ordinal", "cards", ["note_id", "ordinal"])
 
 
 def downgrade() -> None:
+    op.drop_constraint("uq_cards_note_ordinal", "cards", type_="unique")
     op.drop_column("cards", "buried_until")
     op.drop_column("cards", "flag")
     op.drop_column("notes", "tags")

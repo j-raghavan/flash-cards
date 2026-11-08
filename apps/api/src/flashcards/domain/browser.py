@@ -16,6 +16,7 @@ from flashcards.domain.scheduling import CardSchedule, ScheduleState, retrievabi
 from flashcards.domain.tags import Tags, has_tag
 
 MAX_PAGE = 200
+MAX_OFFSET = 100_000
 MAX_QUERY_LENGTH = 200
 PREVIEW_CHARS = 120
 _SECONDS_PER_DAY = 86_400
@@ -51,7 +52,12 @@ def card_state(card: Card, schedule: CardSchedule | None, now: datetime) -> Card
 
 def card_proficiency(schedule: CardSchedule | None, now: datetime) -> int:
     """Percent chance of recalling the card now; 0 for a card never reviewed."""
-    if schedule is None or schedule.stability is None or schedule.last_reviewed_at is None:
+    if (
+        schedule is None
+        or schedule.stability is None
+        or schedule.stability <= 0  # never written by FSRS; tolerate bad data
+        or schedule.last_reviewed_at is None
+    ):
         return 0
     elapsed = (now - schedule.last_reviewed_at).total_seconds() / _SECONDS_PER_DAY
     return round(100 * retrievability(schedule.stability, elapsed))

@@ -185,6 +185,9 @@ class InMemoryNoteRepository:
         notes = [note for note in self._by_id.values() if note.owner_id == owner_id]
         return sorted(notes, key=lambda note: (note.created_at, note.id))
 
+    async def lock_many(self, note_ids: Sequence[str]) -> list[Note]:
+        return [self._by_id[nid] for nid in sorted(set(note_ids)) if nid in self._by_id]
+
     async def update(self, note: Note) -> None:
         if note.id in self._by_id:
             self._by_id[note.id] = note
@@ -220,6 +223,14 @@ class InMemoryCardRepository:
 
     async def update(self, card: Card) -> None:
         self._by_id[card.id] = card
+
+    async def get_many(self, card_ids: Sequence[str]) -> list[Card]:
+        return [self._by_id[cid] for cid in dict.fromkeys(card_ids) if cid in self._by_id]
+
+    async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
+        wanted = set(note_ids)
+        cards = [c for c in self._by_id.values() if c.note_id in wanted]
+        return sorted(cards, key=lambda c: (c.note_id, c.ordinal))
 
     async def delete(self, card_id: str) -> None:
         self._by_id.pop(card_id, None)

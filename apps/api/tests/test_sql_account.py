@@ -606,3 +606,37 @@ async def test_card_browser_reads_and_writes(
         monkeypatch.setattr(sql, "_IN_CHUNK", 1)
         found = await SqlScheduleRepository(s).get_many(["c-n1", "c-n2", "missing"])
         assert set(found) == {"c-n1"}  # c-n2's schedule went with its card
+
+
+async def test_note_locks_card_batches_and_one_card_per_ordinal(engine: AsyncEngine) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlDeckRepository(s).add(
+            Deck(id="d1", owner_id="alice", name="Bio", parent_id=None, created_at=NOW)
+        )
+        for nid in ("n2", "n1"):
+            await SqlNoteRepository(s).add(
+                Note(id=nid, owner_id="alice", deck_id="d1", note_type=NoteType.CLOZE,
+                     fields=(("text", "{{c1::a}} {{c2::b}}"),), created_at=NOW)
+            )
+        for cid, nid, ordinal in (("c3", "n2", 1), ("c2", "n1", 2), ("c1", "n1", 1)):
+            await SqlCardRepository(s).add(
+                Card(id=cid, owner_id="alice", deck_id="d1", note_id=nid, ordinal=ordinal,
+                     created_at=NOW)
+            )
+
+    async with sm() as s, s.begin():
+        locked = await SqlNoteRepository(s).lock_many(["n2", "missing", "n1", "n2"])
+        assert [n.id for n in locked] == ["n1", "n2"]  # existing only, in id order
+        cards = SqlCardRepository(s)
+        assert [c.id for c in await cards.get_many(["c3", "missing", "c1", "c3"])] == ["c3", "c1"]
+        assert [c.id for c in await cards.list_for_notes(["n2", "n1"])] == ["c1", "c2", "c3"]
+
+    with pytest.raises(IntegrityError):
+        async with sm() as s, s.begin():
+            await SqlCardRepository(s).add(
+                Card(id="dup", owner_id="alice", deck_id="d1", note_id="n1", ordinal=1,
+                     created_at=NOW)
+            )

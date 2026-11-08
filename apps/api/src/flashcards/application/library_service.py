@@ -97,9 +97,10 @@ class LibraryService:
         New fields re-derive the cards: a card whose ordinal survives keeps its
         schedule and history, a removed cloze deletion takes its card, schedule and
         history with it, and a new deletion gets a new card. Everything is checked
-        before anything is written.
+        before anything is written. The note is locked first, so concurrent edits
+        or moves of it apply one after the other.
         """
-        note = await self._notes.get_note(owner_id=owner_id, note_id=note_id)
+        note = await self._notes.lock_note(owner_id=owner_id, note_id=note_id)
         updated = note
         if tags is not None:
             updated = updated.with_tags(normalize_tags(tags))
@@ -119,10 +120,9 @@ class LibraryService:
     async def delete_note(self, *, owner_id: str, note_id: str) -> None:
         """Delete a note and the cards, schedules and logs it produced."""
         # Raises NoteNotFound if the note is missing or not the caller's.
-        note = await self._notes.get_note(owner_id=owner_id, note_id=note_id)
-        for card in await self._card_repo.list_for_deck(note.deck_id):
-            if card.note_id == note_id:
-                await self._purge_card(card.id)
+        await self._notes.get_note(owner_id=owner_id, note_id=note_id)
+        for card in await self._card_repo.list_for_notes([note_id]):
+            await self._purge_card(card.id)
         await self._card_repo.delete_for_note(note_id)
         await self._note_repo.delete(note_id)
 

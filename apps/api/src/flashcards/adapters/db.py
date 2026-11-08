@@ -192,6 +192,8 @@ class NoteRow(Base):
 
 class CardRow(Base):
     __tablename__ = "cards"
+    # One card per cloze deletion (or the single Basic card) of a note.
+    __table_args__ = (UniqueConstraint("note_id", "ordinal", name="uq_cards_note_ordinal"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     owner_id: Mapped[str] = mapped_column(String, index=True)

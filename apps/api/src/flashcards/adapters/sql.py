@@ -314,6 +314,19 @@ class SqlNoteRepository:
         )
         return [note_from_row(row) for row in rows]
 
+    async def lock_many(self, note_ids: Sequence[str]) -> list[Note]:
+        ordered = sorted(set(note_ids))
+        notes: list[Note] = []
+        for start in range(0, len(ordered), _IN_CHUNK):
+            rows = await self._session.scalars(
+                select(NoteRow)
+                .where(NoteRow.id.in_(ordered[start : start + _IN_CHUNK]))
+                .order_by(NoteRow.id)
+                .with_for_update()
+            )
+            notes += [note_from_row(row) for row in rows]
+        return notes
+
     async def update(self, note: Note) -> None:
         if await self._session.get(NoteRow, note.id) is not None:
             await self._session.merge(note_to_row(note))
@@ -366,6 +379,26 @@ class SqlCardRepository:
     async def update(self, card: Card) -> None:
         await self._session.merge(card_to_row(card))
         await self._session.flush()
+
+    async def get_many(self, card_ids: Sequence[str]) -> list[Card]:
+        unique = list(dict.fromkeys(card_ids))
+        found: dict[str, Card] = {}
+        for start in range(0, len(unique), _IN_CHUNK):
+            rows = await self._session.scalars(
+                select(CardRow).where(CardRow.id.in_(unique[start : start + _IN_CHUNK]))
+            )
+            found.update({row.id: card_from_row(row) for row in rows})
+        return [found[cid] for cid in unique if cid in found]
+
+    async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
+        unique = sorted(set(note_ids))
+        cards: list[Card] = []
+        for start in range(0, len(unique), _IN_CHUNK):
+            rows = await self._session.scalars(
+                select(CardRow).where(CardRow.note_id.in_(unique[start : start + _IN_CHUNK]))
+            )
+            cards += [card_from_row(row) for row in rows]
+        return sorted(cards, key=lambda c: (c.note_id, c.ordinal))
 
     async def delete(self, card_id: str) -> None:
         await self._session.execute(delete(CardRow).where(CardRow.id == card_id))

@@ -9,8 +9,9 @@ what a valid address is and no extra email-parsing dependency.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import AwareDatetime, BaseModel, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
 
 from flashcards.application.account_service import AccountExport
 from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
@@ -31,7 +32,7 @@ from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, Schedu
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import SharedDeckPreview, ShareLink
 from flashcards.domain.summary import DeckSummary
-from flashcards.domain.tags import MAX_TAGS_PER_NOTE
+from flashcards.domain.tags import MAX_TAG_LENGTH, MAX_TAGS_PER_NOTE
 from flashcards.domain.users import User
 
 
@@ -149,17 +150,20 @@ class DeckOut(BaseModel):
         return cls(id=deck.id, name=deck.name, parent_id=deck.parent_id, created_at=deck.created_at)
 
 
+TagIn = Annotated[str, StringConstraints(max_length=MAX_TAG_LENGTH)]
+
+
 class NoteCreateRequest(BaseModel):
     note_type: NoteType
     fields: dict[str, str]
-    tags: list[str] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)
+    tags: list[TagIn] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)
 
 
 class NoteUpdateRequest(BaseModel):
     """Either or both; the note type cannot change."""
 
     fields: dict[str, str] | None = None
-    tags: list[str] | None = Field(default=None, max_length=MAX_TAGS_PER_NOTE)
+    tags: list[TagIn] | None = Field(default=None, max_length=MAX_TAGS_PER_NOTE)
 
 
 class CardOut(BaseModel):
@@ -237,8 +241,8 @@ class BulkCardRequest(BaseModel):
     card_ids: list[str] = Field(min_length=1, max_length=MAX_BULK_CARDS)
     action: BulkAction
     deck_id: str | None = None  # move
-    tags: list[str] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)  # add/remove
-    flag: int = Field(default=0, ge=0, le=MAX_FLAG)  # flag
+    tags: list[TagIn] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)  # add/remove
+    flag: int | None = Field(default=None, ge=0, le=MAX_FLAG)  # flag (0 clears)
     until: AwareDatetime | None = None  # bury; 24 hours when omitted
 
     @model_validator(mode="after")
@@ -247,6 +251,8 @@ class BulkCardRequest(BaseModel):
             raise ValueError("move needs a deck_id")
         if self.action in (BulkAction.ADD_TAGS, BulkAction.REMOVE_TAGS) and not self.tags:
             raise ValueError(f"{self.action.value} needs tags")
+        if self.action is BulkAction.FLAG and self.flag is None:
+            raise ValueError("flag needs a flag (0 clears it)")
         return self
 
 
@@ -713,6 +719,7 @@ class NoteExportOut(BaseModel):
     deck_id: str
     note_type: NoteType
     fields: dict[str, str]
+    tags: list[str]
     created_at: datetime
 
 
@@ -722,6 +729,8 @@ class CardExportOut(BaseModel):
     note_id: str
     ordinal: int
     suspended: bool
+    flag: int
+    buried_until: datetime | None
 
 
 class ScheduleExportOut(BaseModel):
@@ -803,6 +812,7 @@ class AccountExportOut(BaseModel):
                     deck_id=n.deck_id,
                     note_type=n.note_type,
                     fields=dict(n.fields),
+                    tags=list(n.tags),
                     created_at=n.created_at,
                 )
                 for n in export.notes
@@ -814,6 +824,8 @@ class AccountExportOut(BaseModel):
                     note_id=c.note_id,
                     ordinal=c.ordinal,
                     suspended=c.is_suspended,
+                    flag=c.flag,
+                    buried_until=c.buried_until,
                 )
                 for c in export.cards
             ],

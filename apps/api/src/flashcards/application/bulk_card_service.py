@@ -35,9 +35,14 @@ class BulkAction(enum.StrEnum):
     FLAG = "flag"
 
 
+_NOTE_ACTIONS = frozenset(
+    {BulkAction.MOVE, BulkAction.DELETE, BulkAction.ADD_TAGS, BulkAction.REMOVE_TAGS}
+)
+
+
 @dataclass(frozen=True, slots=True)
 class BulkResult:
-    cards: int  # cards changed or removed
+    cards: int  # cards changed or removed (already in the requested state: not counted)
     notes: int  # notes changed or removed (0 for card-level actions)
 
 
@@ -68,28 +73,38 @@ class BulkCardService:
         until: datetime | None = None,
     ) -> BulkResult:
         """Raises CardNotFound (any id not the caller's), DeckNotFound, or a 422 error."""
-        owned = {card.id: card for card in await self._cards.list_for_owner(owner_id)}
-        missing = [card_id for card_id in card_ids if card_id not in owned]
+        unique_ids = list(dict.fromkeys(card_ids))
+        owned = {
+            card.id: card
+            for card in await self._cards.get_many(unique_ids)
+            if card.owner_id == owner_id
+        }
+        missing = [card_id for card_id in unique_ids if card_id not in owned]
         if missing:
-            raise CardNotFound(missing[0])
-        selected = [owned[card_id] for card_id in dict.fromkeys(card_ids)]
+            raise CardNotFound(missing[0])  # missing and other users' cards look the same
+        selected = [owned[card_id] for card_id in unique_ids]
         now = self._clock.now()
 
-        if action in (BulkAction.MOVE, BulkAction.DELETE, BulkAction.ADD_TAGS,
-                      BulkAction.REMOVE_TAGS):
-            note_ids = list(dict.fromkeys(card.note_id for card in selected))
-            notes = [note for nid in note_ids if (note := await self._notes.get(nid)) is not None]
+        if action in _NOTE_ACTIONS:
+            # Locked in id order, so concurrent edits and moves of a note apply in turn.
+            notes = await self._notes.lock_many([card.note_id for card in selected])
             cards_by_note: dict[str, list[Card]] = {}
-            for card in owned.values():
+            for card in await self._cards.list_for_notes([note.id for note in notes]):
                 cards_by_note.setdefault(card.note_id, []).append(card)
-            affected = sum(len(cards_by_note.get(note.id, [])) for note in notes)
+            affected = sum(len(cards) for cards in cards_by_note.values())
             await self._apply_to_notes(
                 owner_id, action, notes, cards_by_note, deck_id=deck_id, tags=tags
             )
             return BulkResult(cards=affected, notes=len(notes))
 
-        changed = [_card_change(card, action, now=now, flag=flag, until=until) for card in selected]
-        for card in changed:  # all computed (and validated) before the first write
+        # Every change is computed (and validated) before the first write; only cards
+        # that actually change are written and counted.
+        changes = [
+            (card, _card_change(card, action, now=now, flag=flag, until=until))
+            for card in selected
+        ]
+        changed = [new for old, new in changes if new != old]
+        for card in changed:
             await self._cards.update(card)
         return BulkResult(cards=len(changed), notes=0)
 

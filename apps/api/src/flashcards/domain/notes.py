@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from flashcards.domain.tags import Tags
 
@@ -20,6 +20,7 @@ MAX_FLAG = 7
 DEFAULT_BURY = timedelta(hours=24)
 MAX_BURY = timedelta(days=7)
 MAX_FIELDS = 64
+MAX_FIELD_NAME_LEN = 64
 # A full {{cN::...}} deletion with a closing brace. N is a positive integer:
 # leading zeros are allowed (c01 == c1) but c0/c00 are not valid deletions.
 _CLOZE = re.compile(r"\{\{c(0*[1-9]\d*)::.*?\}\}", re.DOTALL)
@@ -77,6 +78,8 @@ def _validate_payload(fields: Fields) -> None:
     if len(fields) > MAX_FIELDS:
         raise InvalidNote(f"too many fields (max {MAX_FIELDS})")
     for name, value in fields:
+        if not 0 < len(name) <= MAX_FIELD_NAME_LEN:
+            raise InvalidNote(f"field names must be 1 to {MAX_FIELD_NAME_LEN} characters")
         if len(value) > MAX_FIELD_LEN:
             raise InvalidNote(f"field '{name}' is too long")
 
@@ -152,7 +155,7 @@ class Card:
         until = until if until is not None else now + DEFAULT_BURY
         if not now < until <= now + MAX_BURY:
             raise InvalidBury("a card can be buried for up to 7 days")
-        return replace(self, buried_until=until)
+        return replace(self, buried_until=until.astimezone(UTC))  # stored the same everywhere
 
     def unburied(self) -> Card:
         return replace(self, buried_until=None)

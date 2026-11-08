@@ -180,6 +180,14 @@ class NoteRepository(Protocol):
         """Every note the owner has, oldest first (the card browser)."""
         ...
 
+    async def lock_many(self, note_ids: Sequence[str]) -> list[Note]:
+        """These notes (those that exist), locked until the transaction ends.
+
+        Taken before changing notes, so concurrent edits, moves and tag changes
+        of one note apply in turn (SELECT ... FOR UPDATE, in id order).
+        """
+        ...
+
     async def update(self, note: Note) -> None:
         """Persist a change to a note's fields, tags or deck."""
         ...
@@ -206,6 +214,14 @@ class CardRepository(Protocol):
 
     async def list_for_owner(self, owner_id: str) -> list[Card]:
         """Every card the owner has, oldest first (the card browser)."""
+        ...
+
+    async def get_many(self, card_ids: Sequence[str]) -> list[Card]:
+        """The cards with these ids that exist (any owner; callers check ownership)."""
+        ...
+
+    async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
+        """Every card of these notes, by note then ordinal."""
         ...
 
     async def update(self, card: Card) -> None:

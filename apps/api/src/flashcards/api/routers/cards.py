@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
@@ -22,6 +22,7 @@ from flashcards.api.schemas import (
     NoteUpdateRequest,
 )
 from flashcards.domain.browser import (
+    MAX_OFFSET,
     MAX_PAGE,
     MAX_QUERY_LENGTH,
     BrowserQuery,
@@ -86,13 +87,18 @@ async def browse_cards(
     sort: SortKey = Query(default=SortKey.CREATED),
     order: Literal["asc", "desc"] = Query(default="asc"),
     limit: int = Query(default=50, ge=1, le=MAX_PAGE),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=MAX_OFFSET),
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> BrowserPageOut:
+    if min_proficiency > max_proficiency:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "min_proficiency cannot be greater than max_proficiency.",
+        )
     query = BrowserQuery(
         states=frozenset(state),
-        tag=tag,
+        tag=tag or None,  # an empty tag means no tag filter, as an empty q does
         flag=flag,
         min_proficiency=min_proficiency,
         max_proficiency=max_proficiency,
@@ -122,7 +128,7 @@ async def bulk_cards(
         action=body.action,
         deck_id=body.deck_id,
         tags=body.tags,
-        flag=body.flag,
+        flag=body.flag or 0,
         until=body.until,
     )
     return BulkResultOut(cards=result.cards, notes=result.notes)

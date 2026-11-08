@@ -7,6 +7,7 @@ regard to case. A note keeps them sorted and without duplicates.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable
 
 MAX_TAG_LENGTH = 64
@@ -25,7 +26,11 @@ def normalize_tags(raw: Iterable[str]) -> Tags:
     tags = _unique(tag.strip() for tag in raw)
     for tag in tags:
         if not _is_valid(tag):
-            raise InvalidTags(f"invalid tag: {tag!r}")
+            # The tag itself is not echoed back: it may be huge or unprintable.
+            raise InvalidTags(
+                f"Each tag must be 1 to {MAX_TAG_LENGTH} printable characters, with no "
+                "spaces and no empty level between \"::\" separators."
+            )
     if len(tags) > MAX_TAGS_PER_NOTE:
         raise InvalidTags(f"a note can have at most {MAX_TAGS_PER_NOTE} tags")
     return _sorted(tags)
@@ -56,7 +61,12 @@ def has_tag(tags: Tags, wanted: str) -> bool:
 
 
 def _is_valid(tag: str) -> bool:
-    return 0 < len(tag) <= MAX_TAG_LENGTH and not any(ch.isspace() for ch in tag)
+    return (
+        0 < len(tag) <= MAX_TAG_LENGTH
+        # No whitespace, and no control, format (zero-width, bidi) or unassigned characters.
+        and not any(ch.isspace() or unicodedata.category(ch).startswith("C") for ch in tag)
+        and all(tag.split(LEVEL_SEPARATOR))  # no empty level: "::", "a::", "a::::b"
+    )
 
 
 def _unique(tags: Iterable[str]) -> list[str]:
