@@ -7,7 +7,13 @@ from fastapi import APIRouter, Depends, Query
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
-from flashcards.api.schemas import CardOut, CardScheduleOut, ReviewRequest
+from flashcards.api.schemas import (
+    CardOut,
+    CardScheduleOut,
+    EvaluateRequest,
+    EvaluationOut,
+    ReviewRequest,
+)
 
 router = APIRouter(tags=["review"])
 
@@ -39,3 +45,16 @@ async def submit_review(
         idempotency_key=body.idempotency_key,
     )
     return CardScheduleOut.from_schedule(schedule)
+
+
+@router.post("/cards/{card_id}/evaluate", response_model=EvaluationOut)
+async def evaluate_answer(
+    card_id: str,
+    body: EvaluateRequest,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container),
+) -> EvaluationOut:
+    evaluation = await container.evaluation.evaluate(
+        owner_id=caller.user.id, card_id=card_id, answer=body.answer
+    )
+    return EvaluationOut.from_evaluation(evaluation)

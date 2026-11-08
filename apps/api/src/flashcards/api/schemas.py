@@ -16,6 +16,7 @@ from flashcards.application.account_service import AccountExport
 from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.decks import Deck
+from flashcards.domain.evaluation import AnswerEvaluation
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
@@ -167,6 +168,24 @@ class CardDetailOut(CardOut):
 class ReviewRequest(BaseModel):
     rating: Rating
     idempotency_key: str | None = None
+
+
+class EvaluateRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=20_000)
+
+
+class EvaluationOut(BaseModel):
+    verdict: str
+    score: float
+    explanation: str
+
+    @classmethod
+    def from_evaluation(cls, evaluation: AnswerEvaluation) -> EvaluationOut:
+        return cls(
+            verdict=evaluation.verdict.value,
+            score=evaluation.score,
+            explanation=evaluation.explanation,
+        )
 
 
 class CardScheduleOut(BaseModel):

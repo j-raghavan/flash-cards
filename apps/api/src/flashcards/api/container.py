@@ -39,6 +39,7 @@ from flashcards.application.auth_service import AuthService
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
+from flashcards.application.evaluation_service import EvaluationService
 from flashcards.application.generation_request_service import GenerationRequestService
 from flashcards.application.goal_service import GoalService
 from flashcards.application.invite_service import InviteService
@@ -121,6 +122,7 @@ class Container:
     apkg_import: ApkgImportService
     account: AccountService
     media: MediaService
+    evaluation: EvaluationService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -180,6 +182,7 @@ def build_services(repos: Repositories) -> Container:
         repos.quotas,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
+    evaluation = EvaluationService(notes, repos.llm)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -199,6 +202,7 @@ def build_services(repos: Repositories) -> Container:
         apkg_import=apkg_import,
         account=account,
         media=media,
+        evaluation=evaluation,
     )
 
 

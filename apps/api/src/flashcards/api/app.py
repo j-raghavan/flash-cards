@@ -27,7 +27,7 @@ from flashcards.api.routers import (
     review,
 )
 from flashcards.config import Settings
-from flashcards.domain.ai import DraftNotFound
+from flashcards.domain.ai import DraftNotFound, LlmError
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
 from flashcards.domain.goals import GoalNotFound, InvalidGoal
@@ -82,6 +82,13 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def media_too_large(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=413, content={"detail": "The media file is too large."})
 
+    async def ai_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
+        # A synchronous AI call failed or is not configured (the async generation
+        # worker captures its own errors onto the job and never reaches here).
+        return JSONResponse(
+            status_code=503, content={"detail": "AI is unavailable right now."}
+        )
+
     not_found_errors = (
         DeckNotFound,
         CardNotFound,
@@ -104,6 +111,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
     app.add_exception_handler(TooManyPages, too_large)
+    # Catches InvalidEvaluation too (it subclasses LlmError).
+    app.add_exception_handler(LlmError, ai_unavailable)
 
 
 def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = None) -> FastAPI:
