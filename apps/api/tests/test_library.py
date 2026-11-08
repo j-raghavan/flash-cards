@@ -8,14 +8,18 @@ import pytest
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMockExamRepository,
     InMemoryNoteRepository,
+    InMemoryPassageRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
+from flashcards.domain.chat import Passage
 from flashcards.domain.decks import DeckNotFound
+from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import NoteNotFound, NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 
@@ -36,6 +40,8 @@ class _Fixture:
         self.card_repo = InMemoryCardRepository()
         self.schedule_repo = InMemoryScheduleRepository()
         self.log_repo = InMemoryReviewLogRepository()
+        self.passage_repo = InMemoryPassageRepository()
+        self.exam_repo = InMemoryMockExamRepository()
         clock = FakeClock()
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
@@ -47,6 +53,8 @@ class _Fixture:
             self.card_repo,
             self.schedule_repo,
             self.log_repo,
+            self.passage_repo,
+            self.exam_repo,
         )
 
     async def seed_card(self, card_id: str) -> None:
@@ -114,6 +122,30 @@ async def test_delete_deck_cascades_subtree(fx: _Fixture) -> None:
     assert await fx.deck_repo.get(child.id) is None
     assert await fx.card_repo.get(cards[0].id) is None
     assert await fx.schedule_repo.get(cards[0].id) is None
+
+
+async def test_delete_deck_removes_its_passages_and_mock_exams(fx: _Fixture) -> None:
+    parent = await fx.decks.create(owner_id=ALICE, name="Parent")
+    child = await fx.decks.create(owner_id=ALICE, name="Child", parent_id=parent.id)
+    keep = await fx.decks.create(owner_id=ALICE, name="Keep")
+    for deck_id in (child.id, keep.id):
+        await fx.passage_repo.add_many(
+            [Passage(id=f"p-{deck_id}", owner_id=ALICE, deck_id=deck_id, file_id="f",
+                     page=1, ordinal=0, text="source text")]
+        )
+        await fx.exam_repo.add(
+            MockExam(id=f"e-{deck_id}", owner_id=ALICE, deck_id=deck_id, created_at=START,
+                     time_limit_seconds=None,
+                     questions=(ExamQuestion(id="q", prompt="p", reference="r", topic="t"),))
+        )
+
+    await fx.library.delete_deck(owner_id=ALICE, deck_id=parent.id)
+
+    assert await fx.passage_repo.list_for_deck(child.id) == []
+    assert await fx.exam_repo.get(f"e-{child.id}") is None
+    # Another deck's passages and exams are untouched.
+    assert len(await fx.passage_repo.list_for_deck(keep.id)) == 1
+    assert await fx.exam_repo.get(f"e-{keep.id}") is not None
 
 
 async def test_delete_note_cascades_only_its_own_cards(fx: _Fixture) -> None:

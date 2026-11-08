@@ -541,6 +541,8 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
             SqlCardRepository(s),
             SqlScheduleRepository(s),
             SqlReviewLogRepository(s),
+            SqlPassageRepository(s),
+            SqlMockExamRepository(s),
         )
         await library.delete_deck(owner_id="alice", deck_id="d1")
     async with sm() as s:

@@ -162,6 +162,8 @@ def build_services(repos: Repositories) -> Container:
         repos.cards,
         repos.schedules,
         repos.review_logs,
+        repos.passages,
+        repos.mock_exams,
     )
     generation = GenerationRequestService(
         decks,

@@ -20,6 +20,8 @@ from flashcards.domain.ai import LlmError
 
 MAX_QUESTION_LEN = 2_000
 PASSAGE_CHARS = 1_200
+# About 2.4 MB of text: plenty for 20 dense pages, bounded against inflated PDFs.
+MAX_PASSAGES_PER_SOURCE = 2_000
 TOP_K = 6
 CHAT_MAX_OUTPUT_TOKENS = 1_500
 NOT_FOUND_ANSWER = "I could not find this in the deck's source documents."

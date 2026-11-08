@@ -10,6 +10,7 @@ as data documents, never concatenated into the instructions (NF-SEC-6).
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from flashcards.application.ai_prompts import chat_prompt
@@ -18,6 +19,7 @@ from flashcards.domain.ai import LlmDocument, StructuredRequest
 from flashcards.domain.chat import (
     CHAT_MAX_OUTPUT_TOKENS,
     CHAT_SCHEMA,
+    MAX_PASSAGES_PER_SOURCE,
     NOT_FOUND_ANSWER,
     ChatAnswer,
     NoChatSources,
@@ -34,12 +36,9 @@ from flashcards.domain.ports import (
     ObjectStore,
     PassageRepository,
 )
-from flashcards.domain.sources import PageKind, TooManyPages, UnsupportedMediaType
-from flashcards.domain.transcripts import InvalidTranscript
+from flashcards.domain.sources import PageKind
 
-# A stored source that cannot be read is indexed with an empty marker passage, so
-# it is not re-extracted on every question.
-_UNREADABLE = (TooManyPages, UnsupportedMediaType, InvalidTranscript)
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -63,10 +62,11 @@ class ChatService:
         self._max_pages = max_pages
 
     async def ask(self, *, owner_id: str, deck_id: str, question: str) -> ChatAnswer:
-        # Raises DeckNotFound if the deck is missing or not the caller's.
-        await self._decks.get(owner_id=owner_id, deck_id=deck_id)
-        await self._index(owner_id, deck_id)
-        indexed = await self._passages.list_for_deck(deck_id)
+        # A deck's sources include its subdecks'. Raises DeckNotFound if the deck is
+        # missing or not the caller's.
+        deck_ids = await self._decks.subtree_ids(owner_id=owner_id, deck_id=deck_id)
+        await self._index(owner_id, deck_ids)
+        indexed = [p for d in deck_ids for p in await self._passages.list_for_deck(d)]
         if not any(p.text.strip() for p in indexed):
             raise NoChatSources(deck_id)
         top = rank_passages(indexed, question)
@@ -86,18 +86,22 @@ class ChatService:
         result = await self._llm.generate_structured(request)
         return parse_chat_answer(result.data, top)
 
-    async def _index(self, owner_id: str, deck_id: str) -> None:
-        done = await self._passages.indexed_files(deck_id)
+    async def _index(self, owner_id: str, deck_ids: list[str]) -> None:
+        # Each source is indexed under the deck its job generated into, so deleting
+        # that deck later removes exactly its passages.
+        wanted = set(deck_ids)
+        done = {(d, f) for d in deck_ids for f in await self._passages.indexed_files(d)}
         for job in await self._jobs.list_for_owner(owner_id):
-            if job.draft_deck_id != deck_id or job.source_id in done:
+            key = (job.draft_deck_id, job.source_id)
+            if job.draft_deck_id not in wanted or key in done:
                 continue
             data = await self._store.get(job.source_id)
             if data is None:
                 continue  # the source was removed; nothing to index
             await self._passages.add_many(
-                await self._extract(owner_id, deck_id, job.source_id, data)
+                await self._extract(owner_id, job.draft_deck_id, job.source_id, data)
             )
-            done.add(job.source_id)
+            done.add(key)
 
     async def _extract(
         self, owner_id: str, deck_id: str, file_id: str, data: bytes
@@ -123,7 +127,14 @@ class ChatService:
                 if page.kind is PageKind.TEXT and page.text:
                     for ordinal, text in enumerate(split_passages(page.text)):
                         out.append(passage(page.ref.page, ordinal, text))
-        except _UNREADABLE:
+                if len(out) >= MAX_PASSAGES_PER_SOURCE:
+                    # Bound what one source can add to the index and to every ranking.
+                    out = out[:MAX_PASSAGES_PER_SOURCE]
+                    break
+        except Exception:
+            # Any unreadable source (encrypted PDF, corrupt file, bad envelope) must
+            # not break chat for the whole deck: record it as having no text.
+            logger.warning("could not index chat source %s", file_id, exc_info=True)
             out = []
         # Always record the file, even with no text, so it is not re-extracted.
         return out or [passage(0, 0, "")]

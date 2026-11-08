@@ -72,7 +72,8 @@ class _Fixture:
         self.goals = GoalService(self.decks, self.goal_repo, clock)
         library = LibraryService(
             self.decks, self.notes, self.deck_repo, self.note_repo,
-            self.card_repo, self.schedule_repo, self.log_repo,
+            self.card_repo, self.schedule_repo, self.log_repo, self.passages,
+            self.mock_exams,
         )
         self.service = AccountService(
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,

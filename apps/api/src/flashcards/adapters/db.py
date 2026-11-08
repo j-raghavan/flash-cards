@@ -569,6 +569,12 @@ def mock_exam_from_row(row: MockExamRow) -> MockExam:
 
 class PassageRow(Base):
     __tablename__ = "document_passages"
+    # One row per passage position: concurrent first questions cannot index twice.
+    __table_args__ = (
+        UniqueConstraint(
+            "deck_id", "file_id", "page", "ordinal", name="uq_document_passages_position"
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     owner_id: Mapped[str] = mapped_column(String, index=True)
@@ -577,18 +583,6 @@ class PassageRow(Base):
     page: Mapped[int] = mapped_column(Integer)
     ordinal: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
-
-
-def passage_to_row(passage: Passage) -> PassageRow:
-    return PassageRow(
-        id=passage.id,
-        owner_id=passage.owner_id,
-        deck_id=passage.deck_id,
-        file_id=passage.file_id,
-        page=passage.page,
-        ordinal=passage.ordinal,
-        text=passage.text,
-    )
 
 
 def passage_from_row(row: PassageRow) -> Passage:

@@ -27,6 +27,9 @@ def upgrade() -> None:
         sa.Column("page", sa.Integer(), nullable=False),
         sa.Column("ordinal", sa.Integer(), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
+        sa.UniqueConstraint(
+            "deck_id", "file_id", "page", "ordinal", name="uq_document_passages_position"
+        ),
     )
     op.create_index("ix_document_passages_owner_id", "document_passages", ["owner_id"])
     op.create_index("ix_document_passages_deck_id", "document_passages", ["deck_id"])

@@ -231,3 +231,53 @@ async def test_ask_is_owner_scoped() -> None:
     deck_id = await rig.deck("alice")
     with pytest.raises(DeckNotFound):
         await rig.service.ask(owner_id="bob", deck_id=deck_id, question="ATP?")
+
+
+async def test_an_encrypted_pdf_does_not_break_chat_for_the_deck() -> None:
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "secret mitochondria notes")
+    encrypted = bytes(
+        doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="pw", owner_pw="owner")
+    )
+    doc.close()
+    rig = _Rig(_FakeLLM())
+    deck_id = await rig.deck()
+    locked = await rig.source(deck_id, encrypted)
+    await rig.source(deck_id, _text_source("Mitochondria make ATP."))
+
+    answer = await rig.service.ask(owner_id="alice", deck_id=deck_id, question="ATP?")
+
+    # The readable source still answers; the encrypted one is recorded, not retried.
+    assert answer.citations and answer.citations[0].file_id != locked
+    assert locked in await rig.passages.indexed_files(deck_id)
+
+
+async def test_a_source_is_capped_in_passages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("flashcards.application.chat_service.MAX_PASSAGES_PER_SOURCE", 2)
+    rig = _Rig(_FakeLLM())
+    deck_id = await rig.deck()
+    # A long single paste splits into several 1,200-char passages before the cap.
+    await rig.source(deck_id, _text_source("ATP " * 2_000))
+    await rig.service.ask(owner_id="alice", deck_id=deck_id, question="ATP?")
+    assert len(await rig.passages.list_for_deck(deck_id)) == 2
+
+
+async def test_chat_on_a_parent_deck_uses_its_subdecks_sources() -> None:
+    rig = _Rig(_FakeLLM())
+    parent = await rig.deck()
+    child = (await rig.decks.create(owner_id="alice", name="Child", parent_id=parent)).id
+    source = await rig.source(child, _text_source("Mitochondria make ATP."))
+
+    answer = await rig.service.ask(owner_id="alice", deck_id=parent, question="ATP?")
+
+    assert answer.citations == (Citation(source, 1),)
+    # Indexed under the deck its job generated into, so deleting that deck cleans it up.
+    assert await rig.passages.indexed_files(child) == {source}
+    assert await rig.passages.indexed_files(parent) == set()
+
+
+async def test_in_memory_passages_ignore_duplicate_positions() -> None:
+    repo = InMemoryPassageRepository()
+    await repo.add_many([_p("first")])
+    await repo.add_many([_p("second"), _p("third", ordinal=1)])
+    assert [p.text for p in await repo.list_for_deck("d")] == ["first", "third"]

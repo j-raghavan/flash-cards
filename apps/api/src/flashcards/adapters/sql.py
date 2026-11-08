@@ -52,7 +52,6 @@ from flashcards.adapters.db import (
     note_from_row,
     note_to_row,
     passage_from_row,
-    passage_to_row,
     review_log_from_row,
     review_log_to_row,
     schedule_from_row,
@@ -529,6 +528,9 @@ class SqlMockExamRepository:
         row = await self._session.get(MockExamRow, exam_id)
         return mock_exam_from_row(row) if row is not None else None
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        await self._session.execute(delete(MockExamRow).where(MockExamRow.deck_id == deck_id))
+
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(
             delete(MockExamRow).where(MockExamRow.owner_id == owner_id)
@@ -540,8 +542,26 @@ class SqlPassageRepository:
         self._session = session
 
     async def add_many(self, passages: list[Passage]) -> None:
-        self._session.add_all([passage_to_row(p) for p in passages])
-        await self._session.flush()
+        if not passages:
+            return
+        rows = [
+            {
+                "id": p.id,
+                "owner_id": p.owner_id,
+                "deck_id": p.deck_id,
+                "file_id": p.file_id,
+                "page": p.page,
+                "ordinal": p.ordinal,
+                "text": p.text,
+            }
+            for p in passages
+        ]
+        # A concurrent request may have indexed the same source: keep its rows.
+        await self._session.execute(
+            pg_insert(PassageRow)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_document_passages_position")
+        )
 
     async def list_for_deck(self, deck_id: str) -> list[Passage]:
         rows = await self._session.scalars(
@@ -556,6 +576,9 @@ class SqlPassageRepository:
             select(PassageRow.file_id).where(PassageRow.deck_id == deck_id).distinct()
         )
         return set(rows)
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        await self._session.execute(delete(PassageRow).where(PassageRow.deck_id == deck_id))
 
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(delete(PassageRow).where(PassageRow.owner_id == owner_id))

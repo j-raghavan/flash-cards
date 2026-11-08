@@ -153,11 +153,16 @@ async def test_mock_exam_roundtrip_and_owner_delete(engine: AsyncEngine) -> None
         assert await SqlMockExamRepository(s).get("missing") is None
 
     async with sm() as s, s.begin():
+        await SqlMockExamRepository(s).delete_for_deck("d9")
+    async with sm() as s:
+        assert await SqlMockExamRepository(s).get("e2") is None  # Bob's exam was in d9
+        assert await SqlMockExamRepository(s).get("e1") is not None
+
+    async with sm() as s, s.begin():
         await SqlMockExamRepository(s).delete_for_owner("alice")
 
     async with sm() as s:
         assert await SqlMockExamRepository(s).get("e1") is None
-        assert await SqlMockExamRepository(s).get("e2") is not None  # Bob's exam survives
 
 
 async def test_passage_repository(engine: AsyncEngine) -> None:
@@ -189,6 +194,20 @@ async def test_passage_repository(engine: AsyncEngine) -> None:
         assert await repo.indexed_files("none") == set()
 
     async with sm() as s, s.begin():
+        # The same positions again (a concurrent indexer) are ignored, not an error.
+        await SqlPassageRepository(s).add_many([passage("dup", "alice", "d1", "f1", 1, 0)])
+        await SqlPassageRepository(s).add_many([])
+    async with sm() as s:
+        assert len(await SqlPassageRepository(s).list_for_deck("d1")) == 4
+
+    async with sm() as s, s.begin():
+        await SqlPassageRepository(s).delete_for_deck("d1")
+    async with sm() as s:
+        assert await SqlPassageRepository(s).list_for_deck("d1") == []
+        assert len(await SqlPassageRepository(s).list_for_deck("d9")) == 1
+
+    async with sm() as s, s.begin():
+        await SqlPassageRepository(s).add_many([passage("p0", "alice", "d1", "f1", 1, 0)])
         await SqlPassageRepository(s).delete_for_owner("alice")
 
     async with sm() as s:

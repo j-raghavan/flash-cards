@@ -357,6 +357,10 @@ class MockExamRepository(Protocol):
 
     async def get(self, exam_id: str) -> MockExam | None: ...
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        """Delete a deck's mock exams (deck deletion)."""
+        ...
+
     async def delete_for_owner(self, owner_id: str) -> None:
         """Delete every mock exam the owner has (account deletion)."""
         ...
@@ -381,6 +385,10 @@ class PassageRepository(Protocol):
 
     async def indexed_files(self, deck_id: str) -> set[str]:
         """The source file ids already indexed for the deck."""
+        ...
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        """Delete a deck's passages (deck deletion)."""
         ...
 
     async def delete_for_owner(self, owner_id: str) -> None:

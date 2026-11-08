@@ -375,6 +375,10 @@ class InMemoryMockExamRepository:
     async def get(self, exam_id: str) -> MockExam | None:
         return self._by_id.get(exam_id)
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        for exam_id in [e.id for e in self._by_id.values() if e.deck_id == deck_id]:
+            del self._by_id[exam_id]
+
     async def delete_for_owner(self, owner_id: str) -> None:
         for exam_id in [e.id for e in self._by_id.values() if e.owner_id == owner_id]:
             del self._by_id[exam_id]
@@ -385,7 +389,13 @@ class InMemoryPassageRepository:
         self._rows: list[Passage] = []
 
     async def add_many(self, passages: list[Passage]) -> None:
-        self._rows.extend(passages)
+        # Same rule as the SQL unique index: one row per (deck, file, page, ordinal).
+        seen = {(p.deck_id, p.file_id, p.page, p.ordinal) for p in self._rows}
+        for passage in passages:
+            key = (passage.deck_id, passage.file_id, passage.page, passage.ordinal)
+            if key not in seen:
+                seen.add(key)
+                self._rows.append(passage)
 
     async def list_for_deck(self, deck_id: str) -> list[Passage]:
         owned = [p for p in self._rows if p.deck_id == deck_id]
@@ -393,6 +403,9 @@ class InMemoryPassageRepository:
 
     async def indexed_files(self, deck_id: str) -> set[str]:
         return {p.file_id for p in self._rows if p.deck_id == deck_id}
+
+    async def delete_for_deck(self, deck_id: str) -> None:
+        self._rows = [p for p in self._rows if p.deck_id != deck_id]
 
     async def delete_for_owner(self, owner_id: str) -> None:
         self._rows = [p for p in self._rows if p.owner_id != owner_id]
