@@ -36,8 +36,12 @@ def test_deck_crud_flow(admin_client: TestClient) -> None:
     assert admin_client.get(f"/decks/{deck_id}").status_code == 404
 
 
-def test_deck_endpoints_require_auth(client: TestClient) -> None:
+def test_learning_endpoints_require_auth(client: TestClient) -> None:
     assert client.get("/decks").status_code == 401
+    assert client.get("/decks/x/cards").status_code == 401
+    assert client.get("/decks/x/stats").status_code == 401
+    assert client.get("/decks/x/review").status_code == 401
+    assert client.post("/cards/x/review", json={"rating": 3}).status_code == 401
 
 
 def test_blank_deck_name_is_422(admin_client: TestClient) -> None:
@@ -139,6 +143,26 @@ def test_review_is_idempotent_on_key(admin_client: TestClient) -> None:
         f"/cards/{card_id}/review", json={"rating": 1, "idempotency_key": "k1"}
     ).json()
     assert second["due_at"] == first["due_at"]
+
+
+def test_delete_deck_cascades_its_cards(admin_client: TestClient) -> None:
+    deck_id = _make_deck(admin_client)
+    card_id = admin_client.post(
+        f"/decks/{deck_id}/notes",
+        json={"note_type": "basic", "fields": {"front": "Q", "back": "A"}},
+    ).json()[0]["id"]
+    assert admin_client.delete(f"/decks/{deck_id}").status_code == 204
+    # The card is gone, not merely unreachable: a consistent 404 in both backends.
+    assert admin_client.get(f"/cards/{card_id}").status_code == 404
+
+
+def test_invalid_rating_is_422(admin_client: TestClient) -> None:
+    deck_id = _make_deck(admin_client)
+    card_id = admin_client.post(
+        f"/decks/{deck_id}/notes",
+        json={"note_type": "basic", "fields": {"front": "Q", "back": "A"}},
+    ).json()[0]["id"]
+    assert admin_client.post(f"/cards/{card_id}/review", json={"rating": 9}).status_code == 422
 
 
 def test_foreign_deck_and_card_are_404(app: FastAPI, admin_client: TestClient) -> None:

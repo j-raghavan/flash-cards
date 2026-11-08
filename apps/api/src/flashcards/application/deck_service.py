@@ -50,13 +50,21 @@ class DeckService:
         return moved
 
     async def delete(self, *, owner_id: str, deck_id: str) -> list[str]:
-        """Delete a deck and all its descendants; return the ids removed."""
-        await self._require_owned(owner_id, deck_id)
-        decks = await self._repo.list_for_owner(owner_id)
-        subtree = _subtree_ids(deck_id, decks)
+        """Delete a deck and all its descendant decks; return the ids removed.
+
+        This removes deck rows only. Cross-aggregate cleanup (the notes, cards,
+        schedules and logs inside the decks) is the LibraryService's job.
+        """
+        subtree = await self.subtree_ids(owner_id=owner_id, deck_id=deck_id)
         for removed_id in subtree:
             await self._repo.delete(removed_id)
         return subtree
+
+    async def subtree_ids(self, *, owner_id: str, deck_id: str) -> list[str]:
+        """Return a deck and all its descendant deck ids, after verifying ownership."""
+        await self._require_owned(owner_id, deck_id)
+        decks = await self._repo.list_for_owner(owner_id)
+        return _subtree_ids(deck_id, decks)
 
     async def _require_owned(self, owner_id: str, deck_id: str) -> Deck:
         deck = await self._repo.get(deck_id)

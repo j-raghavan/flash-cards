@@ -107,6 +107,10 @@ class NoteRepository(Protocol):
 
     async def delete(self, note_id: str) -> None: ...
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        """Delete every note in a deck."""
+        ...
+
 
 class CardRepository(Protocol):
     async def add(self, card: Card) -> None: ...
@@ -125,6 +129,10 @@ class CardRepository(Protocol):
         """Delete every card produced by a note."""
         ...
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        """Delete every card in a deck."""
+        ...
+
 
 class Scheduler(Protocol):
     def new_schedule(self, card_id: str, now: datetime) -> CardSchedule:
@@ -141,6 +149,10 @@ class ScheduleRepository(Protocol):
 
     async def upsert(self, schedule: CardSchedule) -> None: ...
 
+    async def delete(self, card_id: str) -> None:
+        """Delete a card's schedule, if any."""
+        ...
+
 
 class ReviewLogRepository(Protocol):
     async def append(self, log: ReviewLog) -> None:
@@ -151,4 +163,8 @@ class ReviewLogRepository(Protocol):
         flashcards.domain.scheduling.DuplicateReview instead of appending, so a
         retried submission is an atomic no-op, never a double count (NF-REL-1).
         """
+        ...
+
+    async def delete_for_card(self, card_id: str) -> None:
+        """Delete every review log for a card."""
         ...

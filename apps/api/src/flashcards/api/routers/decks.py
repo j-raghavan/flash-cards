@@ -78,5 +78,5 @@ async def delete_deck(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> Response:
-    await container.decks.delete(owner_id=caller.user.id, deck_id=deck_id)
+    await container.library.delete_deck(owner_id=caller.user.id, deck_id=deck_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

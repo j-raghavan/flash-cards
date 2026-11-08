@@ -135,6 +135,10 @@ class InMemoryNoteRepository:
     async def delete(self, note_id: str) -> None:
         self._by_id.pop(note_id, None)
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        for note_id in [n.id for n in self._by_id.values() if n.deck_id == deck_id]:
+            del self._by_id[note_id]
+
 
 class InMemoryCardRepository:
     def __init__(self) -> None:
@@ -157,6 +161,10 @@ class InMemoryCardRepository:
         for card_id in [c.id for c in self._by_id.values() if c.note_id == note_id]:
             del self._by_id[card_id]
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        for card_id in [c.id for c in self._by_id.values() if c.deck_id == deck_id]:
+            del self._by_id[card_id]
+
 
 class InMemoryScheduleRepository:
     def __init__(self) -> None:
@@ -167,6 +175,9 @@ class InMemoryScheduleRepository:
 
     async def upsert(self, schedule: CardSchedule) -> None:
         self._by_card[schedule.card_id] = schedule
+
+    async def delete(self, card_id: str) -> None:
+        self._by_card.pop(card_id, None)
 
 
 class InMemoryReviewLogRepository:
@@ -182,3 +193,6 @@ class InMemoryReviewLogRepository:
         ):
             raise DuplicateReview(log.idempotency_key)
         self._logs.append(log)
+
+    async def delete_for_card(self, card_id: str) -> None:
+        self._logs = [log for log in self._logs if log.card_id != card_id]

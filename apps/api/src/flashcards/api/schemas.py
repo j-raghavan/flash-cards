@@ -95,12 +95,12 @@ class SessionOut(BaseModel):
 
 
 class DeckCreateRequest(BaseModel):
-    name: str
+    name: str = Field(max_length=500)
     parent_id: str | None = None
 
 
 class DeckRenameRequest(BaseModel):
-    name: str
+    name: str = Field(max_length=500)
 
 
 class DeckMoveRequest(BaseModel):

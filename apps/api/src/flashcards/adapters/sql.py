@@ -21,6 +21,7 @@ from flashcards.adapters.db import (
     DeckRow,
     InviteRow,
     NoteRow,
+    ReviewLogRow,
     SessionRow,
     UserRow,
     card_from_row,
@@ -199,6 +200,9 @@ class SqlNoteRepository:
             await self._session.delete(row)
             await self._session.flush()
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        await self._session.execute(delete(NoteRow).where(NoteRow.deck_id == deck_id))
+
 
 class SqlCardRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -227,6 +231,9 @@ class SqlCardRepository:
     async def delete_for_note(self, note_id: str) -> None:
         await self._session.execute(delete(CardRow).where(CardRow.note_id == note_id))
 
+    async def delete_for_deck(self, deck_id: str) -> None:
+        await self._session.execute(delete(CardRow).where(CardRow.deck_id == deck_id))
+
 
 class SqlScheduleRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -239,6 +246,11 @@ class SqlScheduleRepository:
     async def upsert(self, schedule: CardSchedule) -> None:
         await self._session.merge(schedule_to_row(schedule))
         await self._session.flush()
+
+    async def delete(self, card_id: str) -> None:
+        await self._session.execute(
+            delete(CardScheduleRow).where(CardScheduleRow.card_id == card_id)
+        )
 
 
 class SqlReviewLogRepository:
@@ -258,3 +270,8 @@ class SqlReviewLogRepository:
                 await self._session.flush()
         except IntegrityError as exc:
             raise DuplicateReview(log.idempotency_key) from exc
+
+    async def delete_for_card(self, card_id: str) -> None:
+        await self._session.execute(
+            delete(ReviewLogRow).where(ReviewLogRow.card_id == card_id)
+        )

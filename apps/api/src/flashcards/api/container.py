@@ -25,6 +25,7 @@ from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.application.auth_service import AuthService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.invite_service import InviteService
+from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
@@ -70,6 +71,7 @@ class Container:
     decks: DeckService
     notes: NoteService
     reviews: ReviewService
+    library: LibraryService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -82,6 +84,15 @@ def build_services(repos: Repositories) -> Container:
     decks = DeckService(repos.decks, repos.clock)
     notes = NoteService(decks, repos.notes, repos.cards, repos.clock)
     reviews = ReviewService(notes, repos.schedules, repos.review_logs, repos.scheduler, repos.clock)
+    library = LibraryService(
+        decks,
+        notes,
+        repos.decks,
+        repos.notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -92,6 +103,7 @@ def build_services(repos: Repositories) -> Container:
         decks=decks,
         notes=notes,
         reviews=reviews,
+        library=library,
     )
 
 

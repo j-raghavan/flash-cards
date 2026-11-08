@@ -471,3 +471,53 @@ async def test_sql_card_update_note_delete_and_missing_deck_delete(engine: Async
     async with sm() as s, s.begin():
         await SqlDeckRepository(s).delete("does-not-exist")
         await SqlNoteRepository(s).delete("does-not-exist")
+
+
+async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
+    from flashcards.application.deck_service import DeckService
+    from flashcards.application.library_service import LibraryService
+    from flashcards.application.note_service import NoteService
+    from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
+
+    sm = create_sessionmaker(engine)
+    await _seed_card(sm)
+    async with sm() as s, s.begin():
+        await SqlScheduleRepository(s).upsert(
+            CardSchedule(
+                card_id="c1",
+                state=ScheduleState.LEARNING,
+                step=0,
+                stability=None,
+                difficulty=None,
+                due_at=_now(),
+                last_reviewed_at=None,
+            )
+        )
+        await SqlReviewLogRepository(s).append(
+            ReviewLog(
+                id="l1",
+                owner_id="alice",
+                card_id="c1",
+                rating=Rating.GOOD,
+                reviewed_at=_now(),
+                idempotency_key=None,
+            )
+        )
+    async with sm() as s, s.begin():
+        decks = DeckService(SqlDeckRepository(s), SystemClock())
+        notes = NoteService(decks, SqlNoteRepository(s), SqlCardRepository(s), SystemClock())
+        library = LibraryService(
+            decks,
+            notes,
+            SqlDeckRepository(s),
+            SqlNoteRepository(s),
+            SqlCardRepository(s),
+            SqlScheduleRepository(s),
+            SqlReviewLogRepository(s),
+        )
+        await library.delete_deck(owner_id="alice", deck_id="d1")
+    async with sm() as s:
+        assert await SqlDeckRepository(s).get("d1") is None
+        assert await SqlNoteRepository(s).get("n1") is None
+        assert await SqlCardRepository(s).get("c1") is None
+        assert await SqlScheduleRepository(s).get("c1") is None

@@ -91,5 +91,5 @@ async def delete_note(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container),
 ) -> Response:
-    await container.notes.delete_note(owner_id=caller.user.id, note_id=note_id)
+    await container.library.delete_note(owner_id=caller.user.id, note_id=note_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
