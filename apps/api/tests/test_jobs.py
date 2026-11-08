@@ -3,9 +3,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from flashcards.adapters.memory import InMemoryAiJobRepository, InMemoryObjectStore
 from flashcards.domain.ai import Thoroughness
-from flashcards.domain.jobs import AiJob, JobStatus, new_generation_job
+from flashcards.domain.jobs import (
+    AiJob,
+    IllegalJobTransition,
+    JobStatus,
+    new_generation_job,
+)
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 
@@ -42,11 +49,28 @@ def test_progress_advances_and_clamps() -> None:
 
 
 def test_terminal_transitions() -> None:
-    assert _job().succeeded(NOW).is_terminal
-    assert _job().cancelled(NOW).is_terminal
-    failed = _job().failed("boom", NOW)
+    running = _job().started(NOW)
+    assert running.succeeded(NOW).is_terminal
+    assert _job().cancelled(NOW).is_terminal  # cancel is allowed from QUEUED
+    failed = running.failed("boom", NOW)
     assert failed.is_terminal
     assert failed.error == "boom"
+
+
+def test_illegal_transitions_raise() -> None:
+    queued = _job()
+    with pytest.raises(IllegalJobTransition):
+        queued.succeeded(NOW)  # cannot finalize a job that never ran
+    with pytest.raises(IllegalJobTransition):
+        queued.advanced(NOW)
+    done = _job().started(NOW).succeeded(NOW)
+    with pytest.raises(IllegalJobTransition):
+        done.started(NOW)  # cannot restart a terminal job
+    with pytest.raises(IllegalJobTransition):
+        done.cancelled(NOW)
+    exhausted = _job(max_attempts=1).started(NOW).failed("e", NOW)
+    with pytest.raises(IllegalJobTransition):
+        exhausted.retried(NOW)  # the attempt cap is enforced, not advisory
 
 
 def test_retry_spends_attempts_until_exhausted() -> None:
@@ -107,7 +131,7 @@ async def test_request_cancel_only_while_active() -> None:
     assert await repo.request_cancel(job.id, NOW) is False  # already requested
     assert await repo.request_cancel("missing", NOW) is False
     # A terminal job cannot be cancelled.
-    done = _job().succeeded(NOW)
+    done = _job().started(NOW).succeeded(NOW)
     await repo.add(done)
     assert await repo.request_cancel(done.id, NOW) is False
 

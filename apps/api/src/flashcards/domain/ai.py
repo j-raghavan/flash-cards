@@ -80,7 +80,7 @@ DRAFT_CARDS_SCHEMA: Mapping[str, object] = {
                 "additionalProperties": False,
                 "required": ["type", "fields"],
                 "properties": {
-                    "type": {"type": "string", "enum": ["basic", "cloze"]},
+                    "type": {"type": "string", "enum": [t.value for t in NoteType]},
                     "fields": {
                         "type": "object",
                         "additionalProperties": {"type": "string"},
@@ -110,8 +110,12 @@ def parse_draft_cards(raw: Mapping[str, object], *, source_page: int) -> list[Dr
             raise InvalidDraft(f"unknown card type: {type_value!r}")
         if not isinstance(fields_value, dict):
             raise InvalidDraft("card fields is not an object")
+        for key, value in fields_value.items():
+            # Reject, don't coerce: a null/number/object value must not become a card.
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise InvalidDraft("card fields must be string key/value pairs")
         note_type = NoteType(type_value)
-        fields: Fields = tuple((str(k), str(v)) for k, v in fields_value.items())
+        fields: Fields = tuple(fields_value.items())
         try:
             card_ordinals(note_type, fields)
         except InvalidNote as exc:

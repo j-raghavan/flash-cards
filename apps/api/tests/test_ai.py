@@ -60,6 +60,16 @@ def test_parse_rejects_malformed_items() -> None:
         parse_draft_cards({"cards": [{"type": "basic", "fields": "nope"}]}, source_page=1)
 
 
+def test_parse_rejects_non_string_field_values() -> None:
+    # Non-string values must be rejected, not coerced into junk cards (NF-SEC-6).
+    for bad in (None, 42, {"nested": "x"}, ["a"]):
+        with pytest.raises(InvalidDraft):
+            parse_draft_cards(
+                {"cards": [{"type": "basic", "fields": {"front": "Q", "back": bad}}]},
+                source_page=1,
+            )
+
+
 def test_parse_rejects_cards_with_invalid_note_fields() -> None:
     # Basic card missing its back, and a cloze with no deletion, both unusable.
     with pytest.raises(InvalidDraft):

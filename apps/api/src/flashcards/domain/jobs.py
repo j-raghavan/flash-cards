@@ -38,6 +38,10 @@ class JobNotFound(JobError):
     pass
 
 
+class IllegalJobTransition(JobError):
+    """A lifecycle transition was attempted from a state that does not allow it."""
+
+
 @dataclass(frozen=True, slots=True)
 class AiJob:
     id: str
@@ -70,28 +74,39 @@ class AiJob:
     def can_retry(self) -> bool:
         return self.status is JobStatus.FAILED and self.attempt < self.max_attempts
 
+    def _require(self, allowed: bool, what: str) -> None:
+        if not allowed:
+            raise IllegalJobTransition(f"cannot {what} from {self.status}")
+
     def started(self, now: datetime) -> AiJob:
+        self._require(self.status is JobStatus.QUEUED, "start")
         return replace(self, status=JobStatus.RUNNING, updated_at=now)
 
     def with_total(self, total: int, now: datetime) -> AiJob:
+        self._require(self.status is JobStatus.RUNNING, "set total on")
         return replace(self, total_units=total, updated_at=now)
 
     def advanced(self, now: datetime) -> AiJob:
+        self._require(self.status is JobStatus.RUNNING, "advance")
         return replace(self, completed_units=self.completed_units + 1, updated_at=now)
 
     def succeeded(self, now: datetime) -> AiJob:
+        self._require(self.status is JobStatus.RUNNING, "succeed")
         return replace(self, status=JobStatus.SUCCEEDED, updated_at=now)
 
     def failed(self, error: str, now: datetime) -> AiJob:
+        self._require(self.status is JobStatus.RUNNING, "fail")
         return replace(self, status=JobStatus.FAILED, error=error, updated_at=now)
 
     def cancelled(self, now: datetime) -> AiJob:
+        self._require(not self.is_terminal, "cancel")
         return replace(self, status=JobStatus.CANCELLED, updated_at=now)
 
     def with_cancel_requested(self, now: datetime) -> AiJob:
         return replace(self, cancel_requested=True, updated_at=now)
 
     def retried(self, now: datetime) -> AiJob:
+        self._require(self.can_retry, "retry")
         # Resume: keep completed_units as the restart point, spend another attempt.
         return replace(
             self,
