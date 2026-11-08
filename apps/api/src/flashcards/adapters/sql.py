@@ -9,7 +9,7 @@ user insert together, or not at all.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, cast
+from typing import cast
 
 from sqlalchemy import CursorResult, Result, delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -62,9 +62,9 @@ from flashcards.domain.users import EmailAlreadyRegistered, User
 _TERMINAL = (JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value)
 
 
-def _changed_one(result: Result[Any]) -> bool:
+def _changed_one(result: Result[object]) -> bool:
     """True when a DML statement affected exactly one row."""
-    return cast("CursorResult[Any]", result).rowcount == 1
+    return cast("CursorResult[object]", result).rowcount == 1
 
 
 class SqlInviteRepository:

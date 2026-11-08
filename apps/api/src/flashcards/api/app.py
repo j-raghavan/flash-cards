@@ -71,12 +71,13 @@ def _register_error_handlers(app: FastAPI) -> None:
 
 def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = None) -> FastAPI:
     settings = settings or Settings()
+    configured_llm = llm if llm is not None else _llm_from_settings(settings)
 
     if settings.database_url:
-        engine, provider, job_queue = sql_provider(settings.database_url)
+        engine, provider, job_queue = sql_provider(settings.database_url, llm=configured_llm)
         container = None
     else:
-        container, provider, job_queue = in_memory_provider(llm=llm)
+        container, provider, job_queue = in_memory_provider(llm=configured_llm)
         engine = None
 
     @asynccontextmanager
@@ -120,6 +121,19 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         return {"status": "ok", "version": __version__}
 
     return app
+
+
+def _llm_from_settings(settings: Settings) -> LLMProvider:
+    """The real Anthropic provider when a key is configured, else a refusing stub."""
+    if settings.anthropic_api_key:
+        from flashcards.adapters.anthropic_llm import AnthropicLLMProvider
+
+        return AnthropicLLMProvider(
+            api_key=settings.anthropic_api_key, model=settings.anthropic_model
+        )
+    from flashcards.adapters.llm import NullLLMProvider
+
+    return NullLLMProvider()
 
 
 def _maybe_bootstrap_invite(settings: Settings, container: Container | None) -> str | None:

@@ -20,6 +20,7 @@ dependencies = [
   "fsrs>=6,<7",
   "pymupdf>=1.24",
   "puremagic>=2.1",
+  "anthropic>=2.6,<3",
 ]
 
 [project.scripts]
@@ -92,7 +93,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S", "SIM"]
+# ANN401 bans the literal typing.Any in annotations (project rule: strongly typed,
+# never Any). It is syntactic, so it never trips on Pydantic/FastAPI machinery.
+select = ["E", "F", "I", "UP", "B", "S", "SIM", "ANN401"]
 
 # FastAPI's dependency/parameter markers are meant to be called in argument
 # defaults, so they are not the mutable-default footgun B008 warns about.

@@ -7,7 +7,7 @@ import asyncio
 import time
 from collections.abc import Callable
 
-import httpx
+import httpx2
 import pymupdf
 import pytest
 from fastapi import FastAPI
@@ -71,13 +71,12 @@ def _make_deck(client: TestClient) -> str:
 
 def _upload(
     client: TestClient, deck_id: str, data: bytes, media: str = "application/pdf"
-) -> httpx.Response:
-    resp: httpx.Response = client.post(
+) -> httpx2.Response:
+    return client.post(
         "/ai/generate",
         files={"file": ("doc", data, media)},
         data={"deck_id": deck_id, "thoroughness": "standard"},
     )
-    return resp
 
 
 def test_generate_enqueues_a_queued_job(member: tuple[TestClient, str]) -> None:

@@ -60,7 +60,7 @@ def in_memory_provider(
 
 
 def sql_provider(
-    database_url: str,
+    database_url: str, llm: LLMProvider | None = None
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
@@ -71,7 +71,7 @@ def sql_provider(
     # Stateless/process-level singletons, shared across requests.
     extractor = PyMuPDFExtractor()
     job_queue = InProcessJobQueue()
-    llm = NullLLMProvider()
+    provider_llm = llm or NullLLMProvider()
 
     async def provider() -> AsyncIterator[Container]:
         async with sessionmaker() as session, session.begin():
@@ -95,7 +95,7 @@ def sql_provider(
                     quotas=SqlQuotaRepository(session),
                     extractor=extractor,
                     job_queue=job_queue,
-                    llm=llm,
+                    llm=provider_llm,
                 )
             )
 
