@@ -75,3 +75,7 @@ class InviteService:
 
     async def revoke(self, invite_id: str) -> bool:
         return await self._repo.try_revoke(invite_id, self._clock.now())
+
+    async def revoke_created_by(self, user_id: str) -> list[str]:
+        """Revoke a user's unredeemed invites, e.g. when they stop being an admin."""
+        return await self._repo.revoke_created_by(user_id, self._clock.now())

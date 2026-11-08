@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import CursorResult, Result, delete, func, select, update
+from sqlalchemy import CursorResult, Result, and_, case, delete, func, null, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,12 +20,14 @@ from flashcards.adapters.db import (
     AiBlobRow,
     AiJobRow,
     AiQuotaRow,
+    AuditEventRow,
     CardRow,
     CardScheduleRow,
     DeckRow,
     DraftCardRow,
     GoalRow,
     InviteRow,
+    LoginThrottleRow,
     MediaRow,
     MockExamRow,
     NoteRow,
@@ -34,8 +36,11 @@ from flashcards.adapters.db import (
     SessionRow,
     ShareLinkRow,
     UserRow,
+    UserTokenRow,
     aijob_from_row,
     aijob_to_row,
+    audit_from_row,
+    audit_to_row,
     card_from_row,
     card_to_row,
     deck_from_row,
@@ -61,15 +66,26 @@ from flashcards.adapters.db import (
     session_to_row,
     share_link_from_row,
     share_link_to_row,
+    throttle_from_row,
     user_from_row,
     user_to_row,
+    user_token_from_row,
+    user_token_to_row,
 )
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
-from flashcards.domain.invites import Invite
+from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.login_throttle import (
+    FAILURE_WINDOW,
+    LOCKOUT,
+    MAX_FAILED_LOGINS,
+    ThrottleState,
+    after_attempt,
+)
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -77,6 +93,7 @@ from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 _TERMINAL = (JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value)
@@ -135,6 +152,19 @@ class SqlInviteRepository:
         )
         return _changed_one(result)
 
+    async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
+        revoked = await self._session.scalars(
+            update(InviteRow)
+            .where(
+                InviteRow.created_by == user_id,
+                InviteRow.redeemed_at.is_(None),
+                InviteRow.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+            .returning(InviteRow.id)
+        )
+        return sorted(revoked)
+
 
 class SqlUserRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -154,6 +184,32 @@ class SqlUserRepository:
     async def get_by_email(self, email: str) -> User | None:
         row = await self._session.scalar(select(UserRow).where(UserRow.email == email))
         return user_from_row(row) if row is not None else None
+
+    async def get_for_update(self, user_id: str) -> User | None:
+        row = await self._session.scalar(
+            select(UserRow).where(UserRow.id == user_id).with_for_update()
+        )
+        return user_from_row(row) if row is not None else None
+
+    async def lock_active_admins(self) -> list[User]:
+        rows = await self._session.scalars(
+            select(UserRow)
+            .where(UserRow.role == Role.ADMIN.value, UserRow.suspended_at.is_(None))
+            .order_by(UserRow.id)
+            .with_for_update()
+        )
+        return [user_from_row(row) for row in rows]
+
+    async def list_all(self) -> list[User]:
+        rows = await self._session.scalars(
+            select(UserRow).order_by(UserRow.created_at, UserRow.id)
+        )
+        return [user_from_row(row) for row in rows]
+
+    async def update(self, user: User) -> None:
+        if await self._session.get(UserRow, user.id) is not None:
+            await self._session.merge(user_to_row(user))
+            await self._session.flush()
 
     async def delete(self, user_id: str) -> None:
         await self._session.execute(delete(UserRow).where(UserRow.id == user_id))
@@ -188,6 +244,13 @@ class SqlSessionRepository:
             .values(revoked_at=now)
         )
         return _changed_one(result)
+
+    async def revoke_all_for_user(self, user_id: str, now: datetime) -> None:
+        await self._session.execute(
+            update(SessionRow)
+            .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
 
     async def delete_for_user(self, user_id: str) -> None:
         await self._session.execute(delete(SessionRow).where(SessionRow.user_id == user_id))
@@ -658,3 +721,123 @@ class SqlShareLinkRepository:
         await self._session.execute(
             delete(ShareLinkRow).where(ShareLinkRow.owner_id == owner_id)
         )
+
+
+class SqlAuditRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def append(self, event: AuditEvent) -> None:
+        self._session.add(audit_to_row(event))
+        await self._session.flush()
+
+    async def list_recent(self, *, limit: int, before: str | None = None) -> list[AuditEvent]:
+        query = select(AuditEventRow).order_by(AuditEventRow.seq.desc()).limit(limit)
+        if before is not None:
+            cursor = select(AuditEventRow.seq).where(AuditEventRow.id == before)
+            # An unknown id makes the subquery NULL, so nothing matches: an empty page.
+            query = query.where(AuditEventRow.seq < cursor.scalar_subquery())
+        rows = await self._session.scalars(query)
+        return [audit_from_row(row) for row in rows]
+
+
+class SqlLoginThrottleRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, key: str) -> ThrottleState | None:
+        row = await self._session.get(LoginThrottleRow, key)
+        return throttle_from_row(row) if row is not None else None
+
+    async def register_attempt(self, key: str, now: datetime) -> ThrottleState:
+        # One statement, so concurrent attempts are each counted (no lost update)
+        # and two first attempts cannot collide on the insert. It mirrors
+        # login_throttle.after_attempt; the SET expressions read the old row.
+        row = LoginThrottleRow.__table__.c
+        first = after_attempt(None, key, now)
+        fresh = or_(
+            and_(row.locked_until.is_not(None), row.locked_until <= now),
+            and_(row.locked_until.is_(None), row.window_started_at <= now - FAILURE_WINDOW),
+        )
+        statement = (
+            pg_insert(LoginThrottleRow)
+            .values(
+                key=key,
+                failures=first.failures,
+                window_started_at=first.window_started_at,
+                locked_until=first.locked_until,
+            )
+            .on_conflict_do_update(
+                index_elements=[row.key],
+                set_={
+                    "failures": case((fresh, 1), else_=row.failures + 1),
+                    "window_started_at": case((fresh, now), else_=row.window_started_at),
+                    "locked_until": case(
+                        (fresh, null()),
+                        (row.locked_until.is_not(None), row.locked_until),
+                        (row.failures + 1 >= MAX_FAILED_LOGINS, now + LOCKOUT),
+                        else_=null(),
+                    ),
+                },
+            )
+            .returning(row.key, row.failures, row.window_started_at, row.locked_until)
+        )
+        saved = (await self._session.execute(statement)).one()
+        return ThrottleState(
+            key=saved.key,
+            failures=saved.failures,
+            window_started_at=saved.window_started_at,
+            locked_until=saved.locked_until,
+        )
+
+    async def delete(self, key: str) -> None:
+        await self._session.execute(delete(LoginThrottleRow).where(LoginThrottleRow.key == key))
+
+
+class SqlUserTokenRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, token: UserToken) -> None:
+        self._session.add(user_token_to_row(token))
+        await self._session.flush()
+
+    async def get_by_token_hash(self, token_hash: str) -> UserToken | None:
+        row = await self._session.scalar(
+            select(UserTokenRow).where(UserTokenRow.token_hash == token_hash)
+        )
+        return user_token_from_row(row) if row is not None else None
+
+    async def latest_for_user(self, user_id: str, purpose: TokenPurpose) -> UserToken | None:
+        row = await self._session.scalar(
+            select(UserTokenRow)
+            .where(UserTokenRow.user_id == user_id, UserTokenRow.purpose == purpose.value)
+            .order_by(UserTokenRow.created_at.desc())
+            .limit(1)
+        )
+        return user_token_from_row(row) if row is not None else None
+
+    async def try_use(self, token_id: str, now: datetime) -> bool:
+        used = await self._session.scalar(
+            update(UserTokenRow)
+            .where(UserTokenRow.id == token_id, UserTokenRow.used_at.is_(None))
+            .values(used_at=now)
+            .returning(UserTokenRow.id)
+        )
+        return used is not None
+
+    async def invalidate_for_user(
+        self, user_id: str, purpose: TokenPurpose, now: datetime
+    ) -> None:
+        await self._session.execute(
+            update(UserTokenRow)
+            .where(
+                UserTokenRow.user_id == user_id,
+                UserTokenRow.purpose == purpose.value,
+                UserTokenRow.used_at.is_(None),
+            )
+            .values(used_at=now)
+        )
+
+    async def delete_for_user(self, user_id: str) -> None:
+        await self._session.execute(delete(UserTokenRow).where(UserTokenRow.user_id == user_id))

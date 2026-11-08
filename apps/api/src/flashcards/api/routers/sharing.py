@@ -28,7 +28,7 @@ async def create_share_link(
     deck_id: str,
     body: ShareCreateRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> CreatedShareLinkOut:
     created = await container.sharing.create(
         owner_id=caller.user.id, deck_id=deck_id, allow_clone=body.allow_clone
@@ -41,7 +41,7 @@ async def create_share_link(
 async def list_share_links(
     deck_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[ShareLinkOut]:
     links = await container.sharing.list_for_deck(owner_id=caller.user.id, deck_id=deck_id)
     return [ShareLinkOut.from_link(link) for link in links]
@@ -52,7 +52,7 @@ async def update_share_link(
     share_id: str,
     body: ShareUpdateRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> ShareLinkOut:
     link = await container.sharing.set_allow_clone(
         owner_id=caller.user.id, link_id=share_id, allow=body.allow_clone
@@ -64,7 +64,7 @@ async def update_share_link(
 async def revoke_share_link(
     share_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> ShareLinkOut:
     link = await container.sharing.revoke(owner_id=caller.user.id, link_id=share_id)
     return ShareLinkOut.from_link(link)
@@ -74,7 +74,7 @@ async def revoke_share_link(
 async def preview_shared_deck(
     token: str,
     _caller: CurrentUser = Depends(current_user),  # signed-in accounts only (invite-only)
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> SharedDeckOut:
     return SharedDeckOut.from_preview(await container.sharing.preview(token=token))
 
@@ -88,7 +88,7 @@ async def clone_shared_deck(
     # burst of clones cannot take every database connection.
     _slot: None = Depends(ai_slot),
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> DeckOut:
     deck = await container.sharing.clone(owner_id=caller.user.id, token=token)
     return DeckOut.from_deck(deck)

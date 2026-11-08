@@ -14,14 +14,17 @@ from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
+    InMemoryAuditRepository,
     InMemoryCardRepository,
     InMemoryDeckRepository,
     InMemoryDraftCardRepository,
     InMemoryGoalRepository,
     InMemoryInviteRepository,
+    InMemoryLoginThrottleRepository,
     InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
@@ -33,13 +36,17 @@ from flashcards.adapters.memory import (
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
     InMemoryUserRepository,
+    InMemoryUserTokenRepository,
     SystemClock,
 )
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
+from flashcards.application.account_email_service import AccountEmailService
 from flashcards.application.account_service import AccountService
+from flashcards.application.admin_service import AdminService
 from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.apkg_import_service import ApkgImportService
+from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import AuthService
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.chat_service import ChatService
@@ -57,11 +64,13 @@ from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.sharing_service import SharingService
+from flashcards.application.sign_in_service import SignInService
 from flashcards.application.summary_service import SummaryService
 from flashcards.application.transcript_import_service import TranscriptImportService
 from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
 from flashcards.domain.ports import (
     AiJobRepository,
+    AuditRepository,
     CardRepository,
     Clock,
     DeckRepository,
@@ -71,6 +80,8 @@ from flashcards.domain.ports import (
     InviteRepository,
     JobQueue,
     LLMProvider,
+    LoginThrottleRepository,
+    Mailer,
     MediaRepository,
     MediaTypeSniffer,
     MockExamRepository,
@@ -87,6 +98,7 @@ from flashcards.domain.ports import (
     ShareLinkRepository,
     TranscriptProvider,
     UserRepository,
+    UserTokenRepository,
 )
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
@@ -122,7 +134,13 @@ class Repositories:
     ai_calls: QuotaRepository
     share_links: ShareLinkRepository
     clone_quota: QuotaRepository
+    audit_events: AuditRepository
+    login_throttle: LoginThrottleRepository
+    user_tokens: UserTokenRepository
+    mailer: Mailer
     dummy_hash: str | None = None
+    # Where links in emails point (the web client).
+    public_base_url: str = "http://localhost:5173"
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +169,11 @@ class Container:
     transcript_import: TranscriptImportService
     chat: ChatService
     sharing: SharingService
+    audit: AuditService
+    admin: AdminService
+    sign_in: SignInService
+    account_email: AccountEmailService
+    mailer: Mailer
 
 
 def build_services(repos: Repositories) -> Container:
@@ -216,6 +239,9 @@ def build_services(repos: Repositories) -> Container:
         repos.ai_calls,
         repos.share_links,
         repos.clone_quota,
+        repos.login_throttle,
+        repos.user_tokens,
+        invites,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -258,6 +284,28 @@ def build_services(repos: Repositories) -> Container:
         repos.clone_quota,
         repos.clock,
     )
+    audit = AuditService(repos.audit_events, repos.clock)
+    admin = AdminService(
+        invites,
+        audit,
+        repos.users,
+        repos.sessions,
+        account,
+        repos.login_throttle,
+        repos.user_tokens,
+        repos.clock,
+    )
+    sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
+    account_email = AccountEmailService(
+        repos.users,
+        repos.user_tokens,
+        repos.sessions,
+        repos.login_throttle,
+        repos.hasher,
+        audit,
+        repos.clock,
+        base_url=repos.public_base_url,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -283,6 +331,11 @@ def build_services(repos: Repositories) -> Container:
         transcript_import=transcript_import,
         chat=chat,
         sharing=sharing,
+        audit=audit,
+        admin=admin,
+        sign_in=sign_in,
+        account_email=account_email,
+        mailer=repos.mailer,
     )
 
 
@@ -291,6 +344,8 @@ def build_container(
     llm: LLMProvider | None = None,
     job_queue: JobQueue | None = None,
     transcripts: TranscriptProvider | None = None,
+    mailer: Mailer | None = None,
+    public_base_url: str = "http://localhost:5173",
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -327,5 +382,10 @@ def build_container(
             ai_calls=InMemoryQuotaRepository(limit=DEFAULT_DAILY_AI_CALLS),
             share_links=InMemoryShareLinkRepository(),
             clone_quota=InMemoryQuotaRepository(limit=DEFAULT_DAILY_CLONE_CARDS),
+            audit_events=InMemoryAuditRepository(),
+            login_throttle=InMemoryLoginThrottleRepository(),
+            user_tokens=InMemoryUserTokenRepository(),
+            mailer=mailer or LogMailer(show_content=True),
+            public_base_url=public_base_url,
         )
     )

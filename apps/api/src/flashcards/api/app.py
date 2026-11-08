@@ -41,7 +41,7 @@ from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
 from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
-from flashcards.domain.ports import LLMProvider
+from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sharing import (
     CloneLimitReached,
@@ -56,6 +56,7 @@ from flashcards.domain.transcripts import (
     InvalidVideoUrl,
     TranscriptUnavailable,
 )
+from flashcards.domain.users import AdminRequired, AdminSelfAction, LastActiveAdmin, UserNotFound
 
 logger = logging.getLogger("flashcards")
 
@@ -137,6 +138,20 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def clone_limit(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=429, content={"detail": "Daily clone limit reached."})
 
+    async def admin_self_action(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Admins cannot do this to their own account."},
+        )
+
+    async def last_admin(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=409, content={"detail": "At least one active admin must remain."}
+        )
+
+    async def admin_required(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"detail": "Admin only."})
+
     async def exam_closed(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
@@ -172,6 +187,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         MediaNotFound,
         ExamNotFound,
         ShareNotFound,
+        UserNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -191,6 +207,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidTranscript, invalid_transcript)
     app.add_exception_handler(NoChatSources, no_chat_sources)
     app.add_exception_handler(ExamClosed, exam_closed)
+    app.add_exception_handler(AdminSelfAction, admin_self_action)
+    app.add_exception_handler(LastActiveAdmin, last_admin)
+    app.add_exception_handler(AdminRequired, admin_required)
     app.add_exception_handler(CloneNotAllowed, clone_not_allowed)
     app.add_exception_handler(CloneTooLarge, clone_too_large)
     app.add_exception_handler(CloneLimitReached, clone_limit)
@@ -206,11 +225,20 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     settings = settings or Settings()
     configured_llm = llm if llm is not None else _llm_from_settings(settings)
 
+    mailer = _mailer_from_settings(settings)
+    _warn_on_local_links(settings)
     if settings.database_url:
-        engine, provider, job_queue = sql_provider(settings.database_url, llm=configured_llm)
+        engine, provider, job_queue = sql_provider(
+            settings.database_url,
+            llm=configured_llm,
+            mailer=mailer,
+            public_base_url=settings.public_base_url,
+        )
         container = None
     else:
-        container, provider, job_queue = in_memory_provider(llm=configured_llm)
+        container, provider, job_queue = in_memory_provider(
+            llm=configured_llm, mailer=mailer, public_base_url=settings.public_base_url
+        )
         engine = None
 
     @asynccontextmanager
@@ -292,6 +320,33 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
         )
     logger.warning("No AI backend is configured; AI requests will be refused.")
     return NullLLMProvider()
+
+
+def _mailer_from_settings(settings: Settings) -> Mailer:
+    """SMTP when configured; otherwise a log-only mailer (full content in development)."""
+    from flashcards.adapters.mailers import LogMailer, SmtpMailer
+
+    if settings.smtp_host:
+        return SmtpMailer(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            sender=settings.smtp_sender,
+            username=settings.smtp_username,
+            password=settings.smtp_password,
+            security=settings.smtp_security,
+        )
+    if settings.environment != "development":
+        logger.warning("No SMTP server configured; verification and reset emails are not sent.")
+    return LogMailer(show_content=settings.environment == "development")
+
+
+def _warn_on_local_links(settings: Settings) -> None:
+    """Emails would carry links nobody outside this machine can open."""
+    if settings.environment != "development" and "localhost" in settings.public_base_url:
+        logger.warning(
+            "FLASHCARDS_PUBLIC_BASE_URL is %s; links in emails will not work for users.",
+            settings.public_base_url,
+        )
 
 
 @runtime_checkable

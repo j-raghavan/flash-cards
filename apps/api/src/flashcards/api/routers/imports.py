@@ -21,7 +21,7 @@ MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 async def import_apkg(
     file: UploadFile = File(...),
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> ImportReportOut:
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:

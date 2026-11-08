@@ -21,7 +21,7 @@ router = APIRouter(prefix="/goals", tags=["goals"])
 async def create_goal(
     body: GoalCreateRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> GoalOut:
     goal = await container.goal_service.create(
         owner_id=caller.user.id,
@@ -36,7 +36,7 @@ async def create_goal(
 @router.get("", response_model=list[GoalOut])
 async def list_goals(
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[GoalOut]:
     goals = await container.goal_service.list_goals(owner_id=caller.user.id)
     return [GoalOut.from_goal(goal) for goal in goals]
@@ -46,7 +46,7 @@ async def list_goals(
 async def get_goal(
     goal_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> GoalOut:
     return GoalOut.from_goal(
         await container.goal_service.get(owner_id=caller.user.id, goal_id=goal_id)
@@ -58,7 +58,7 @@ async def update_goal(
     goal_id: str,
     body: GoalUpdateRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> GoalOut:
     goal = await container.goal_service.update(
         owner_id=caller.user.id,
@@ -75,7 +75,7 @@ async def update_goal(
 async def delete_goal(
     goal_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     await container.goal_service.delete(owner_id=caller.user.id, goal_id=goal_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -85,7 +85,7 @@ async def delete_goal(
 async def goal_plan(
     goal_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> StudyPlanOut:
     plan = await container.planner.plan_for(owner_id=caller.user.id, goal_id=goal_id)
     return StudyPlanOut.from_plan(plan)

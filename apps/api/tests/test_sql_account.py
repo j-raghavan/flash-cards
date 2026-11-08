@@ -348,3 +348,201 @@ async def test_share_link_repository(engine: AsyncEngine) -> None:
         repo = SqlShareLinkRepository(s)
         assert await repo.list_for_owner("alice") == []
         assert [x.id for x in await repo.list_for_owner("bob")] == ["lb"]
+
+
+async def test_audit_repository(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlAuditRepository
+    from flashcards.domain.audit import AuditAction, AuditEvent
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        repo = SqlAuditRepository(s)
+        await repo.append(AuditEvent(id="e1", action=AuditAction.LOGIN_LOCKED, created_at=NOW))
+        await repo.append(
+            AuditEvent(
+                id="e2", action=AuditAction.USER_SUSPENDED, created_at=NOW + timedelta(minutes=1),
+                actor_id="admin", target_id="u1", detail=(("reason", "abuse"),),
+            )
+        )
+    async with sm() as s:
+        repo = SqlAuditRepository(s)
+        recent = await repo.list_recent(limit=10)
+        assert [e.id for e in recent] == ["e2", "e1"]
+        assert recent[0].detail == (("reason", "abuse"),) and recent[0].actor_id == "admin"
+        assert [e.id for e in await repo.list_recent(limit=1)] == ["e2"]
+        older = await repo.list_recent(limit=10, before="e2")
+        assert [e.id for e in older] == ["e1"]
+        assert await repo.list_recent(limit=10, before="unknown") == []
+    # Events recorded in the same instant still page in recording order.
+    async with sm() as s, s.begin():
+        for eid in ("t1", "t2", "t3"):
+            await SqlAuditRepository(s).append(
+                AuditEvent(id=eid, action=AuditAction.LOGIN_LOCKED, created_at=NOW)
+            )
+    async with sm() as s:
+        repo = SqlAuditRepository(s)
+        assert [e.id for e in await repo.list_recent(limit=2)] == ["t3", "t2"]
+        assert [e.id for e in await repo.list_recent(limit=2, before="t2")] == ["t1", "e2"]
+
+
+async def test_login_throttle_repository(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlLoginThrottleRepository
+    from flashcards.domain.login_throttle import (
+        FAILURE_WINDOW,
+        LOCKOUT,
+        MAX_FAILED_LOGINS,
+        admitted,
+    )
+
+    sm = create_sessionmaker(engine)
+
+    async def attempt(key: str, at: datetime) -> tuple[int, datetime | None]:
+        async with sm() as s, s.begin():
+            state = await SqlLoginThrottleRepository(s).register_attempt(key, at)
+        return state.failures, state.locked_until
+
+    # The atomic upsert follows the same rules as the in-memory domain function.
+    for n in range(1, MAX_FAILED_LOGINS):
+        assert await attempt("k", NOW) == (n, None)
+    assert await attempt("k", NOW) == (MAX_FAILED_LOGINS, NOW + LOCKOUT)
+    later = NOW + timedelta(minutes=5)
+    assert await attempt("k", later) == (MAX_FAILED_LOGINS + 1, NOW + LOCKOUT)
+    assert await attempt("k", NOW + LOCKOUT) == (1, None)  # an expired lock starts fresh
+    assert await attempt("k", NOW + LOCKOUT + FAILURE_WINDOW) == (1, None)  # so does a window
+
+    async with sm() as s:
+        state = await SqlLoginThrottleRepository(s).get("k")
+        assert state is not None and admitted(state)
+        assert await SqlLoginThrottleRepository(s).get("missing") is None
+    async with sm() as s, s.begin():
+        await SqlLoginThrottleRepository(s).delete("k")
+    async with sm() as s:
+        assert await SqlLoginThrottleRepository(s).get("k") is None
+
+
+async def test_user_token_user_and_session_updates(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlUserTokenRepository
+    from flashcards.domain.user_tokens import TokenPurpose, UserToken
+
+    def token(tid: str, minutes: int, purpose: TokenPurpose) -> UserToken:
+        return UserToken(
+            id=tid, user_id="u1", purpose=purpose, token_hash=f"h-{tid}",
+            created_at=NOW + timedelta(minutes=minutes), expires_at=NOW + timedelta(hours=1),
+        )
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlUserRepository(s).add(
+            User(id="u1", email="u@e.com", password_hash="h", role=Role.MEMBER, created_at=NOW)
+        )
+        await SqlUserRepository(s).add(
+            User(
+                id="u2", email="v@e.com", password_hash="h", role=Role.MEMBER,
+                created_at=NOW + timedelta(minutes=1),
+            )
+        )
+        for sid in ("s1", "s2"):
+            await SqlSessionRepository(s).add(
+                Session(
+                    id=sid, user_id="u1", token_hash=f"t-{sid}", created_at=NOW,
+                    expires_at=NOW + timedelta(days=1), revoked_at=None,
+                )
+            )
+        tokens = SqlUserTokenRepository(s)
+        await tokens.add(token("a", 0, TokenPurpose.PASSWORD_RESET))
+        await tokens.add(token("b", 1, TokenPurpose.PASSWORD_RESET))
+        await tokens.add(token("c", 2, TokenPurpose.EMAIL_VERIFICATION))
+
+    async with sm() as s, s.begin():
+        users = SqlUserRepository(s)
+        assert [u.id for u in await users.list_all()] == ["u1", "u2"]
+        current = await users.get("u1")
+        assert current is not None
+        await users.update(current.with_verified(NOW).with_password_hash("new"))
+        await users.update(
+            User(id="ghost", email="g@e.com", password_hash="h", role=Role.MEMBER, created_at=NOW)
+        )  # updating a missing user is a no-op
+        await SqlSessionRepository(s).revoke_all_for_user("u1", NOW)
+        tokens = SqlUserTokenRepository(s)
+        latest = await tokens.latest_for_user("u1", TokenPurpose.PASSWORD_RESET)
+        assert latest is not None and latest.id == "b"
+        assert await tokens.try_use("b", NOW) is True
+        assert await tokens.try_use("b", NOW) is False
+        await tokens.invalidate_for_user("u1", TokenPurpose.PASSWORD_RESET, NOW)
+
+    async with sm() as s:
+        stored = await SqlUserRepository(s).get("u1")
+        assert stored is not None and stored.is_verified and stored.password_hash == "new"
+        assert await SqlUserRepository(s).get("ghost") is None
+        sessions = await SqlSessionRepository(s).list_for_user("u1")
+        assert all(x.revoked_at is not None for x in sessions)
+        tokens = SqlUserTokenRepository(s)
+        a = await tokens.get_by_token_hash("h-a")
+        c = await tokens.get_by_token_hash("h-c")
+        assert a is not None and a.used_at is not None  # invalidated
+        assert c is not None and c.used_at is None  # other purpose untouched
+        assert await tokens.get_by_token_hash("missing") is None
+
+    async with sm() as s, s.begin():
+        await SqlUserTokenRepository(s).delete_for_user("u1")
+    async with sm() as s:
+        assert await SqlUserTokenRepository(s).latest_for_user(
+            "u1", TokenPurpose.EMAIL_VERIFICATION
+        ) is None
+
+
+async def test_admin_row_locks_serialize_admin_changes(engine: AsyncEngine) -> None:
+    import asyncio
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        for uid, role in (("a1", Role.ADMIN), ("a2", Role.ADMIN), ("m1", Role.MEMBER)):
+            await SqlUserRepository(s).add(
+                User(id=uid, email=f"{uid}@e.com", password_hash="h", role=role, created_at=NOW)
+            )
+
+    async def second_admins() -> list[str]:
+        async with sm() as s, s.begin():
+            return [u.id for u in await SqlUserRepository(s).lock_active_admins()]
+
+    async with sm() as s, s.begin():
+        users = SqlUserRepository(s)
+        assert [u.id for u in await users.lock_active_admins()] == ["a1", "a2"]
+        target = await users.get_for_update("a2")
+        assert target is not None
+        waiting = asyncio.create_task(second_admins())
+        await asyncio.sleep(0.2)
+        assert not waiting.done()  # blocked on the first transaction's locks
+        await users.update(target.with_role(Role.MEMBER))
+    # Once the demotion commits, the waiting transaction sees one admin left.
+    assert await waiting == ["a1"]
+
+    async with sm() as s:
+        assert await SqlUserRepository(s).get_for_update("missing") is None
+
+
+async def test_invites_revoked_by_creator(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlInviteRepository
+    from flashcards.domain.invites import Invite
+
+    def invite(iid: str, creator: str) -> Invite:
+        return Invite(
+            id=iid, token_hash=f"h-{iid}", role=Role.MEMBER, created_by=creator,
+            created_at=NOW, expires_at=NOW + timedelta(days=7),
+        )
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        repo = SqlInviteRepository(s)
+        for iid, creator in (("i1", "a1"), ("i2", "a1"), ("i3", "a1"), ("i4", "a2")):
+            await repo.add(invite(iid, creator))
+        assert await repo.try_redeem("i2", NOW)
+        assert await repo.try_revoke("i3", NOW)
+
+    async with sm() as s, s.begin():
+        # Only the live invite of that creator changes.
+        assert await SqlInviteRepository(s).revoke_created_by("a1", NOW) == ["i1"]
+        assert await SqlInviteRepository(s).revoke_created_by("a1", NOW) == []
+    async with sm() as s:
+        other = await SqlInviteRepository(s).get("i4")
+        assert other is not None and other.revoked_at is None

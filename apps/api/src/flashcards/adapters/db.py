@@ -11,10 +11,12 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
+    Identity,
     Integer,
     LargeBinary,
     String,
@@ -30,17 +32,20 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
+from flashcards.domain.audit import AuditAction, AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus, JobType
+from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
 
@@ -634,6 +639,95 @@ def share_link_from_row(row: ShareLinkRow) -> ShareLink:
         allow_clone=row.allow_clone,
         created_at=row.created_at,
         revoked_at=row.revoked_at,
+    )
+
+
+class AuditEventRow(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Assigned by the database in insertion order; pages are cut on it.
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True, index=True)
+    action: Mapped[str] = mapped_column(String, index=True)
+    actor_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    target_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    detail: Mapped[dict[str, str]] = mapped_column(JSON)
+
+
+def audit_to_row(event: AuditEvent) -> AuditEventRow:
+    return AuditEventRow(
+        id=event.id,
+        action=event.action.value,
+        actor_id=event.actor_id,
+        target_id=event.target_id,
+        created_at=event.created_at,
+        detail=dict(event.detail),
+    )
+
+
+def audit_from_row(row: AuditEventRow) -> AuditEvent:
+    return AuditEvent(
+        id=row.id,
+        action=AuditAction(row.action),
+        actor_id=row.actor_id,
+        target_id=row.target_id,
+        created_at=row.created_at,
+        detail=tuple(sorted(row.detail.items())),
+    )
+
+
+class LoginThrottleRow(Base):
+    __tablename__ = "login_throttle"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def throttle_from_row(row: LoginThrottleRow) -> ThrottleState:
+    return ThrottleState(
+        key=row.key,
+        failures=row.failures,
+        window_started_at=row.window_started_at,
+        locked_until=row.locked_until,
+    )
+
+
+class UserTokenRow(Base):
+    __tablename__ = "user_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    purpose: Mapped[str] = mapped_column(String)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def user_token_to_row(token: UserToken) -> UserTokenRow:
+    return UserTokenRow(
+        id=token.id,
+        user_id=token.user_id,
+        purpose=token.purpose.value,
+        token_hash=token.token_hash,
+        created_at=token.created_at,
+        expires_at=token.expires_at,
+        used_at=token.used_at,
+    )
+
+
+def user_token_from_row(row: UserTokenRow) -> UserToken:
+    return UserToken(
+        id=row.id,
+        user_id=row.user_id,
+        purpose=TokenPurpose(row.purpose),
+        token_hash=row.token_hash,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        used_at=row.used_at,
     )
 
 

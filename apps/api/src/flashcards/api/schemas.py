@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from flashcards.application.account_service import AccountExport
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
+from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import ChatAnswer
 from flashcards.domain.decks import Deck
 from flashcards.domain.evaluation import AnswerEvaluation
@@ -42,6 +43,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class TokenRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(max_length=320)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    password: str = Field(max_length=1_000)
+
+
 class InviteCreateRequest(BaseModel):
     email: str | None = None
     role: Role = Role.MEMBER
@@ -52,10 +66,13 @@ class UserOut(BaseModel):
     id: str
     email: str
     role: Role
+    email_verified: bool
 
     @classmethod
     def from_user(cls, user: User) -> UserOut:
-        return cls(id=user.id, email=user.email, role=user.role)
+        return cls(
+            id=user.id, email=user.email, role=user.role, email_verified=user.is_verified
+        )
 
 
 class CreatedInviteOut(BaseModel):
@@ -219,6 +236,50 @@ class ChatAnswerOut(BaseModel):
         return cls(
             answer=answer.answer,
             citations=[CitationOut(file_id=c.file_id, page=c.page) for c in answer.citations],
+        )
+
+
+class AdminUserOut(BaseModel):
+    id: str
+    email: str
+    role: Role
+    email_verified: bool
+    suspended: bool
+    created_at: datetime
+
+    @classmethod
+    def from_user(cls, user: User) -> AdminUserOut:
+        return cls(
+            id=user.id,
+            email=user.email,
+            role=user.role,
+            email_verified=user.is_verified,
+            suspended=user.suspended_at is not None,
+            created_at=user.created_at,
+        )
+
+
+class RoleUpdateRequest(BaseModel):
+    role: Role
+
+
+class AuditEventOut(BaseModel):
+    id: str
+    action: str
+    created_at: datetime
+    actor_id: str | None
+    target_id: str | None
+    detail: dict[str, str]
+
+    @classmethod
+    def from_event(cls, event: AuditEvent) -> AuditEventOut:
+        return cls(
+            id=event.id,
+            action=event.action.value,
+            created_at=event.created_at,
+            actor_id=event.actor_id,
+            target_id=event.target_id,
+            detail=dict(event.detail),
         )
 
 

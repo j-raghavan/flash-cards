@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
+from flashcards.application.sign_in_service import throttle_key
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.media import MediaAsset
@@ -23,6 +25,7 @@ from flashcards.domain.ports import (
     DeckRepository,
     DraftCardRepository,
     GoalRepository,
+    LoginThrottleRepository,
     MediaRepository,
     MockExamRepository,
     NoteRepository,
@@ -34,10 +37,11 @@ from flashcards.domain.ports import (
     SessionRepository,
     ShareLinkRepository,
     UserRepository,
+    UserTokenRepository,
 )
 from flashcards.domain.scheduling import CardSchedule, ReviewLog
 from flashcards.domain.sharing import ShareLink
-from flashcards.domain.users import User
+from flashcards.domain.users import LastActiveAdmin, User
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +80,9 @@ class AccountService:
         ai_calls: QuotaRepository,
         share_links: ShareLinkRepository,
         clone_quota: QuotaRepository,
+        login_throttle: LoginThrottleRepository,
+        user_tokens: UserTokenRepository,
+        invites: InviteService,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -96,6 +103,9 @@ class AccountService:
         self._ai_calls = ai_calls
         self._share_links = share_links
         self._clone_quota = clone_quota
+        self._login_throttle = login_throttle
+        self._user_tokens = user_tokens
+        self._invites = invites
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -123,9 +133,17 @@ class AccountService:
             share_links=tuple(await self._share_links.list_for_owner(user.id)),
         )
 
-    async def delete(self, *, user: User) -> None:
-        # In SQL mode the whole request runs in one transaction (sql_provider wraps
-        # it in session.begin()), so this erasure is atomic there.
+    async def delete(self, *, user: User) -> list[str]:
+        """Erase the account; return the ids of the unredeemed invites it revoked.
+
+        The last active admin cannot be deleted (LastActiveAdmin). Checked with the
+        admin rows locked, so two admins deleting themselves at once cannot both
+        pass. In SQL mode the whole request runs in one transaction (sql_provider
+        wraps it in session.begin()), so this erasure is atomic there.
+        """
+        admins = await self._users.lock_active_admins()
+        if [admin.id for admin in admins] == [user.id]:
+            raise LastActiveAdmin(user.id)
         owner_id = user.id
         # AI jobs, their drafts (cascade) and their stored source files.
         for job in await self._ai_jobs.list_for_owner(owner_id):
@@ -147,5 +165,10 @@ class AccountService:
         await self._ai_calls.delete_for_owner(owner_id)
         await self._share_links.delete_for_owner(owner_id)
         await self._clone_quota.delete_for_owner(owner_id)
+        # The throttle key is derived from the email, so it goes with the account.
+        await self._login_throttle.delete(throttle_key(user.email))
+        await self._user_tokens.delete_for_user(owner_id)
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)
+        # Invites the account sent stop working once it is gone.
+        return await self._invites.revoke_created_by(owner_id)

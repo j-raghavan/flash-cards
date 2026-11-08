@@ -12,11 +12,13 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from flashcards.domain.ai import DraftCardRecord
+from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.login_throttle import ThrottleState, after_attempt
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -24,6 +26,7 @@ from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 
@@ -65,6 +68,10 @@ class InMemoryInviteRepository:
         self._by_id[invite_id] = invite.with_revoked(now)
         return True
 
+    async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
+        ids = sorted(i.id for i in self._by_id.values() if i.created_by == user_id)
+        return [invite_id for invite_id in ids if await self.try_revoke(invite_id, now)]
+
 
 class InMemoryUserRepository:
     def __init__(self) -> None:
@@ -83,6 +90,19 @@ class InMemoryUserRepository:
     async def get_by_email(self, email: str) -> User | None:
         user_id = self._email_to_id.get(email)
         return self._by_id.get(user_id) if user_id is not None else None
+
+    async def get_for_update(self, user_id: str) -> User | None:
+        return self._by_id.get(user_id)  # one event loop: nothing runs in between
+
+    async def lock_active_admins(self) -> list[User]:
+        return sorted((u for u in self._by_id.values() if u.is_active_admin), key=lambda u: u.id)
+
+    async def list_all(self) -> list[User]:
+        return sorted(self._by_id.values(), key=lambda u: (u.created_at, u.id))
+
+    async def update(self, user: User) -> None:
+        if user.id in self._by_id:
+            self._by_id[user.id] = user
 
     async def delete(self, user_id: str) -> None:
         user = self._by_id.pop(user_id, None)
@@ -113,6 +133,11 @@ class InMemorySessionRepository:
             return False
         self._by_id[session_id] = session.with_revoked(now)
         return True
+
+    async def revoke_all_for_user(self, user_id: str, now: datetime) -> None:
+        for session in list(self._by_id.values()):
+            if session.user_id == user_id and session.revoked_at is None:
+                self._by_id[session.id] = session.with_revoked(now)
 
     async def delete_for_user(self, user_id: str) -> None:
         for session_id in [s.id for s in self._by_id.values() if s.user_id == user_id]:
@@ -459,3 +484,68 @@ class InMemoryShareLinkRepository:
     async def delete_for_owner(self, owner_id: str) -> None:
         for link_id in [x.id for x in self._by_id.values() if x.owner_id == owner_id]:
             del self._by_id[link_id]
+
+
+class InMemoryAuditRepository:
+    def __init__(self) -> None:
+        self._events: list[AuditEvent] = []
+
+    async def append(self, event: AuditEvent) -> None:
+        self._events.append(event)
+
+    async def list_recent(self, *, limit: int, before: str | None = None) -> list[AuditEvent]:
+        events = self._events  # in recording order
+        if before is not None:
+            ids = [e.id for e in events]
+            events = events[: ids.index(before)] if before in ids else []
+        return events[::-1][:limit]
+
+
+class InMemoryLoginThrottleRepository:
+    def __init__(self) -> None:
+        self._by_key: dict[str, ThrottleState] = {}
+
+    async def get(self, key: str) -> ThrottleState | None:
+        return self._by_key.get(key)
+
+    async def register_attempt(self, key: str, now: datetime) -> ThrottleState:
+        # No await between the read and the write, so this is atomic on the loop.
+        state = after_attempt(self._by_key.get(key), key, now)
+        self._by_key[key] = state
+        return state
+
+    async def delete(self, key: str) -> None:
+        self._by_key.pop(key, None)
+
+
+class InMemoryUserTokenRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, UserToken] = {}
+
+    async def add(self, token: UserToken) -> None:
+        self._by_id[token.id] = token
+
+    async def get_by_token_hash(self, token_hash: str) -> UserToken | None:
+        return next((t for t in self._by_id.values() if t.token_hash == token_hash), None)
+
+    async def latest_for_user(self, user_id: str, purpose: TokenPurpose) -> UserToken | None:
+        mine = [t for t in self._by_id.values() if t.user_id == user_id and t.purpose is purpose]
+        return max(mine, key=lambda t: t.created_at, default=None)
+
+    async def try_use(self, token_id: str, now: datetime) -> bool:
+        token = self._by_id.get(token_id)
+        if token is None or token.used_at is not None:
+            return False
+        self._by_id[token_id] = replace(token, used_at=now)
+        return True
+
+    async def invalidate_for_user(
+        self, user_id: str, purpose: TokenPurpose, now: datetime
+    ) -> None:
+        for token in list(self._by_id.values()):
+            if token.user_id == user_id and token.purpose is purpose and token.used_at is None:
+                self._by_id[token.id] = replace(token, used_at=now)
+
+    async def delete_for_user(self, user_id: str) -> None:
+        for token_id in [t.id for t in self._by_id.values() if t.user_id == user_id]:
+            del self._by_id[token_id]

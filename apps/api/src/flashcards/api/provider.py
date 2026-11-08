@@ -19,16 +19,19 @@ from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
     SqlAiJobRepository,
+    SqlAuditRepository,
     SqlCardRepository,
     SqlDeckRepository,
     SqlDraftCardRepository,
     SqlGoalRepository,
     SqlInviteRepository,
+    SqlLoginThrottleRepository,
     SqlMediaRepository,
     SqlMockExamRepository,
     SqlNoteRepository,
@@ -40,6 +43,7 @@ from flashcards.adapters.sql import (
     SqlSessionRepository,
     SqlShareLinkRepository,
     SqlUserRepository,
+    SqlUserTokenRepository,
 )
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.api.container import (
@@ -48,7 +52,7 @@ from flashcards.api.container import (
     build_container,
     build_services,
 )
-from flashcards.domain.ports import LLMProvider
+from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
@@ -58,9 +62,14 @@ TOKEN_BYTES = 32
 
 def in_memory_provider(
     llm: LLMProvider | None = None,
+    *,
+    mailer: Mailer | None = None,
+    public_base_url: str = "http://localhost:5173",
 ) -> tuple[Container, ServicesProvider, InProcessJobQueue]:
     job_queue = InProcessJobQueue()
-    container = build_container(llm=llm, job_queue=job_queue)
+    container = build_container(
+        llm=llm, job_queue=job_queue, mailer=mailer, public_base_url=public_base_url
+    )
 
     async def provider() -> AsyncIterator[Container]:
         yield container
@@ -69,7 +78,11 @@ def in_memory_provider(
 
 
 def sql_provider(
-    database_url: str, llm: LLMProvider | None = None
+    database_url: str,
+    llm: LLMProvider | None = None,
+    *,
+    mailer: Mailer | None = None,
+    public_base_url: str = "http://localhost:5173",
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
@@ -84,6 +97,7 @@ def sql_provider(
     media_sniffer = PuremagicMediaSniffer()
     job_queue = InProcessJobQueue()
     provider_llm = llm or NullLLMProvider()
+    provider_mailer = mailer or LogMailer(show_content=False)
 
     async def provider() -> AsyncIterator[Container]:
         async with sessionmaker() as session, session.begin():
@@ -119,6 +133,11 @@ def sql_provider(
                     ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
                     share_links=SqlShareLinkRepository(session),
                     clone_quota=SqlQuotaRepository(session, limit=DEFAULT_DAILY_CLONE_CARDS),
+                    audit_events=SqlAuditRepository(session),
+                    login_throttle=SqlLoginThrottleRepository(session),
+                    user_tokens=SqlUserTokenRepository(session),
+                    mailer=provider_mailer,
+                    public_base_url=public_base_url,
                 )
             )
 

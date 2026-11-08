@@ -42,3 +42,14 @@ class Settings(BaseSettings):
     # Keep it below the database pool size: each holds a connection while it waits
     # on the model.
     max_concurrent_ai_calls: int = 4
+    # Where the web client lives; links in emails point here.
+    public_base_url: str = "http://localhost:5173"
+    # Outgoing mail. Without smtp_host, mail is not sent: in development it is
+    # logged so the links can be followed; elsewhere only its subject is logged.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_sender: str = "Flash-Cards <no-reply@localhost>"
+    # "starttls" (port 587), "ssl" (port 465) or "none" (a local relay only; no login).
+    smtp_security: Literal["starttls", "ssl", "none"] = "starttls"

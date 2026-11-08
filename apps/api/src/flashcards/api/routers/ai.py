@@ -32,7 +32,7 @@ async def start_generation(
     deck_id: str = Form(...),
     thoroughness: Thoroughness = Form(Thoroughness.STANDARD),
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> JobOut:
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
@@ -51,7 +51,7 @@ async def start_generation(
 async def start_youtube_generation(
     body: YouTubeGenerateRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> JobOut:
     job = await container.transcript_import.from_youtube(
         owner_id=caller.user.id,
@@ -68,7 +68,7 @@ async def start_youtube_generation(
 async def start_transcript_generation(
     body: TranscriptGenerateRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> JobOut:
     job = await container.transcript_import.from_text(
         owner_id=caller.user.id,
@@ -83,7 +83,7 @@ async def start_transcript_generation(
 async def get_job(
     job_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> JobOut:
     return JobOut.from_job(await container.generation.get(owner_id=caller.user.id, job_id=job_id))
 
@@ -92,7 +92,7 @@ async def get_job(
 async def cancel_job(
     job_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> JobOut:
     await container.generation.cancel(owner_id=caller.user.id, job_id=job_id)
     return JobOut.from_job(await container.generation.get(owner_id=caller.user.id, job_id=job_id))
@@ -102,7 +102,7 @@ async def cancel_job(
 async def list_drafts(
     job_id: str,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[DraftOut]:
     drafts = await container.draft_review.list_drafts(owner_id=caller.user.id, job_id=job_id)
     return [DraftOut.from_record(draft) for draft in drafts]
@@ -117,7 +117,7 @@ async def approve_drafts(
     job_id: str,
     body: ApproveDraftsRequest,
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> list[CardOut]:
     cards = await container.draft_review.approve(
         owner_id=caller.user.id, job_id=job_id, draft_ids=body.draft_ids

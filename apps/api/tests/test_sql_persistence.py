@@ -24,16 +24,19 @@ from flashcards.adapters.db import (
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import InMemoryJobQueue, SystemClock
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
     SqlAiJobRepository,
+    SqlAuditRepository,
     SqlCardRepository,
     SqlDeckRepository,
     SqlDraftCardRepository,
     SqlGoalRepository,
     SqlInviteRepository,
+    SqlLoginThrottleRepository,
     SqlMediaRepository,
     SqlMockExamRepository,
     SqlNoteRepository,
@@ -45,6 +48,7 @@ from flashcards.adapters.sql import (
     SqlSessionRepository,
     SqlShareLinkRepository,
     SqlUserRepository,
+    SqlUserTokenRepository,
 )
 from flashcards.adapters.transcripts import NullTranscriptProvider
 from flashcards.api.app import create_app
@@ -89,6 +93,10 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         ai_calls=SqlQuotaRepository(session, limit=200),
         share_links=SqlShareLinkRepository(session),
         clone_quota=SqlQuotaRepository(session, limit=50_000),
+        audit_events=SqlAuditRepository(session),
+        login_throttle=SqlLoginThrottleRepository(session),
+        user_tokens=SqlUserTokenRepository(session),
+        mailer=LogMailer(show_content=False),
     )
 
 PASSWORD = "correct-horse-battery"
@@ -269,6 +277,15 @@ def test_end_to_end_signup_over_http_on_postgres(pg_url: str) -> None:
         me = client.get("/auth/me")
         assert me.status_code == 200
         assert me.json()["email"] == "admin@example.com"
+
+        # Failed sign-ins must persist across requests on Postgres: each 401 commits
+        # its count, so the sixth attempt is locked even with the right password.
+        for _ in range(5):
+            wrong = {"email": "admin@example.com", "password": "not-the-password"}
+            assert client.post("/auth/login", json=wrong).status_code == 401
+        right = {"email": "admin@example.com", "password": PASSWORD}
+        locked = client.post("/auth/login", json=right)
+        assert locked.status_code == 429 and int(locked.headers["retry-after"]) > 0
 
 
 # --- M1 aggregates on Postgres ---

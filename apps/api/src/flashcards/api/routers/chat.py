@@ -18,7 +18,7 @@ async def ask_deck(
     body: ChatRequest,
     _slot: None = Depends(ai_slot),  # before the DB session: see ai_slot
     caller: CurrentUser = Depends(current_user),
-    container: Container = Depends(get_container),
+    container: Container = Depends(get_container, scope="function"),
 ) -> ChatAnswerOut:
     answer = await container.chat.ask(
         owner_id=caller.user.id, deck_id=deck_id, question=body.question
