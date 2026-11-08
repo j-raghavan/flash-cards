@@ -2,18 +2,27 @@
 
 Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, photos of notes or a YouTube link, review the generated cards, set an exam date and target grade, and follow a daily plan.
 
-> **Status:** pre-alpha, under active development. See [docs/PRD.md](docs/PRD.md) for the product requirements.
+> **Status:** pre-alpha. The backend API is functional; the web client is in development. See [docs/PRD.md](docs/PRD.md) for the full product requirements.
 
 ## Features
 
 - AI card generation from PDF, PNG and JPEG files or a lecture transcript, with every card reviewed before it is scheduled and a source reference on each one
 - Basic and Cloze cards with image and audio attachments
-- FSRS-based adaptive scheduling, with deck stats and proficiency
+- FSRS-based adaptive scheduling, with deck statistics and proficiency
 - Exam goals with a daily study plan and a readiness forecast
-- Self-evaluated and AI-evaluated study, deck summaries, timed mock exams with a per-topic breakdown, and chat with your source documents that cites the page
+- Self-evaluated and AI-evaluated study, deck summaries, timed mock exams with a per-topic breakdown, and chat with source documents with page citations
 - Anki `.apkg` import, full account export and account deletion
-- Invite-only access
-- Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint, including a local model
+- Invite-only access with administrator-issued invites
+- Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint, including locally hosted models
+
+## Roadmap
+
+- Web client: installable PWA with offline review
+- Deck sharing by revocable link, with optional cloning
+- Email verification, password reset, administrator console and audit log
+- Image Occlusion and custom note types
+- Anki `.apkg` export
+- Automatic YouTube transcript retrieval
 
 ## Stack
 
