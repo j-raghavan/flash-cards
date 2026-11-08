@@ -136,6 +136,10 @@ class InMemoryNoteRepository:
     async def get(self, note_id: str) -> Note | None:
         return self._by_id.get(note_id)
 
+    async def list_for_deck(self, deck_id: str) -> list[Note]:
+        notes = [note for note in self._by_id.values() if note.deck_id == deck_id]
+        return sorted(notes, key=lambda note: note.created_at)
+
     async def delete(self, note_id: str) -> None:
         self._by_id.pop(note_id, None)
 
@@ -197,6 +201,10 @@ class InMemoryReviewLogRepository:
         ):
             raise DuplicateReview(log.idempotency_key)
         self._logs.append(log)
+
+    async def list_for_owner(self, owner_id: str) -> list[ReviewLog]:
+        owned = [log for log in self._logs if log.owner_id == owner_id]
+        return sorted(owned, key=lambda log: log.reviewed_at)
 
     async def delete_for_card(self, card_id: str) -> None:
         self._logs = [log for log in self._logs if log.card_id != card_id]

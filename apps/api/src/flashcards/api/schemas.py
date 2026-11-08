@@ -12,6 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from flashcards.application.account_service import AccountExport
 from flashcards.domain.ai import DraftCardRecord
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.decks import Deck
@@ -325,4 +326,134 @@ class ImportReportOut(BaseModel):
             decks_created=report.decks_created,
             notes_imported=report.notes_imported,
             notes_skipped=report.notes_skipped,
+        )
+
+
+class UserExportOut(BaseModel):
+    id: str
+    email: str
+    role: Role
+    created_at: datetime
+
+
+class DeckExportOut(BaseModel):
+    id: str
+    name: str
+    parent_id: str | None
+    created_at: datetime
+
+
+class NoteExportOut(BaseModel):
+    id: str
+    deck_id: str
+    note_type: NoteType
+    fields: dict[str, str]
+    created_at: datetime
+
+
+class CardExportOut(BaseModel):
+    id: str
+    deck_id: str
+    note_id: str
+    ordinal: int
+    suspended: bool
+
+
+class ScheduleExportOut(BaseModel):
+    card_id: str
+    state: ScheduleState
+    stability: float | None
+    difficulty: float | None
+    due_at: datetime
+    last_reviewed_at: datetime | None
+
+
+class ReviewLogExportOut(BaseModel):
+    id: str
+    card_id: str
+    rating: int
+    reviewed_at: datetime
+
+
+class GoalExportOut(BaseModel):
+    id: str
+    name: str
+    deck_ids: list[str]
+    exam_date: datetime
+    target_retention: float
+    created_at: datetime
+
+
+class AccountExportOut(BaseModel):
+    user: UserExportOut
+    decks: list[DeckExportOut]
+    notes: list[NoteExportOut]
+    cards: list[CardExportOut]
+    schedules: list[ScheduleExportOut]
+    review_logs: list[ReviewLogExportOut]
+    goals: list[GoalExportOut]
+
+    @classmethod
+    def from_export(cls, export: AccountExport) -> AccountExportOut:
+        return cls(
+            user=UserExportOut(
+                id=export.user.id,
+                email=export.user.email,
+                role=export.user.role,
+                created_at=export.user.created_at,
+            ),
+            decks=[
+                DeckExportOut(
+                    id=d.id, name=d.name, parent_id=d.parent_id, created_at=d.created_at
+                )
+                for d in export.decks
+            ],
+            notes=[
+                NoteExportOut(
+                    id=n.id,
+                    deck_id=n.deck_id,
+                    note_type=n.note_type,
+                    fields=dict(n.fields),
+                    created_at=n.created_at,
+                )
+                for n in export.notes
+            ],
+            cards=[
+                CardExportOut(
+                    id=c.id,
+                    deck_id=c.deck_id,
+                    note_id=c.note_id,
+                    ordinal=c.ordinal,
+                    suspended=c.is_suspended,
+                )
+                for c in export.cards
+            ],
+            schedules=[
+                ScheduleExportOut(
+                    card_id=s.card_id,
+                    state=s.state,
+                    stability=s.stability,
+                    difficulty=s.difficulty,
+                    due_at=s.due_at,
+                    last_reviewed_at=s.last_reviewed_at,
+                )
+                for s in export.schedules
+            ],
+            review_logs=[
+                ReviewLogExportOut(
+                    id=r.id, card_id=r.card_id, rating=int(r.rating), reviewed_at=r.reviewed_at
+                )
+                for r in export.review_logs
+            ],
+            goals=[
+                GoalExportOut(
+                    id=g.id,
+                    name=g.name,
+                    deck_ids=list(g.deck_ids),
+                    exam_date=g.exam_date,
+                    target_retention=g.target_retention,
+                    created_at=g.created_at,
+                )
+                for g in export.goals
+            ],
         )

@@ -31,6 +31,7 @@ from flashcards.adapters.memory import (
     SystemClock,
 )
 from flashcards.adapters.passwords import Argon2PasswordHasher
+from flashcards.application.account_service import AccountService
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.auth_service import AuthService
 from flashcards.application.card_generation_service import CardGenerationService
@@ -111,6 +112,7 @@ class Container:
     goal_service: GoalService
     planner: PlannerService
     apkg_import: ApkgImportService
+    account: AccountService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -153,6 +155,14 @@ def build_services(repos: Repositories) -> Container:
     goal_service = GoalService(decks, repos.goals, repos.clock)
     planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)
     apkg_import = ApkgImportService(repos.package_reader, decks, notes)
+    account = AccountService(
+        repos.decks,
+        repos.notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+        repos.goals,
+    )
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -170,6 +180,7 @@ def build_services(repos: Repositories) -> Container:
         goal_service=goal_service,
         planner=planner,
         apkg_import=apkg_import,
+        account=account,
     )
 
 

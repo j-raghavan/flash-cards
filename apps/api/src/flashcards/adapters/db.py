@@ -34,7 +34,7 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus, JobType
 from flashcards.domain.notes import Card, Note, NoteType
-from flashcards.domain.scheduling import CardSchedule, ReviewLog, ScheduleState
+from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
 
@@ -327,6 +327,17 @@ def review_log_to_row(log: ReviewLog) -> ReviewLogRow:
         rating=int(log.rating),
         reviewed_at=log.reviewed_at,
         idempotency_key=log.idempotency_key,
+    )
+
+
+def review_log_from_row(row: ReviewLogRow) -> ReviewLog:
+    return ReviewLog(
+        id=row.id,
+        owner_id=row.owner_id,
+        card_id=row.card_id,
+        rating=Rating(row.rating),
+        reviewed_at=row.reviewed_at,
+        idempotency_key=row.idempotency_key,
     )
 
 

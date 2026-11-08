@@ -14,7 +14,17 @@ from fastapi.responses import JSONResponse
 from flashcards import __version__
 from flashcards.api.container import Container
 from flashcards.api.provider import in_memory_provider, sql_provider
-from flashcards.api.routers import admin, ai, auth, cards, decks, goals, imports, review
+from flashcards.api.routers import (
+    account,
+    admin,
+    ai,
+    auth,
+    cards,
+    decks,
+    goals,
+    imports,
+    review,
+)
 from flashcards.config import Settings
 from flashcards.domain.ai import DraftNotFound
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
@@ -136,6 +146,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(ai.router)
     app.include_router(goals.router)
     app.include_router(imports.router)
+    app.include_router(account.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

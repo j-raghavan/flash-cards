@@ -123,6 +123,10 @@ class NoteRepository(Protocol):
 
     async def get(self, note_id: str) -> Note | None: ...
 
+    async def list_for_deck(self, deck_id: str) -> list[Note]:
+        """Return the deck's notes, oldest first."""
+        ...
+
     async def delete(self, note_id: str) -> None: ...
 
     async def delete_for_deck(self, deck_id: str) -> None:
@@ -181,6 +185,10 @@ class ReviewLogRepository(Protocol):
         flashcards.domain.scheduling.DuplicateReview instead of appending, so a
         retried submission is an atomic no-op, never a double count (NF-REL-1).
         """
+        ...
+
+    async def list_for_owner(self, owner_id: str) -> list[ReviewLog]:
+        """Return the owner's review logs, oldest first (for data export)."""
         ...
 
     async def delete_for_card(self, card_id: str) -> None:

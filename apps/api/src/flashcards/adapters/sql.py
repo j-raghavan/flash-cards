@@ -44,6 +44,7 @@ from flashcards.adapters.db import (
     invite_to_row,
     note_from_row,
     note_to_row,
+    review_log_from_row,
     review_log_to_row,
     schedule_from_row,
     schedule_to_row,
@@ -212,6 +213,12 @@ class SqlNoteRepository:
         row = await self._session.get(NoteRow, note_id)
         return note_from_row(row) if row is not None else None
 
+    async def list_for_deck(self, deck_id: str) -> list[Note]:
+        rows = await self._session.scalars(
+            select(NoteRow).where(NoteRow.deck_id == deck_id).order_by(NoteRow.created_at)
+        )
+        return [note_from_row(row) for row in rows]
+
     async def delete(self, note_id: str) -> None:
         row = await self._session.get(NoteRow, note_id)
         if row is not None:
@@ -274,6 +281,14 @@ class SqlScheduleRepository:
 class SqlReviewLogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def list_for_owner(self, owner_id: str) -> list[ReviewLog]:
+        rows = await self._session.scalars(
+            select(ReviewLogRow)
+            .where(ReviewLogRow.owner_id == owner_id)
+            .order_by(ReviewLogRow.reviewed_at)
+        )
+        return [review_log_from_row(row) for row in rows]
 
     async def append(self, log: ReviewLog) -> None:
         if log.idempotency_key is None:
