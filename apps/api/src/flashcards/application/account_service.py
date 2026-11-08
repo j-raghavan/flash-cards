@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from flashcards.application.library_service import LibraryService
+from flashcards.application.sign_in_service import throttle_key
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.media import MediaAsset
@@ -23,6 +24,7 @@ from flashcards.domain.ports import (
     DeckRepository,
     DraftCardRepository,
     GoalRepository,
+    LoginThrottleRepository,
     MediaRepository,
     MockExamRepository,
     NoteRepository,
@@ -76,6 +78,7 @@ class AccountService:
         ai_calls: QuotaRepository,
         share_links: ShareLinkRepository,
         clone_quota: QuotaRepository,
+        login_throttle: LoginThrottleRepository,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -96,6 +99,7 @@ class AccountService:
         self._ai_calls = ai_calls
         self._share_links = share_links
         self._clone_quota = clone_quota
+        self._login_throttle = login_throttle
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -147,5 +151,7 @@ class AccountService:
         await self._ai_calls.delete_for_owner(owner_id)
         await self._share_links.delete_for_owner(owner_id)
         await self._clone_quota.delete_for_owner(owner_id)
+        # The throttle key is derived from the email, so it goes with the account.
+        await self._login_throttle.delete(throttle_key(user.email))
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)

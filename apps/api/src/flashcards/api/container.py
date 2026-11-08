@@ -23,6 +23,7 @@ from flashcards.adapters.memory import (
     InMemoryDraftCardRepository,
     InMemoryGoalRepository,
     InMemoryInviteRepository,
+    InMemoryLoginThrottleRepository,
     InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
@@ -60,6 +61,7 @@ from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.sharing_service import SharingService
+from flashcards.application.sign_in_service import SignInService
 from flashcards.application.summary_service import SummaryService
 from flashcards.application.transcript_import_service import TranscriptImportService
 from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
@@ -75,6 +77,7 @@ from flashcards.domain.ports import (
     InviteRepository,
     JobQueue,
     LLMProvider,
+    LoginThrottleRepository,
     MediaRepository,
     MediaTypeSniffer,
     MockExamRepository,
@@ -127,6 +130,7 @@ class Repositories:
     share_links: ShareLinkRepository
     clone_quota: QuotaRepository
     audit_events: AuditRepository
+    login_throttle: LoginThrottleRepository
     dummy_hash: str | None = None
 
 
@@ -158,6 +162,7 @@ class Container:
     sharing: SharingService
     audit: AuditService
     admin: AdminService
+    sign_in: SignInService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -223,6 +228,7 @@ def build_services(repos: Repositories) -> Container:
         repos.ai_calls,
         repos.share_links,
         repos.clone_quota,
+        repos.login_throttle,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -267,6 +273,7 @@ def build_services(repos: Repositories) -> Container:
     )
     audit = AuditService(repos.audit_events, repos.clock)
     admin = AdminService(invites, audit)
+    sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -294,6 +301,7 @@ def build_services(repos: Repositories) -> Container:
         sharing=sharing,
         audit=audit,
         admin=admin,
+        sign_in=sign_in,
     )
 
 
@@ -339,5 +347,6 @@ def build_container(
             share_links=InMemoryShareLinkRepository(),
             clone_quota=InMemoryQuotaRepository(limit=DEFAULT_DAILY_CLONE_CARDS),
             audit_events=InMemoryAuditRepository(),
+            login_throttle=InMemoryLoginThrottleRepository(),
         )
     )

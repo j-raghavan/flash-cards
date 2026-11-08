@@ -35,6 +35,7 @@ from flashcards.adapters.sql import (
     SqlDraftCardRepository,
     SqlGoalRepository,
     SqlInviteRepository,
+    SqlLoginThrottleRepository,
     SqlMediaRepository,
     SqlMockExamRepository,
     SqlNoteRepository,
@@ -91,6 +92,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         share_links=SqlShareLinkRepository(session),
         clone_quota=SqlQuotaRepository(session, limit=50_000),
         audit_events=SqlAuditRepository(session),
+        login_throttle=SqlLoginThrottleRepository(session),
     )
 
 PASSWORD = "correct-horse-battery"
@@ -271,6 +273,15 @@ def test_end_to_end_signup_over_http_on_postgres(pg_url: str) -> None:
         me = client.get("/auth/me")
         assert me.status_code == 200
         assert me.json()["email"] == "admin@example.com"
+
+        # Failed sign-ins must persist across requests on Postgres: each 401 commits
+        # its count, so the sixth attempt is locked even with the right password.
+        for _ in range(5):
+            wrong = {"email": "admin@example.com", "password": "not-the-password"}
+            assert client.post("/auth/login", json=wrong).status_code == 401
+        right = {"email": "admin@example.com", "password": PASSWORD}
+        locked = client.post("/auth/login", json=right)
+        assert locked.status_code == 429 and int(locked.headers["retry-after"]) > 0
 
 
 # --- M1 aggregates on Postgres ---

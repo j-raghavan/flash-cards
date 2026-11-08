@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 
 from flashcards.api.container import Container
 from flashcards.api.deps import (
@@ -18,6 +21,7 @@ from flashcards.api.schemas import LoginRequest, SessionOut, SignupRequest, User
 from flashcards.application.auth_service import AccountSuspended, InvalidCredentials
 from flashcards.config import Settings
 from flashcards.domain.invites import InviteError
+from flashcards.domain.login_throttle import LoginLocked
 from flashcards.domain.users import EmailAlreadyRegistered, InvalidEmail, WeakPassword
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -54,11 +58,24 @@ async def login(
     response: Response,
     container: Container = Depends(get_container),
     settings: Settings = Depends(get_settings),
-) -> UserOut:
+) -> UserOut | JSONResponse:
     try:
-        issued = await container.auth.login(email=body.email, password=body.password)
-    except InvalidCredentials as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.") from exc
+        issued = await container.sign_in.login(email=body.email, password=body.password)
+    except InvalidCredentials:
+        # Returned, not raised: in SQL mode a raised error rolls back the request's
+        # transaction, which would discard the failed-attempt count and defeat the
+        # lockout.
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Invalid email or password."},
+        )
+    except LoginLocked as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many failed sign-in attempts. Try again later.",
+            # Rounded up, so a client that waits exactly this long is never early.
+            headers={"Retry-After": str(max(1, math.ceil(exc.retry_after.total_seconds())))},
+        ) from exc
     except AccountSuspended as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account is suspended.") from exc
 

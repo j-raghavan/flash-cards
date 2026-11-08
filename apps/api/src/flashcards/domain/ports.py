@@ -15,6 +15,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
+from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -444,3 +445,13 @@ class AuditRepository(Protocol):
     ) -> list[AuditEvent]:
         """Newest first; only events strictly older than `before` when given."""
         ...
+
+
+class LoginThrottleRepository(Protocol):
+    async def get(self, key: str) -> ThrottleState | None: ...
+
+    async def save(self, state: ThrottleState) -> None:
+        """Insert or replace the state for its key."""
+        ...
+
+    async def delete(self, key: str) -> None: ...

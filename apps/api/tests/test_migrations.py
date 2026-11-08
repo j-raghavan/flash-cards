@@ -36,6 +36,7 @@ APP_TABLES = {
     "document_passages",
     "share_links",
     "audit_events",
+    "login_throttle",
 }
 
 

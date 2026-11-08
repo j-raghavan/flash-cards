@@ -372,3 +372,26 @@ async def test_audit_repository(engine: AsyncEngine) -> None:
         assert [e.id for e in await repo.list_recent(limit=1)] == ["e2"]
         older = await repo.list_recent(limit=10, before=NOW + timedelta(minutes=1))
         assert [e.id for e in older] == ["e1"]
+
+
+async def test_login_throttle_repository(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlLoginThrottleRepository
+    from flashcards.domain.login_throttle import ThrottleState
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlLoginThrottleRepository(s).save(
+            ThrottleState(key="k", failures=1, window_started_at=NOW)
+        )
+    async with sm() as s, s.begin():
+        await SqlLoginThrottleRepository(s).save(
+            ThrottleState(key="k", failures=0, window_started_at=NOW, locked_until=NOW)
+        )
+    async with sm() as s:
+        state = await SqlLoginThrottleRepository(s).get("k")
+        assert state is not None and state.failures == 0 and state.locked_until == NOW
+        assert await SqlLoginThrottleRepository(s).get("missing") is None
+    async with sm() as s, s.begin():
+        await SqlLoginThrottleRepository(s).delete("k")
+    async with sm() as s:
+        assert await SqlLoginThrottleRepository(s).get("k") is None

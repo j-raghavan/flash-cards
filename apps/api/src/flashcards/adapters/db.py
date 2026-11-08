@@ -36,6 +36,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
 from flashcards.domain.jobs import AiJob, JobStatus, JobType
+from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
@@ -668,6 +669,33 @@ def audit_from_row(row: AuditEventRow) -> AuditEvent:
         target_id=row.target_id,
         created_at=row.created_at,
         detail=tuple(sorted(row.detail.items())),
+    )
+
+
+class LoginThrottleRow(Base):
+    __tablename__ = "login_throttle"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def throttle_to_row(state: ThrottleState) -> LoginThrottleRow:
+    return LoginThrottleRow(
+        key=state.key,
+        failures=state.failures,
+        window_started_at=state.window_started_at,
+        locked_until=state.locked_until,
+    )
+
+
+def throttle_from_row(row: LoginThrottleRow) -> ThrottleState:
+    return ThrottleState(
+        key=row.key,
+        failures=row.failures,
+        window_started_at=row.window_started_at,
+        locked_until=row.locked_until,
     )
 
 

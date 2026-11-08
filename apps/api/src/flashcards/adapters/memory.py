@@ -18,6 +18,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -474,3 +475,17 @@ class InMemoryAuditRepository:
     ) -> list[AuditEvent]:
         events = [e for e in self._events if before is None or e.created_at < before]
         return sorted(events, key=lambda e: e.created_at, reverse=True)[:limit]
+
+
+class InMemoryLoginThrottleRepository:
+    def __init__(self) -> None:
+        self._by_key: dict[str, ThrottleState] = {}
+
+    async def get(self, key: str) -> ThrottleState | None:
+        return self._by_key.get(key)
+
+    async def save(self, state: ThrottleState) -> None:
+        self._by_key[state.key] = state
+
+    async def delete(self, key: str) -> None:
+        self._by_key.pop(key, None)

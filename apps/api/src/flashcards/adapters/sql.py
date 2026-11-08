@@ -27,6 +27,7 @@ from flashcards.adapters.db import (
     DraftCardRow,
     GoalRow,
     InviteRow,
+    LoginThrottleRow,
     MediaRow,
     MockExamRow,
     NoteRow,
@@ -64,6 +65,8 @@ from flashcards.adapters.db import (
     session_to_row,
     share_link_from_row,
     share_link_to_row,
+    throttle_from_row,
+    throttle_to_row,
     user_from_row,
     user_to_row,
 )
@@ -74,6 +77,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
@@ -680,3 +684,19 @@ class SqlAuditRepository:
             query = query.where(AuditEventRow.created_at < before)
         rows = await self._session.scalars(query)
         return [audit_from_row(row) for row in rows]
+
+
+class SqlLoginThrottleRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, key: str) -> ThrottleState | None:
+        row = await self._session.get(LoginThrottleRow, key)
+        return throttle_from_row(row) if row is not None else None
+
+    async def save(self, state: ThrottleState) -> None:
+        await self._session.merge(throttle_to_row(state))
+        await self._session.flush()
+
+    async def delete(self, key: str) -> None:
+        await self._session.execute(delete(LoginThrottleRow).where(LoginThrottleRow.key == key))

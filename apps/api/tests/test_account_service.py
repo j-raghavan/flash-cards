@@ -10,6 +10,7 @@ from flashcards.adapters.memory import (
     InMemoryDeckRepository,
     InMemoryDraftCardRepository,
     InMemoryGoalRepository,
+    InMemoryLoginThrottleRepository,
     InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
@@ -27,10 +28,12 @@ from flashcards.application.deck_service import DeckService
 from flashcards.application.goal_service import GoalService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
+from flashcards.application.sign_in_service import throttle_key
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.chat import Passage
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import new_generation_job
+from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import NoteType
@@ -72,6 +75,7 @@ class _Fixture:
         self.ai_calls = InMemoryQuotaRepository(limit=5)
         self.share_links = InMemoryShareLinkRepository()
         self.clone_quota = InMemoryQuotaRepository(limit=100)
+        self.throttle = InMemoryLoginThrottleRepository()
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
         self.goals = GoalService(self.decks, self.goal_repo, clock)
@@ -84,7 +88,7 @@ class _Fixture:
             library, self.deck_repo, self.note_repo, self.card_repo, self.schedule_repo,
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
-            self.passages, self.ai_calls, self.share_links, self.clone_quota,
+            self.passages, self.ai_calls, self.share_links, self.clone_quota, self.throttle,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -193,6 +197,9 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     )
     await fx.seed_full_account(BOB)  # Bob's full account must survive Alice's deletion
 
+    await fx.throttle.save(
+        ThrottleState(key=throttle_key(ALICE.email), failures=2, window_started_at=NOW)
+    )
     await fx.service.delete(user=ALICE)
     await fx.users.delete("ghost")  # deleting a missing user is a no-op
 
@@ -207,6 +214,7 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.media.list_for_owner(ALICE.id) == []
     assert await fx.mock_exams.get("exam-alice") is None
     assert await fx.share_links.get("share-alice") is None
+    assert await fx.throttle.get(throttle_key(ALICE.email)) is None
     assert await fx.share_links.get("share-bob") is not None
     assert await fx.passages.indexed_files(fx_alice_deck) == set()
     assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset

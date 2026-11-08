@@ -30,6 +30,7 @@ from flashcards.adapters.sql import (
     SqlDraftCardRepository,
     SqlGoalRepository,
     SqlInviteRepository,
+    SqlLoginThrottleRepository,
     SqlMediaRepository,
     SqlMockExamRepository,
     SqlNoteRepository,
@@ -121,6 +122,7 @@ def sql_provider(
                     share_links=SqlShareLinkRepository(session),
                     clone_quota=SqlQuotaRepository(session, limit=DEFAULT_DAILY_CLONE_CARDS),
                     audit_events=SqlAuditRepository(session),
+                    login_throttle=SqlLoginThrottleRepository(session),
                 )
             )
 
