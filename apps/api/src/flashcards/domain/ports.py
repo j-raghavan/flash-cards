@@ -8,6 +8,7 @@ from typing import Protocol
 
 from flashcards.domain.ai import StructuredRequest, StructuredResult
 from flashcards.domain.decks import Deck
+from flashcards.domain.jobs import AiJob
 from flashcards.domain.invites import Invite
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
@@ -180,4 +181,36 @@ class ReviewLogRepository(Protocol):
 
     async def delete_for_card(self, card_id: str) -> None:
         """Delete every review log for a card."""
+        ...
+
+
+class ObjectStore(Protocol):
+    async def put(self, key: str, data: bytes, content_type: str) -> None: ...
+
+    async def get(self, key: str) -> bytes | None: ...
+
+    async def delete(self, key: str) -> None: ...
+
+
+class AiJobRepository(Protocol):
+    async def add(self, job: AiJob) -> None: ...
+
+    async def get(self, job_id: str) -> AiJob | None: ...
+
+    async def update(self, job: AiJob) -> None: ...
+
+    async def try_claim(self, job_id: str, now: datetime) -> AiJob | None:
+        """Atomically move a QUEUED job to RUNNING and return it; None if not claimable.
+
+        Only the single caller that wins the transition gets the job back, so a
+        job is never processed twice.
+        """
+        ...
+
+    async def request_cancel(self, job_id: str, now: datetime) -> bool:
+        """Flag a non-terminal job for cancellation; return whether it changed."""
+        ...
+
+    async def list_running(self) -> list[AiJob]:
+        """Jobs left RUNNING (e.g. by a crash), for boot-time requeue."""
         ...
