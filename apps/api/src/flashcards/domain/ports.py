@@ -6,12 +6,25 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+from flashcards.domain.ai import StructuredRequest, StructuredResult
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
+
+
+class LLMProvider(Protocol):
+    async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
+        """Return JSON matching request.schema.
+
+        Implementations MUST pass request.documents as model data content (never
+        concatenated into request.instructions), declare no tools, constrain the
+        output to request.schema, and validate the parsed JSON (raising
+        flashcards.domain.ai.LlmError on transport or validation failure).
+        """
+        ...
 
 
 class Clock(Protocol):
