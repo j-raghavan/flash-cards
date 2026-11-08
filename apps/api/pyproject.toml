@@ -18,6 +18,9 @@ dependencies = [
   "alembic>=1.13",
 ]
 
+[project.scripts]
+flashcards = "flashcards.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
@@ -48,7 +51,7 @@ source = ["flashcards"]
 fail_under = 97
 show_missing = true
 # Only constructs that cannot execute: type-checking imports and Protocol method stubs.
-exclude_also = ["if TYPE_CHECKING:", "^\\s*\\.\\.\\.$"]
+exclude_also = ["if TYPE_CHECKING:", "^\\s*\\.\\.\\.$", "if __name__ == .__main__.:"]
 
 # Architecture rules (DDD / Clean Architecture), enforced in CI by import-linter.
 [tool.importlinter]

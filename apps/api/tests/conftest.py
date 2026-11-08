@@ -8,6 +8,8 @@ from collections.abc import Callable, Iterator
 # Testcontainers' Ryuk reaper fails to start under some Docker Desktop setups;
 # the container context managers clean up their own containers, so disable it.
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
+# Bound the readiness wait so a wedged daemon fails fast instead of hanging.
+os.environ.setdefault("TESTCONTAINERS_CONNECTION_TIMEOUT", "60")
 
 import pytest
 from fastapi import FastAPI

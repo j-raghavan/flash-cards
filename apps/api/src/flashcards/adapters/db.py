@@ -140,8 +140,23 @@ def session_from_row(row: SessionRow) -> Session:
     )
 
 
+def normalize_async_url(database_url: str) -> str:
+    """Coerce a plain Postgres URL to the asyncpg driver.
+
+    Hosted providers hand out ``postgresql://`` (or ``postgres://``); the async
+    engine needs ``postgresql+asyncpg://``. A URL that already names a driver is
+    left untouched.
+    """
+    if database_url.startswith("postgresql+"):
+        return database_url
+    for prefix in ("postgresql://", "postgres://"):
+        if database_url.startswith(prefix):
+            return "postgresql+asyncpg://" + database_url[len(prefix) :]
+    return database_url
+
+
 def create_engine(database_url: str) -> AsyncEngine:
-    return create_async_engine(database_url, pool_pre_ping=True)
+    return create_async_engine(normalize_async_url(database_url), pool_pre_ping=True)
 
 
 def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

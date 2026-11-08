@@ -10,11 +10,16 @@ COPY apps/api/pyproject.toml ./
 COPY apps/api/src ./src
 RUN pip install .
 
-RUN useradd --system --no-create-home appuser
+# Migration assets (not part of the installed package) and the entrypoint.
+COPY apps/api/alembic.ini ./alembic.ini
+COPY apps/api/migrations ./migrations
+COPY apps/api/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh && useradd --system --no-create-home appuser
 USER appuser
 
 ENV FLASHCARDS_ENVIRONMENT=production
 EXPOSE 8000
 
-# Render and Fly set PORT; default to 8000 locally.
-CMD ["sh", "-c", "uvicorn flashcards.api.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Render and Fly set PORT; default to 8000 locally. The entrypoint runs
+# `alembic upgrade head` first when FLASHCARDS_DATABASE_URL is set.
+CMD ["./entrypoint.sh"]

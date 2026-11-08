@@ -11,7 +11,7 @@ from alembic import context
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from flashcards.adapters.db import Base
+from flashcards.adapters.db import Base, normalize_async_url
 
 config = context.config
 if config.config_file_name is not None:
@@ -24,7 +24,7 @@ def _database_url() -> str:
     url = config.get_main_option("sqlalchemy.url") or os.environ.get("FLASHCARDS_DATABASE_URL")
     if not url:
         raise RuntimeError("No database URL: set sqlalchemy.url or FLASHCARDS_DATABASE_URL")
-    return url
+    return normalize_async_url(url)
 
 
 def run_migrations_offline() -> None:
