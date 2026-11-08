@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.scheduling import CardSchedule, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -155,3 +156,28 @@ class InMemoryCardRepository:
     async def delete_for_note(self, note_id: str) -> None:
         for card_id in [c.id for c in self._by_id.values() if c.note_id == note_id]:
             del self._by_id[card_id]
+
+
+class InMemoryScheduleRepository:
+    def __init__(self) -> None:
+        self._by_card: dict[str, CardSchedule] = {}
+
+    async def get(self, card_id: str) -> CardSchedule | None:
+        return self._by_card.get(card_id)
+
+    async def upsert(self, schedule: CardSchedule) -> None:
+        self._by_card[schedule.card_id] = schedule
+
+
+class InMemoryReviewLogRepository:
+    def __init__(self) -> None:
+        self._logs: list[ReviewLog] = []
+
+    async def append(self, log: ReviewLog) -> None:
+        self._logs.append(log)
+
+    async def exists_key(self, owner_id: str, idempotency_key: str) -> bool:
+        return any(
+            log.owner_id == owner_id and log.idempotency_key == idempotency_key
+            for log in self._logs
+        )

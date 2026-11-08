@@ -9,6 +9,7 @@ from typing import Protocol
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import User
 
@@ -122,4 +123,28 @@ class CardRepository(Protocol):
 
     async def delete_for_note(self, note_id: str) -> None:
         """Delete every card produced by a note."""
+        ...
+
+
+class Scheduler(Protocol):
+    def new_schedule(self, card_id: str, now: datetime) -> CardSchedule:
+        """Return the initial schedule for a never-reviewed card."""
+        ...
+
+    def review(self, schedule: CardSchedule, rating: Rating, now: datetime) -> CardSchedule:
+        """Return the next schedule after grading a card."""
+        ...
+
+
+class ScheduleRepository(Protocol):
+    async def get(self, card_id: str) -> CardSchedule | None: ...
+
+    async def upsert(self, schedule: CardSchedule) -> None: ...
+
+
+class ReviewLogRepository(Protocol):
+    async def append(self, log: ReviewLog) -> None: ...
+
+    async def exists_key(self, owner_id: str, idempotency_key: str) -> bool:
+        """Whether this owner already submitted a review with this idempotency key."""
         ...
