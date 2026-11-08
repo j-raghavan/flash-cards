@@ -66,6 +66,13 @@ class AnkiPackage:
     cards: tuple[AnkiCard, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ImportReport:
+    decks_created: int
+    notes_imported: int
+    notes_skipped: int  # unknown or unsupported note types, or invalid fields
+
+
 def map_note(note_type: AnkiNoteType, fields: tuple[str, ...]) -> tuple[NoteType, Fields]:
     """Map an Anki note onto our (NoteType, Fields), or raise UnsupportedNote."""
     if note_type.is_cloze:

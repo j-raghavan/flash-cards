@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Protocol
 
 from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredResult
+from flashcards.domain.anki import AnkiPackage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
@@ -265,6 +266,16 @@ class JobQueue(Protocol):
 class QuotaRepository(Protocol):
     async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
         """Atomically reserve pages against the owner's limit; True if within it."""
+        ...
+
+
+class PackageReader(Protocol):
+    def read(self, data: bytes) -> AnkiPackage:
+        """Parse an .apkg into an AnkiPackage, or raise flashcards.domain.anki errors.
+
+        The archive is untrusted: implementations guard against path traversal and
+        zip bombs and never execute embedded content (NF-SEC-2).
+        """
         ...
 
 
