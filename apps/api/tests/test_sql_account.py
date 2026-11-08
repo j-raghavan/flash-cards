@@ -370,8 +370,19 @@ async def test_audit_repository(engine: AsyncEngine) -> None:
         assert [e.id for e in recent] == ["e2", "e1"]
         assert recent[0].detail == (("reason", "abuse"),) and recent[0].actor_id == "admin"
         assert [e.id for e in await repo.list_recent(limit=1)] == ["e2"]
-        older = await repo.list_recent(limit=10, before=NOW + timedelta(minutes=1))
+        older = await repo.list_recent(limit=10, before="e2")
         assert [e.id for e in older] == ["e1"]
+        assert await repo.list_recent(limit=10, before="unknown") == []
+    # Events recorded in the same instant still page in recording order.
+    async with sm() as s, s.begin():
+        for eid in ("t1", "t2", "t3"):
+            await SqlAuditRepository(s).append(
+                AuditEvent(id=eid, action=AuditAction.LOGIN_LOCKED, created_at=NOW)
+            )
+    async with sm() as s:
+        repo = SqlAuditRepository(s)
+        assert [e.id for e in await repo.list_recent(limit=2)] == ["t3", "t2"]
+        assert [e.id for e in await repo.list_recent(limit=2, before="t2")] == ["t1", "e2"]
 
 
 async def test_login_throttle_repository(engine: AsyncEngine) -> None:

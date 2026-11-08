@@ -38,7 +38,8 @@ async def test_record_and_page_newest_first() -> None:
 
     assert [e.id for e in await audit.recent(limit=10)] == [second.id, first.id]
     assert second.detail == (("from", "member"), ("to", "admin"))  # stored sorted
-    assert [e.id for e in await audit.recent(limit=10, before=second.created_at)] == [first.id]
+    assert [e.id for e in await audit.recent(limit=10, before=second.id)] == [first.id]
+    assert await audit.recent(limit=10, before="unknown") == []
     # The page size is clamped to at least one event.
     assert len(await audit.recent(limit=0)) == 1
 
@@ -57,13 +58,26 @@ def test_admin_actions_appear_in_the_audit_log(admin_client: TestClient) -> None
     assert all(e["actor_id"] for e in events[:2])
 
 
+async def test_events_recorded_in_the_same_instant_page_without_gaps() -> None:
+    audit = AuditService(InMemoryAuditRepository(), _Clock())  # the clock never moves
+    recorded = [await audit.record(AuditAction.LOGIN_LOCKED) for _ in range(5)]
+
+    seen: list[str] = []
+    page = await audit.recent(limit=2)
+    while page:
+        seen += [e.id for e in page]
+        page = await audit.recent(limit=2, before=page[-1].id)
+
+    assert seen == [e.id for e in reversed(recorded)]  # every event once, newest first
+
+
 def test_audit_log_pages_and_validates(admin_client: TestClient) -> None:
-    admin_client.post("/admin/invites", json={"role": "member"})
-    admin_client.post("/admin/invites", json={"role": "member"})
-    page = admin_client.get("/admin/audit", params={"limit": 1}).json()
-    assert len(page) == 1
-    older = admin_client.get("/admin/audit", params={"before": page[0]["created_at"]}).json()
-    assert all(e["created_at"] < page[0]["created_at"] for e in older)
+    for _ in range(3):
+        admin_client.post("/admin/invites", json={"role": "member"})
+    everything = [e["id"] for e in admin_client.get("/admin/audit").json()]
+    page = admin_client.get("/admin/audit", params={"limit": 2}).json()
+    older = admin_client.get("/admin/audit", params={"before": page[-1]["id"]}).json()
+    assert [e["id"] for e in page + older] == everything
     assert admin_client.get("/admin/audit", params={"limit": 0}).status_code == 422
     assert admin_client.get("/admin/audit", params={"limit": 201}).status_code == 422
 

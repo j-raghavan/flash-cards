@@ -474,10 +474,13 @@ class ShareLinkRepository(Protocol):
 class AuditRepository(Protocol):
     async def append(self, event: AuditEvent) -> None: ...
 
-    async def list_recent(
-        self, *, limit: int, before: datetime | None = None
-    ) -> list[AuditEvent]:
-        """Newest first; only events strictly older than `before` when given."""
+    async def list_recent(self, *, limit: int, before: str | None = None) -> list[AuditEvent]:
+        """Newest first, in recording order.
+
+        `before` is an event id (the last of the previous page): only events
+        recorded before it are returned, so pages never skip or repeat an event.
+        An unknown id gives an empty page.
+        """
         ...
 
 

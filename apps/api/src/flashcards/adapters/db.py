@@ -11,10 +11,12 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
+    Identity,
     Integer,
     LargeBinary,
     String,
@@ -644,6 +646,8 @@ class AuditEventRow(Base):
     __tablename__ = "audit_events"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Assigned by the database in insertion order; pages are cut on it.
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True, index=True)
     action: Mapped[str] = mapped_column(String, index=True)
     actor_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     target_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

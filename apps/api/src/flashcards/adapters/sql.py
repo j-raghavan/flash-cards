@@ -731,12 +731,12 @@ class SqlAuditRepository:
         self._session.add(audit_to_row(event))
         await self._session.flush()
 
-    async def list_recent(
-        self, *, limit: int, before: datetime | None = None
-    ) -> list[AuditEvent]:
-        query = select(AuditEventRow).order_by(AuditEventRow.created_at.desc()).limit(limit)
+    async def list_recent(self, *, limit: int, before: str | None = None) -> list[AuditEvent]:
+        query = select(AuditEventRow).order_by(AuditEventRow.seq.desc()).limit(limit)
         if before is not None:
-            query = query.where(AuditEventRow.created_at < before)
+            cursor = select(AuditEventRow.seq).where(AuditEventRow.id == before)
+            # An unknown id makes the subquery NULL, so nothing matches: an empty page.
+            query = query.where(AuditEventRow.seq < cursor.scalar_subquery())
         rows = await self._session.scalars(query)
         return [audit_from_row(row) for row in rows]
 

@@ -6,7 +6,7 @@ All require the admin role, and every change is recorded in the audit log.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -68,7 +68,9 @@ async def revoke_invite(
 @router.get("/audit", response_model=list[AuditEventOut])
 async def list_audit_events(
     limit: int = Query(default=50, gt=0, le=200),
-    before: datetime | None = Query(default=None),
+    before: str | None = Query(
+        default=None, description="The id of the last event of the previous page."
+    ),
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container, scope="function"),
 ) -> list[AuditEventOut]:

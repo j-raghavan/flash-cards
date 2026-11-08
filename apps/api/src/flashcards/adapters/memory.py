@@ -493,12 +493,12 @@ class InMemoryAuditRepository:
     async def append(self, event: AuditEvent) -> None:
         self._events.append(event)
 
-    async def list_recent(
-        self, *, limit: int, before: datetime | None = None
-    ) -> list[AuditEvent]:
-        events = [e for e in self._events if before is None or e.created_at < before]
-        # Newest first; events recorded in the same instant keep reverse insertion order.
-        return sorted(events, key=lambda e: e.created_at)[::-1][:limit]
+    async def list_recent(self, *, limit: int, before: str | None = None) -> list[AuditEvent]:
+        events = self._events  # in recording order
+        if before is not None:
+            ids = [e.id for e in events]
+            events = events[: ids.index(before)] if before in ids else []
+        return events[::-1][:limit]
 
 
 class InMemoryLoginThrottleRepository:

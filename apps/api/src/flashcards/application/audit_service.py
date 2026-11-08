@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from datetime import datetime
 
 from flashcards.domain.audit import MAX_AUDIT_PAGE, AuditAction, AuditEvent
 from flashcards.domain.ports import AuditRepository, Clock
@@ -45,7 +44,7 @@ class AuditService:
         await self._events.append(event)
         return event
 
-    async def recent(self, *, limit: int, before: datetime | None = None) -> list[AuditEvent]:
+    async def recent(self, *, limit: int, before: str | None = None) -> list[AuditEvent]:
         return await self._events.list_recent(
             limit=max(1, min(limit, MAX_AUDIT_PAGE)), before=before
         )
