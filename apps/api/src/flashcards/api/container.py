@@ -18,6 +18,7 @@ from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
     InMemoryDraftCardRepository,
+    InMemoryGoalRepository,
     InMemoryInviteRepository,
     InMemoryNoteRepository,
     InMemoryObjectStore,
@@ -34,9 +35,11 @@ from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
 from flashcards.application.generation_request_service import GenerationRequestService
+from flashcards.application.goal_service import GoalService
 from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
+from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.ports import (
@@ -46,6 +49,7 @@ from flashcards.domain.ports import (
     DeckRepository,
     DocumentExtractor,
     DraftCardRepository,
+    GoalRepository,
     InviteRepository,
     JobQueue,
     LLMProvider,
@@ -81,6 +85,7 @@ class Repositories:
     extractor: DocumentExtractor
     job_queue: JobQueue
     llm: LLMProvider
+    goals: GoalRepository
     dummy_hash: str | None = None
 
 
@@ -99,6 +104,8 @@ class Container:
     generation: GenerationRequestService
     draft_review: DraftReviewService
     card_generation: CardGenerationService
+    goal_service: GoalService
+    planner: PlannerService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -138,6 +145,8 @@ def build_services(repos: Repositories) -> Container:
         repos.llm,
         repos.clock,
     )
+    goal_service = GoalService(decks, repos.goals, repos.clock)
+    planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)
     return Container(
         clock=repos.clock,
         invite_repo=repos.invites,
@@ -152,6 +161,8 @@ def build_services(repos: Repositories) -> Container:
         generation=generation,
         draft_review=draft_review,
         card_generation=card_generation,
+        goal_service=goal_service,
+        planner=planner,
     )
 
 
@@ -183,5 +194,6 @@ def build_container(
             extractor=PyMuPDFExtractor(),
             job_queue=job_queue or InProcessJobQueue(),
             llm=llm or NullLLMProvider(),
+            goals=InMemoryGoalRepository(),
         )
     )

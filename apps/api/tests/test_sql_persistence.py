@@ -30,6 +30,7 @@ from flashcards.adapters.sql import (
     SqlCardRepository,
     SqlDeckRepository,
     SqlDraftCardRepository,
+    SqlGoalRepository,
     SqlInviteRepository,
     SqlNoteRepository,
     SqlObjectStore,
@@ -70,6 +71,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         extractor=PyMuPDFExtractor(),
         job_queue=InMemoryJobQueue(),
         llm=NullLLMProvider(),
+        goals=SqlGoalRepository(session),
     )
 
 PASSWORD = "correct-horse-battery"

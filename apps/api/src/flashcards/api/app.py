@@ -14,10 +14,11 @@ from fastapi.responses import JSONResponse
 from flashcards import __version__
 from flashcards.api.container import Container
 from flashcards.api.provider import in_memory_provider, sql_provider
-from flashcards.api.routers import admin, ai, auth, cards, decks, review
+from flashcards.api.routers import admin, ai, auth, cards, decks, goals, review
 from flashcards.config import Settings
 from flashcards.domain.ai import DraftNotFound
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
+from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobNotFound
 from flashcards.domain.notes import CardNotFound, InvalidNote, NoteNotFound
@@ -59,10 +60,22 @@ def _register_error_handlers(app: FastAPI) -> None:
             status_code=413, content={"detail": "The document has too many pages."}
         )
 
-    for not_found_error in (DeckNotFound, CardNotFound, NoteNotFound, JobNotFound, DraftNotFound):
+    async def invalid_goal(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    not_found_errors = (
+        DeckNotFound,
+        CardNotFound,
+        NoteNotFound,
+        JobNotFound,
+        DraftNotFound,
+        GoalNotFound,
+    )
+    for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
     app.add_exception_handler(InvalidDeckName, invalid_deck_name)
     app.add_exception_handler(InvalidNote, invalid_note)
+    app.add_exception_handler(InvalidGoal, invalid_goal)
     app.add_exception_handler(DeckCycle, conflict)
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
@@ -115,6 +128,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(cards.router)
     app.include_router(review.router)
     app.include_router(ai.router)
+    app.include_router(goals.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
