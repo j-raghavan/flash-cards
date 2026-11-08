@@ -63,6 +63,35 @@ def test_card_ordinals_rejects_overlong_field() -> None:
         card_ordinals(NoteType.BASIC, (("front", "x" * (MAX_FIELD_LEN + 1)), ("back", "A")))
 
 
+def test_card_ordinals_rejects_overlong_extra_field() -> None:
+    # A field the note type does not read is still bounded.
+    with pytest.raises(InvalidNote):
+        card_ordinals(
+            NoteType.BASIC,
+            (("front", "Q"), ("back", "A"), ("extra", "x" * (MAX_FIELD_LEN + 1))),
+        )
+
+
+def test_card_ordinals_rejects_too_many_fields() -> None:
+    fields = tuple((f"f{i}", "v") for i in range(65))
+    with pytest.raises(InvalidNote):
+        card_ordinals(NoteType.CLOZE, fields)
+
+
+def test_cloze_c0_is_not_a_valid_deletion() -> None:
+    with pytest.raises(InvalidNote):
+        parse_cloze_ordinals("{{c0::nope}}")
+
+
+def test_cloze_requires_closing_braces() -> None:
+    with pytest.raises(InvalidNote):
+        parse_cloze_ordinals("{{c1::unterminated")
+
+
+def test_cloze_folds_leading_zero_to_same_ordinal() -> None:
+    assert parse_cloze_ordinals("{{c01::a}} {{c1::b}}") == [1]
+
+
 def test_note_field_accessor() -> None:
     note = Note(
         id="n1",
@@ -170,6 +199,19 @@ async def test_invalid_note_fields_rejected(service: NoteService, decks: DeckSer
             deck_id=deck_id,
             note_type=NoteType.BASIC,
             fields={"front": "Q"},
+        )
+
+
+async def test_cloze_note_without_text_field_is_rejected(
+    service: NoteService, decks: DeckService
+) -> None:
+    deck_id = await _deck(decks)
+    with pytest.raises(InvalidNote):
+        await service.create_note(
+            owner_id=ALICE,
+            deck_id=deck_id,
+            note_type=NoteType.CLOZE,
+            fields={"front": "Q", "back": "A"},
         )
 
 

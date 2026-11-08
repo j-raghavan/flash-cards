@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
 from flashcards.domain.notes import Card, Note
-from flashcards.domain.scheduling import CardSchedule, ReviewLog
+from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -174,10 +174,11 @@ class InMemoryReviewLogRepository:
         self._logs: list[ReviewLog] = []
 
     async def append(self, log: ReviewLog) -> None:
+        if log.idempotency_key is not None and any(
+            existing.owner_id == log.owner_id
+            and existing.card_id == log.card_id
+            and existing.idempotency_key == log.idempotency_key
+            for existing in self._logs
+        ):
+            raise DuplicateReview(log.idempotency_key)
         self._logs.append(log)
-
-    async def exists_key(self, owner_id: str, idempotency_key: str) -> bool:
-        return any(
-            log.owner_id == owner_id and log.idempotency_key == idempotency_key
-            for log in self._logs
-        )

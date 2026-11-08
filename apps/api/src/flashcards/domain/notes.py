@@ -14,7 +14,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 MAX_FIELD_LEN = 20_000
-_CLOZE_OPEN = re.compile(r"\{\{c(\d+)::")
+MAX_FIELDS = 64
+# A full {{cN::...}} deletion with a closing brace. N is a positive integer:
+# leading zeros are allowed (c01 == c1) but c0/c00 are not valid deletions.
+_CLOZE = re.compile(r"\{\{c(0*[1-9]\d*)::.*?\}\}", re.DOTALL)
 
 
 class NoteType(enum.StrEnum):
@@ -49,16 +52,24 @@ def _field(fields: Fields, name: str) -> str | None:
 
 
 def _require_nonempty(fields: Fields, name: str) -> str:
+    # Length is already bounded by _validate_payload, which runs first.
     value = (_field(fields, name) or "").strip()
     if not value:
         raise InvalidNote(f"field '{name}' is required")
-    if len(value) > MAX_FIELD_LEN:
-        raise InvalidNote(f"field '{name}' is too long")
     return value
 
 
+def _validate_payload(fields: Fields) -> None:
+    """Bound the whole payload, not just the fields a note type reads."""
+    if len(fields) > MAX_FIELDS:
+        raise InvalidNote(f"too many fields (max {MAX_FIELDS})")
+    for name, value in fields:
+        if len(value) > MAX_FIELD_LEN:
+            raise InvalidNote(f"field '{name}' is too long")
+
+
 def parse_cloze_ordinals(text: str) -> list[int]:
-    ordinals = sorted({int(m.group(1)) for m in _CLOZE_OPEN.finditer(text)})
+    ordinals = sorted({int(m.group(1)) for m in _CLOZE.finditer(text)})
     if not ordinals:
         raise InvalidNote("cloze text must contain at least one {{cN::...}} deletion")
     return ordinals
@@ -66,6 +77,7 @@ def parse_cloze_ordinals(text: str) -> list[int]:
 
 def card_ordinals(note_type: NoteType, fields: Fields) -> list[int]:
     """Validate the fields for the note type and return the ordinals to make cards for."""
+    _validate_payload(fields)
     if note_type is NoteType.BASIC:
         _require_nonempty(fields, "front")
         _require_nonempty(fields, "back")

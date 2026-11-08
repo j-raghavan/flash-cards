@@ -13,6 +13,14 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
+class DuplicateReview(Exception):
+    """A review already exists for this (owner, card, idempotency key).
+
+    Raised by ReviewLogRepository.append so idempotency is enforced atomically by
+    the storage layer, not by a check-then-act in the service (NF-REL-1).
+    """
+
+
 class Rating(enum.IntEnum):
     AGAIN = 1
     HARD = 2

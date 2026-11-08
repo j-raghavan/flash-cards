@@ -19,7 +19,7 @@ from flashcards.domain.ports import (
     Scheduler,
     ScheduleRepository,
 )
-from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
+from flashcards.domain.scheduling import CardSchedule, DuplicateReview, Rating, ReviewLog
 
 
 class ReviewService:
@@ -48,22 +48,25 @@ class ReviewService:
         # Raises CardNotFound if the card is missing or not the caller's.
         await self._notes.get_card(owner_id=owner_id, card_id=card_id)
         now = self._clock.now()
-
-        if idempotency_key is not None and await self._logs.exists_key(owner_id, idempotency_key):
-            return await self._current_schedule(card_id, now)
-
         current = await self._current_schedule(card_id, now)
         updated = self._scheduler.review(current, rating, now)
-        await self._logs.append(
-            ReviewLog(
-                id=str(uuid.uuid4()),
-                owner_id=owner_id,
-                card_id=card_id,
-                rating=rating,
-                reviewed_at=now,
-                idempotency_key=idempotency_key,
+
+        # Append first: the storage layer rejects a duplicate idempotency key
+        # atomically, so the schedule is only advanced when a new review lands.
+        try:
+            await self._logs.append(
+                ReviewLog(
+                    id=str(uuid.uuid4()),
+                    owner_id=owner_id,
+                    card_id=card_id,
+                    rating=rating,
+                    reviewed_at=now,
+                    idempotency_key=idempotency_key,
+                )
             )
-        )
+        except DuplicateReview:
+            return await self._current_schedule(card_id, now)
+
         await self._schedules.upsert(updated)
         return updated
 

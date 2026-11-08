@@ -63,6 +63,24 @@ def test_fsrs_reaches_review_state_after_two_goods() -> None:
     assert s.stability is not None and s.stability > 0
 
 
+def test_fsrs_again_on_a_review_card_relearns() -> None:
+    scheduler = FsrsScheduler()
+    s = scheduler.new_schedule("card-1", START)
+    s = scheduler.review(s, Rating.GOOD, START)
+    s = scheduler.review(s, Rating.GOOD, s.due_at)
+    assert s.state is ScheduleState.REVIEW
+    s = scheduler.review(s, Rating.AGAIN, s.due_at)
+    assert s.state is ScheduleState.RELEARNING
+
+
+def test_fsrs_easy_schedules_further_out_than_hard() -> None:
+    scheduler = FsrsScheduler()
+    fresh = scheduler.new_schedule("card-1", START)
+    hard = scheduler.review(fresh, Rating.HARD, START)
+    easy = scheduler.review(fresh, Rating.EASY, START)
+    assert easy.due_at > hard.due_at
+
+
 # --- ReviewService (fake deterministic scheduler) ---
 
 
@@ -187,5 +205,31 @@ async def test_due_queue_excludes_suspended_and_not_due(
     assert await reviews.due_queue(owner_id=ALICE, deck_id=deck_id) == []
 
 
-def test_rating_values_map_to_fsrs_scale() -> None:
-    assert (Rating.AGAIN, Rating.HARD, Rating.GOOD, Rating.EASY) == (1, 2, 3, 4)
+async def test_same_key_on_different_cards_both_apply(
+    reviews: ReviewService, notes: NoteService, logs: InMemoryReviewLogRepository
+) -> None:
+    deck_id, card_a = await _card(notes)
+    _, cards_b = await notes.create_note(
+        owner_id=ALICE,
+        deck_id=deck_id,
+        note_type=NoteType.BASIC,
+        fields={"front": "Q2", "back": "A2"},
+    )
+    await reviews.submit(owner_id=ALICE, card_id=card_a, rating=Rating.GOOD, idempotency_key="k")
+    await reviews.submit(
+        owner_id=ALICE, card_id=cards_b[0].id, rating=Rating.GOOD, idempotency_key="k"
+    )
+    # Same key, different cards: both reviews are recorded (not a false dedup).
+    assert len(logs._logs) == 2
+
+
+async def test_same_key_across_owners_both_apply(
+    reviews: ReviewService, notes: NoteService, logs: InMemoryReviewLogRepository
+) -> None:
+    _, alice_card = await _card(notes, owner=ALICE)
+    _, bob_card = await _card(notes, owner=BOB)
+    await reviews.submit(
+        owner_id=ALICE, card_id=alice_card, rating=Rating.GOOD, idempotency_key="k"
+    )
+    await reviews.submit(owner_id=BOB, card_id=bob_card, rating=Rating.GOOD, idempotency_key="k")
+    assert len(logs._logs) == 2

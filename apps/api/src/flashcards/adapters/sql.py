@@ -11,22 +11,38 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, Result, select, update
+from sqlalchemy import CursorResult, Result, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flashcards.adapters.db import (
+    CardRow,
+    CardScheduleRow,
+    DeckRow,
     InviteRow,
+    NoteRow,
     SessionRow,
     UserRow,
+    card_from_row,
+    card_to_row,
+    deck_from_row,
+    deck_to_row,
     invite_from_row,
     invite_to_row,
+    note_from_row,
+    note_to_row,
+    review_log_to_row,
+    schedule_from_row,
+    schedule_to_row,
     session_from_row,
     session_to_row,
     user_from_row,
     user_to_row,
 )
+from flashcards.domain.decks import Deck
 from flashcards.domain.invites import Invite
+from flashcards.domain.notes import Card, Note
+from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -134,3 +150,111 @@ class SqlSessionRepository:
             .values(revoked_at=now)
         )
         return _changed_one(result)
+
+
+class SqlDeckRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, deck: Deck) -> None:
+        self._session.add(deck_to_row(deck))
+        await self._session.flush()
+
+    async def get(self, deck_id: str) -> Deck | None:
+        row = await self._session.get(DeckRow, deck_id)
+        return deck_from_row(row) if row is not None else None
+
+    async def list_for_owner(self, owner_id: str) -> list[Deck]:
+        rows = await self._session.scalars(
+            select(DeckRow).where(DeckRow.owner_id == owner_id).order_by(DeckRow.created_at)
+        )
+        return [deck_from_row(row) for row in rows]
+
+    async def update(self, deck: Deck) -> None:
+        await self._session.merge(deck_to_row(deck))
+        await self._session.flush()
+
+    async def delete(self, deck_id: str) -> None:
+        row = await self._session.get(DeckRow, deck_id)
+        if row is not None:
+            await self._session.delete(row)
+            await self._session.flush()
+
+
+class SqlNoteRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, note: Note) -> None:
+        self._session.add(note_to_row(note))
+        await self._session.flush()
+
+    async def get(self, note_id: str) -> Note | None:
+        row = await self._session.get(NoteRow, note_id)
+        return note_from_row(row) if row is not None else None
+
+    async def delete(self, note_id: str) -> None:
+        row = await self._session.get(NoteRow, note_id)
+        if row is not None:
+            await self._session.delete(row)
+            await self._session.flush()
+
+
+class SqlCardRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, card: Card) -> None:
+        self._session.add(card_to_row(card))
+        await self._session.flush()
+
+    async def get(self, card_id: str) -> Card | None:
+        row = await self._session.get(CardRow, card_id)
+        return card_from_row(row) if row is not None else None
+
+    async def list_for_deck(self, deck_id: str) -> list[Card]:
+        rows = await self._session.scalars(
+            select(CardRow)
+            .where(CardRow.deck_id == deck_id)
+            .order_by(CardRow.created_at, CardRow.ordinal)
+        )
+        return [card_from_row(row) for row in rows]
+
+    async def update(self, card: Card) -> None:
+        await self._session.merge(card_to_row(card))
+        await self._session.flush()
+
+    async def delete_for_note(self, note_id: str) -> None:
+        await self._session.execute(delete(CardRow).where(CardRow.note_id == note_id))
+
+
+class SqlScheduleRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, card_id: str) -> CardSchedule | None:
+        row = await self._session.get(CardScheduleRow, card_id)
+        return schedule_from_row(row) if row is not None else None
+
+    async def upsert(self, schedule: CardSchedule) -> None:
+        await self._session.merge(schedule_to_row(schedule))
+        await self._session.flush()
+
+
+class SqlReviewLogRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def append(self, log: ReviewLog) -> None:
+        if log.idempotency_key is None:
+            self._session.add(review_log_to_row(log))
+            await self._session.flush()
+            return
+        # A savepoint so a duplicate-key violation rolls back only this insert and
+        # leaves the surrounding request transaction usable.
+        try:
+            async with self._session.begin_nested():
+                self._session.add(review_log_to_row(log))
+                await self._session.flush()
+        except IntegrityError as exc:
+            raise DuplicateReview(log.idempotency_key) from exc

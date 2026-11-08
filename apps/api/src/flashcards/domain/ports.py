@@ -143,8 +143,12 @@ class ScheduleRepository(Protocol):
 
 
 class ReviewLogRepository(Protocol):
-    async def append(self, log: ReviewLog) -> None: ...
+    async def append(self, log: ReviewLog) -> None:
+        """Append a review log entry.
 
-    async def exists_key(self, owner_id: str, idempotency_key: str) -> bool:
-        """Whether this owner already submitted a review with this idempotency key."""
+        When the log carries an idempotency_key and one already exists for the
+        same (owner_id, card_id, idempotency_key), raise
+        flashcards.domain.scheduling.DuplicateReview instead of appending, so a
+        retried submission is an atomic no-op, never a double count (NF-REL-1).
+        """
         ...

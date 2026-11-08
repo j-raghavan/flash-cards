@@ -111,8 +111,10 @@ async def test_move_to_root_and_under_parent(service: DeckService) -> None:
     b = await service.create(owner_id=ALICE, name="B")
     moved = await service.move(owner_id=ALICE, deck_id=b.id, new_parent_id=a.id)
     assert moved.parent_id == a.id
+    assert (await service.get(owner_id=ALICE, deck_id=b.id)).parent_id == a.id
     back = await service.move(owner_id=ALICE, deck_id=b.id, new_parent_id=None)
     assert back.parent_id is None
+    assert (await service.get(owner_id=ALICE, deck_id=b.id)).parent_id is None
 
 
 async def test_move_onto_self_is_a_cycle(service: DeckService) -> None:
