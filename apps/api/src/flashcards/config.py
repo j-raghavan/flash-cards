@@ -5,11 +5,15 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, MAX_MONTHLY_PAGES
 from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
+
+# The only environments in which the test-only "fake" LLM provider may run
+# (ADR 0021). Anything else, "production" included, refuses it at startup.
+FAKE_LLM_ENVIRONMENTS = frozenset({"development", "test"})
 
 
 class Settings(BaseSettings):
@@ -35,7 +39,10 @@ class Settings(BaseSettings):
     # generation jobs fail cleanly instead of pretending to work.
     # A Literal, so a typo (e.g. "openai") fails at startup instead of silently
     # falling back to a provider that refuses every request.
-    llm_provider: Literal["anthropic", "openai_compatible"] = "anthropic"
+    # "fake" is for the end-to-end tests only: it returns fixed draft cards and is
+    # refused unless the environment is development or test and the server runs
+    # in in-memory mode (ADR 0021).
+    llm_provider: Literal["anthropic", "openai_compatible", "fake"] = "anthropic"
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-opus-5-5"
     # OpenAI-compatible endpoint (LM Studio, Ollama, vLLM, ...). base_url points at
@@ -73,3 +80,23 @@ class Settings(BaseSettings):
     smtp_sender: str = "Flash-Cards <no-reply@localhost>"
     # "starttls" (port 587), "ssl" (port 465) or "none" (a local relay only; no login).
     smtp_security: Literal["starttls", "ssl", "none"] = "starttls"
+
+    @model_validator(mode="after")
+    def _fake_llm_only_in_tests(self) -> Settings:
+        if self.llm_provider == "fake":
+            refusal = fake_llm_refusal(self.environment, self.database_url)
+            if refusal is not None:
+                raise ValueError(refusal)
+        return self
+
+
+def fake_llm_refusal(environment: str, database_url: str | None) -> str | None:
+    """Why the fake LLM provider may not run here, or None when it may (ADR 0021)."""
+    if environment not in FAKE_LLM_ENVIRONMENTS:
+        return (
+            f"FLASHCARDS_LLM_PROVIDER=fake is for tests only and is refused when "
+            f"FLASHCARDS_ENVIRONMENT is {environment!r}."
+        )
+    if database_url:
+        return "FLASHCARDS_LLM_PROVIDER=fake is refused when FLASHCARDS_DATABASE_URL is set."
+    return None
