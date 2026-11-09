@@ -17,6 +17,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Identity,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -43,7 +44,16 @@ from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.note_types import CardTemplate, CustomNoteType
 from flashcards.domain.notes import Card, Mask, Note, NoteType, Occlusion
-from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
+from flashcards.domain.planner import PlanBaseline, StudyPlan
+from flashcards.domain.progress import StudySettings
+from flashcards.domain.scheduling import (
+    CardSchedule,
+    LastAnswer,
+    Rating,
+    ReviewLog,
+    ScheduleState,
+    UndoSnapshot,
+)
 from flashcards.domain.sessions import UNKNOWN_DEVICE, Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.usage import AiUsage
@@ -272,6 +282,8 @@ class ReviewLogRow(Base):
         UniqueConstraint(
             "owner_id", "card_id", "idempotency_key", name="uq_review_owner_card_idempotency"
         ),
+        # Range reads per owner: activity aggregates and the most recent review.
+        Index("ix_review_logs_owner_reviewed", "owner_id", "reviewed_at"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -282,6 +294,44 @@ class ReviewLogRow(Base):
     rating: Mapped[int] = mapped_column(Integer)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     idempotency_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The schedule before this review, for undo (F-STUDY-3). undo_kind is NULL when
+    # the review cannot be undone, "new" when the card had no schedule, and
+    # "schedule" when the prior_* columns hold it.
+    undo_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    prior_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    prior_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prior_stability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prior_difficulty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prior_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    prior_last_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+UNDO_NEW = "new"
+UNDO_SCHEDULE = "schedule"
+
+
+class LastAnswerRow(Base):
+    """One row per owner: the answer undo may take back (F-STUDY-3)."""
+
+    __tablename__ = "review_last_answers"
+
+    owner_id: Mapped[str] = mapped_column(String, primary_key=True)
+    review_id: Mapped[str] = mapped_column(String)
+    card_id: Mapped[str] = mapped_column(String)
+    idempotency_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    undone: Mapped[bool] = mapped_column(Boolean)
+
+
+def last_answer_from_row(row: LastAnswerRow) -> LastAnswer:
+    return LastAnswer(
+        owner_id=row.owner_id,
+        review_id=row.review_id,
+        card_id=row.card_id,
+        idempotency_key=row.idempotency_key,
+        undone=row.undone,
+    )
 
 
 def deck_to_row(deck: Deck) -> DeckRow:
@@ -446,13 +496,45 @@ def schedule_from_row(row: CardScheduleRow) -> CardSchedule:
 
 
 def review_log_to_row(log: ReviewLog) -> ReviewLogRow:
-    return ReviewLogRow(
+    row = ReviewLogRow(
         id=log.id,
         owner_id=log.owner_id,
         card_id=log.card_id,
         rating=int(log.rating),
         reviewed_at=log.reviewed_at,
         idempotency_key=log.idempotency_key,
+    )
+    if log.undo is None:
+        return row
+    prior = log.undo.schedule
+    if prior is None:
+        row.undo_kind = UNDO_NEW
+        return row
+    row.undo_kind = UNDO_SCHEDULE
+    row.prior_state = prior.state.value
+    row.prior_step = prior.step
+    row.prior_stability = prior.stability
+    row.prior_difficulty = prior.difficulty
+    row.prior_due_at = prior.due_at
+    row.prior_last_reviewed_at = prior.last_reviewed_at
+    return row
+
+
+def _undo_from_row(row: ReviewLogRow) -> UndoSnapshot | None:
+    if row.undo_kind == UNDO_NEW:
+        return UndoSnapshot(None)
+    if row.undo_kind != UNDO_SCHEDULE or row.prior_state is None or row.prior_due_at is None:
+        return None
+    return UndoSnapshot(
+        CardSchedule(
+            card_id=row.card_id,
+            state=ScheduleState(row.prior_state),
+            step=row.prior_step,
+            stability=row.prior_stability,
+            difficulty=row.prior_difficulty,
+            due_at=row.prior_due_at,
+            last_reviewed_at=row.prior_last_reviewed_at,
+        )
     )
 
 
@@ -464,6 +546,7 @@ def review_log_from_row(row: ReviewLogRow) -> ReviewLog:
         rating=Rating(row.rating),
         reviewed_at=row.reviewed_at,
         idempotency_key=row.idempotency_key,
+        undo=_undo_from_row(row),
     )
 
 
@@ -897,6 +980,87 @@ class UserQuotaRow(Base):
         String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     monthly_pages: Mapped[int] = mapped_column(Integer)
+
+
+class StudySettingsRow(Base):
+    __tablename__ = "study_settings"
+
+    owner_id: Mapped[str] = mapped_column(String, primary_key=True)
+    daily_goal: Mapped[int] = mapped_column(Integer)
+    time_zone: Mapped[str] = mapped_column(String)
+
+
+def study_settings_to_row(settings: StudySettings) -> StudySettingsRow:
+    return StudySettingsRow(
+        owner_id=settings.owner_id,
+        daily_goal=settings.daily_goal,
+        time_zone=settings.time_zone,
+    )
+
+
+def study_settings_from_row(row: StudySettingsRow) -> StudySettings:
+    return StudySettings(
+        owner_id=row.owner_id, daily_goal=row.daily_goal, time_zone=row.time_zone
+    )
+
+
+class PlanBaselineRow(Base):
+    __tablename__ = "plan_baselines"
+
+    goal_id: Mapped[str] = mapped_column(
+        String, ForeignKey("goals.id", ondelete="CASCADE"), primary_key=True
+    )
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    exam_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    target_retention: Mapped[float] = mapped_column(Float)
+    days_until_exam: Mapped[int] = mapped_column(Integer)
+    total_cards: Mapped[int] = mapped_column(Integer)
+    new_cards: Mapped[int] = mapped_column(Integer)
+    scheduled_cards: Mapped[int] = mapped_column(Integer)
+    new_per_day: Mapped[int] = mapped_column(Integer)
+    reviews_per_day: Mapped[int] = mapped_column(Integer)
+    readiness: Mapped[float] = mapped_column(Float)
+    on_track: Mapped[bool] = mapped_column(Boolean)
+
+
+def plan_baseline_to_row(baseline: PlanBaseline) -> PlanBaselineRow:
+    plan = baseline.plan
+    return PlanBaselineRow(
+        goal_id=baseline.goal_id,
+        owner_id=baseline.owner_id,
+        taken_at=baseline.taken_at,
+        exam_date=baseline.exam_date,
+        target_retention=baseline.target_retention,
+        days_until_exam=plan.days_until_exam,
+        total_cards=plan.total_cards,
+        new_cards=plan.new_cards,
+        scheduled_cards=plan.scheduled_cards,
+        new_per_day=plan.new_per_day,
+        reviews_per_day=plan.reviews_per_day,
+        readiness=plan.readiness,
+        on_track=plan.on_track,
+    )
+
+
+def plan_baseline_from_row(row: PlanBaselineRow) -> PlanBaseline:
+    return PlanBaseline(
+        goal_id=row.goal_id,
+        owner_id=row.owner_id,
+        taken_at=row.taken_at,
+        exam_date=row.exam_date,
+        target_retention=row.target_retention,
+        plan=StudyPlan(
+            days_until_exam=row.days_until_exam,
+            total_cards=row.total_cards,
+            new_cards=row.new_cards,
+            scheduled_cards=row.scheduled_cards,
+            new_per_day=row.new_per_day,
+            reviews_per_day=row.reviews_per_day,
+            readiness=row.readiness,
+            on_track=row.on_track,
+        ),
+    )
 
 
 def normalize_async_url(database_url: str) -> str:

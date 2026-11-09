@@ -10,8 +10,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from flashcards.adapters.db import Base, create_engine, create_sessionmaker
-from flashcards.adapters.sql import SqlGoalRepository
+from flashcards.adapters.sql import SqlGoalRepository, SqlPlanBaselineRepository
 from flashcards.domain.goals import Goal, new_goal
+from flashcards.domain.planner import PlanBaseline, StudyPlan
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
 EXAM = NOW + timedelta(days=30)
@@ -73,3 +74,50 @@ async def test_goal_roundtrip_update_and_list_order(engine: AsyncEngine) -> None
 
     async with sm() as s:
         assert await SqlGoalRepository(s).get(first.id) is None
+
+
+def _baseline(goal_id: str, taken_at: datetime, new_cards: int) -> PlanBaseline:
+    return PlanBaseline(
+        goal_id=goal_id,
+        owner_id="alice",
+        taken_at=taken_at,
+        exam_date=NOW + timedelta(days=30),
+        target_retention=0.885,
+        plan=StudyPlan(
+            days_until_exam=30,
+            total_cards=new_cards,
+            new_cards=new_cards,
+            scheduled_cards=0,
+            new_per_day=1,
+            reviews_per_day=0,
+            readiness=0.885,
+            on_track=True,
+        ),
+    )
+
+
+async def test_baseline_first_one_wins_save_replaces_and_goal_delete_cascades(
+    engine: AsyncEngine,
+) -> None:
+    sm = create_sessionmaker(engine)
+    goal = new_goal(
+        owner_id="alice",
+        name="Final",
+        deck_ids=["dA"],
+        exam_date=NOW + timedelta(days=30),
+        desired_grade=0.5,
+        now=NOW,
+    )
+    async with sm() as s, s.begin():
+        await SqlGoalRepository(s).add(goal)
+        repo = SqlPlanBaselineRepository(s)
+        assert await repo.get(goal.id) is None
+        first = await repo.add_if_absent(_baseline(goal.id, NOW, 3))
+        second = await repo.add_if_absent(_baseline(goal.id, NOW + timedelta(hours=1), 9))
+        assert first == second == _baseline(goal.id, NOW, 3)
+        await repo.save(_baseline(goal.id, NOW + timedelta(days=1), 7))
+        assert await repo.get(goal.id) == _baseline(goal.id, NOW + timedelta(days=1), 7)
+    async with sm() as s, s.begin():
+        await SqlGoalRepository(s).delete(goal.id)
+    async with sm() as s:
+        assert await SqlPlanBaselineRepository(s).get(goal.id) is None

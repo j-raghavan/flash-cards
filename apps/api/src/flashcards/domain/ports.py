@@ -21,8 +21,10 @@ from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.planner import PlanBaseline
+from flashcards.domain.progress import ActivityBucket, DueBucket, StudySettings
 from flashcards.domain.quotas import InstanceQuotas
-from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
+from flashcards.domain.scheduling import CardSchedule, LastAnswer, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
@@ -342,12 +344,41 @@ class ReviewLogRepository(Protocol):
         """Return the owner's review logs, oldest first (for data export)."""
         ...
 
+    async def lock_owner(self, owner_id: str) -> None:
+        """Serialize review writes (answer, undo) for one owner until the
+        transaction ends, so an undo never interleaves with a new answer.
+        A SQL adapter takes a transaction-scoped advisory lock."""
+        ...
+
+    async def get(self, log_id: str) -> ReviewLog | None: ...
+
+    async def find_by_key(
+        self, owner_id: str, card_id: str, idempotency_key: str
+    ) -> ReviewLog | None:
+        """The review a retried submission with this idempotency key recorded."""
+        ...
+
+    async def set_last_answer(self, log: ReviewLog) -> None:
+        """Record this review as the owner's most recent answer (not undone)."""
+        ...
+
+    async def last_answer(self, owner_id: str) -> LastAnswer | None: ...
+
+    async def mark_undone(self, owner_id: str) -> None:
+        """Flag the owner's most recent answer as undone."""
+        ...
+
+    async def try_delete(self, log_id: str) -> bool:
+        """Delete one review log; True only for the caller that removed it."""
+        ...
+
     async def delete_for_card(self, card_id: str) -> None:
         """Delete every review log for a card."""
         ...
 
     async def delete_for_owner(self, owner_id: str) -> None:
-        """Delete every review log owned by the user (account deletion, F-IMP-5)."""
+        """Delete every review log owned by the user, and their last-answer
+        record (account deletion, F-IMP-5)."""
         ...
 
 
@@ -688,3 +719,62 @@ class UserTokenRepository(Protocol):
         ...
 
     async def delete_for_user(self, user_id: str) -> None: ...
+
+
+class StudySettingsRepository(Protocol):
+    async def get(self, owner_id: str) -> StudySettings | None:
+        """The owner's saved settings; None means the defaults apply."""
+        ...
+
+    async def save(self, settings: StudySettings) -> None:
+        """Insert or replace the owner's settings."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None: ...
+
+
+class PlanBaselineRepository(Protocol):
+    async def get(self, goal_id: str) -> PlanBaseline | None: ...
+
+    async def add_if_absent(self, baseline: PlanBaseline) -> PlanBaseline:
+        """Store the baseline unless the goal has one; return the stored one.
+
+        Atomic, so two first reads of a plan agree on one baseline.
+        """
+        ...
+
+    async def save(self, baseline: PlanBaseline) -> None:
+        """Insert or replace the goal's baseline (the user accepted a new plan)."""
+        ...
+
+
+class StudyStatsRepository(Protocol):
+    """Aggregated reads over review logs and schedules (F-PROG-1/3, F-PLAN-3).
+
+    Results are grouped into epoch-aligned 15-minute buckets in storage, so the
+    amount returned is bounded by the time range, never by the number of rows.
+    deck_ids, when given, keeps only cards in those decks.
+    """
+
+    async def review_activity(
+        self,
+        owner_id: str,
+        *,
+        since: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[ActivityBucket]:
+        """The owner's reviews with since <= reviewed_at < until, bucketed."""
+        ...
+
+    async def due_forecast(
+        self,
+        owner_id: str,
+        *,
+        floor: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[DueBucket]:
+        """Schedules of the owner's unsuspended cards due before until, bucketed,
+        with anything due before floor counted at floor (overdue cards)."""
+        ...
