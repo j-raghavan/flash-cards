@@ -20,6 +20,7 @@ import { useDocumentTitle } from "../lib/useDocumentTitle";
 const DeckSummaryPanel = lazy(() =>
   import("../aiStudy/DeckSummaryPanel").then((m) => ({ default: m.DeckSummaryPanel })),
 );
+const DeckChatPanel = lazy(() => import("../aiStudy/DeckChatPanel").then((m) => ({ default: m.DeckChatPanel })));
 
 function StatsPanel({ stats }: { stats: DeckStats }) {
   const rows: [string, number][] = [
@@ -248,6 +249,7 @@ export function DeckDetailPage() {
 
       <Suspense fallback={null}>
         <DeckSummaryPanel key={deckId} deckId={deckId} />
+        <DeckChatPanel key={`chat:${deckId}`} deckId={deckId} />
       </Suspense>
 
       <h2>Manage</h2>

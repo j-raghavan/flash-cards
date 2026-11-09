@@ -938,3 +938,30 @@ h2:focus {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-question {
+  margin: 0;
+  font-weight: 600;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-answer {
+  padding-left: 12px;
+  border-left: 3px solid var(--line);
+}
+
+.citations {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
