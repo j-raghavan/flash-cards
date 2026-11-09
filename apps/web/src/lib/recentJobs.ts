@@ -1,44 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The API has no "list my jobs" route, so the device remembers the last few
-// generation jobs per deck, letting the user leave and come back to them.
+// Earlier builds remembered recent generation jobs (with file names) in
+// localStorage. The list now comes from GET /ai/jobs; this removes what an
+// earlier build may have left behind, so it does not outlive a sign-out.
 
-const KEY = "flashcards.recentJobs";
-const PER_DECK = 5;
-
-export interface RecentJob {
-  jobId: string;
-  deckId: string;
-  fileName: string;
-  startedAt: string;
-}
-
-function readAll(): RecentJob[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-    return Array.isArray(parsed) ? (parsed as RecentJob[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function rememberJob(job: RecentJob): void {
-  const others = readAll().filter((j) => j.jobId !== job.jobId);
-  const sameDeck = others.filter((j) => j.deckId === job.deckId).slice(0, PER_DECK - 1);
-  const rest = others.filter((j) => j.deckId !== job.deckId);
-  try {
-    localStorage.setItem(KEY, JSON.stringify([job, ...sameDeck, ...rest]));
-  } catch {
-    // Without storage the job is still reachable from its own URL.
-  }
-}
-
-export function recentJobs(deckId: string): RecentJob[] {
-  return readAll().filter((j) => j.deckId === deckId);
-}
+const LEGACY_KEY = "flashcards.recentJobs";
 
 export function forgetAllJobs(): void {
   try {
-    localStorage.removeItem(KEY);
+    localStorage.removeItem(LEGACY_KEY);
   } catch {
     // Nothing stored.
   }

@@ -32,6 +32,9 @@ from flashcards.domain.transcripts import (
     encode_transcript,
 )
 
+DEFAULT_JOB_PAGE = 20
+MAX_JOB_PAGE = 50
+
 
 class GenerationRequestService:
     def __init__(
@@ -119,6 +122,22 @@ class GenerationRequestService:
         if job is None or job.owner_id != owner_id:
             raise JobNotFound(job_id)
         return job
+
+    async def list_recent(
+        self,
+        *,
+        owner_id: str,
+        deck_id: str | None = None,
+        limit: int = DEFAULT_JOB_PAGE,
+        offset: int = 0,
+    ) -> list[AiJob]:
+        """A page of the owner's jobs, newest first, at most MAX_JOB_PAGE long."""
+        return await self._jobs.list_recent(
+            owner_id,
+            deck_id=deck_id,
+            limit=min(max(limit, 1), MAX_JOB_PAGE),
+            offset=max(offset, 0),
+        )
 
     async def retry(self, *, owner_id: str, job_id: str) -> AiJob:
         """Queue a failed job again (ADR 0012); raises IllegalJobTransition otherwise.

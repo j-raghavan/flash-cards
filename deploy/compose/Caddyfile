@@ -1,42 +1,27 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-# Caddy front end for deploy/compose (profile "proxy").
+# Caddy front end for deploy/compose (profile "proxy"): terminates HTTPS and
+# forwards the whole site to the web service.
 # FLASHCARDS_DOMAIN must resolve to this host for automatic HTTPS to work.
+#
+# Routing (/api to the API, the app everywhere else), caching and the security
+# headers, including the Content-Security-Policy, are set by the web service
+# (apps/web/Caddyfile). HSTS is sent there for requests that arrived over HTTPS.
 
 {$FLASHCARDS_DOMAIN} {
-	# Above the largest API upload (40 MB for .apkg). Requests over this are
-	# refused here, before the API reads them into memory.
+	# Above the largest API upload (40 MB for .apkg). The web service applies the
+	# same limit; refusing here keeps oversized bodies off the internal network.
 	request_body {
 		max_size 50MB
 	}
 
 	header {
-		Strict-Transport-Security "max-age=31536000"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "no-referrer"
-		X-Frame-Options "DENY"
 		-Server
+		-Via
 	}
 
-	# Today the whole site is the API.
-	reverse_proxy api:8000 {
-		# Pass SSE frames (GET /ai/jobs/{id}/events) through as they arrive.
+	reverse_proxy web:8080 {
+		# Pass Server-Sent Events (GET /api/ai/jobs/{id}/events) through as
+		# they arrive.
 		flush_interval -1
 	}
-
-	# Web app slot. When the static build is mounted at /srv/web (see
-	# compose.yaml), replace the reverse_proxy block above with:
-	#
-	# handle_path /api/* {
-	# 	reverse_proxy api:8000 {
-	# 		flush_interval -1
-	# 	}
-	# }
-	# handle {
-	# 	root * /srv/web
-	# 	try_files {path} /index.html
-	# 	file_server
-	# }
-	#
-	# The web app and the API must share one origin: the API sends no CORS
-	# headers and its session cookie is SameSite=Lax.
 }

@@ -35,9 +35,9 @@ FastAPI, SQLAlchemy 2, PostgreSQL (including the job queue), React, TypeScript, 
 
 ## Web client
 
-The client lives in `apps/web` (React, TypeScript, Vite). It calls the API only on its own origin, under `/api` unless `VITE_API_BASE_URL` names another path; in development, Vite proxies `/api` to the API at `http://localhost:8000` (override with `FLASHCARDS_API_PROXY_TARGET`). In production, serve the built app and the API from one origin, with the API under `/api`.
+The client lives in `apps/web` (React, TypeScript, Vite). It calls the API only on its own origin, under `/api` unless `VITE_API_BASE_URL` names another path; in development, Vite proxies `/api` to the API at `http://localhost:8000` (override with `FLASHCARDS_API_PROXY_TARGET`). In production, serve the built app and the API from one origin, with the API under `/api`. `apps/web/Dockerfile` builds an image that does exactly that (Caddy, configured by `apps/web/Caddyfile`), and the Docker Compose stack runs it as the site's entry point; see [Self-hosting with Docker Compose](docs/runbooks/self-hosting-compose.md).
 
-The build adds a strict Content-Security-Policy as a `<meta>` tag. A reverse proxy in front of it should also send the same policy as a header, since browsers ignore `frame-ancestors` in a `<meta>` tag:
+The build adds a strict Content-Security-Policy as a `<meta>` tag. The web image also sends it as a header, as any other reverse proxy in front of the app should, since browsers ignore `frame-ancestors` in a `<meta>` tag:
 
 ```
 Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

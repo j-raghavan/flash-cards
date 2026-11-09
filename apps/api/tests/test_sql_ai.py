@@ -7,7 +7,8 @@ These require Docker: a throwaway Postgres container is started per test session
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -105,6 +106,33 @@ async def test_request_cancel_and_list_running(engine: AsyncEngine) -> None:
         running = await SqlAiJobRepository(s).list_running()
         assert [j.id for j in running] == [job.id]
         assert running[0].cancel_requested is True
+
+
+async def test_list_recent_pages_newest_first_per_owner_and_deck(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    jobs = [
+        replace(
+            _job(),
+            draft_deck_id="d1" if i % 2 == 0 else "d2",
+            created_at=NOW + timedelta(minutes=i),
+        )
+        for i in range(5)
+    ]
+    async with sm() as s, s.begin():
+        repo = SqlAiJobRepository(s)
+        for job in jobs:
+            await repo.add(job)
+        await repo.add(_job(owner="bob"))
+    newest = [j.id for j in reversed(jobs)]
+    async with sm() as s:
+        repo = SqlAiJobRepository(s)
+        page = await repo.list_recent("alice", deck_id=None, limit=2, offset=0)
+        assert [j.id for j in page] == newest[:2]
+        rest = await repo.list_recent("alice", deck_id=None, limit=10, offset=2)
+        assert [j.id for j in rest] == newest[2:]
+        d1 = await repo.list_recent("alice", deck_id="d1", limit=10, offset=0)
+        assert [j.id for j in d1] == [jobs[4].id, jobs[2].id, jobs[0].id]
+        assert await repo.list_recent("carol", deck_id=None, limit=10, offset=0) == []
 
 
 async def test_draft_crud_ordering_and_cascade(engine: AsyncEngine) -> None:
