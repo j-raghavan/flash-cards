@@ -42,7 +42,7 @@ from flashcards.api.routers import (
     sharing,
     two_factor,
 )
-from flashcards.config import Settings
+from flashcards.config import Settings, fake_llm_refusal
 from flashcards.domain.ai import DraftNotFound, InvalidModelOutput, LlmError
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
 from flashcards.domain.chat import NoChatSources
@@ -488,6 +488,16 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
     """Select the AI backend from settings, else a refusing stub (ADR 0006)."""
     from flashcards.adapters.llm import NullLLMProvider
 
+    if settings.llm_provider == "fake":
+        # Settings already refuses this outside tests; checked again here so a
+        # Settings built without validation cannot slip it through (ADR 0021).
+        refusal = fake_llm_refusal(settings.environment, settings.database_url)
+        if refusal is not None:
+            raise RuntimeError(refusal)
+        from flashcards.adapters.llm import FAKE_LATENCY_SECONDS, FakeLLMProvider
+
+        logger.warning("FAKE AI PROVIDER (tests only): card generation returns fixed drafts.")
+        return FakeLLMProvider(latency_seconds=FAKE_LATENCY_SECONDS)
     if settings.llm_provider == "openai_compatible":
         if settings.openai_base_url:
             from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider
