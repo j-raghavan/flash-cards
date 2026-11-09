@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The admin console (F-ADMIN-1, F-ADMIN-2, F-ADMIN-5): users, invites and the
+// The admin console (F-ADMIN-1 to F-ADMIN-5): users, invites, AI usage and the
 // audit log. The server checks the admin role on every call; this screen only
 // hides itself from members and keeps admins from acting on their own account.
 // Loaded on first visit, so members never download it.
@@ -14,6 +14,7 @@ import { ConfirmButton, CopyField, ErrorText, Loading } from "../components/ui";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { UsagePanel } from "./UsagePanel";
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -412,6 +413,7 @@ function AuditPanel() {
 const TABS = [
   { id: "users", label: "Users" },
   { id: "invites", label: "Invites" },
+  { id: "usage", label: "Usage" },
   { id: "audit", label: "Audit log" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -482,6 +484,7 @@ export function AdminPage() {
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="tab-panel" tabIndex={0}>
         {tab === "users" ? <UsersPanel selfId={user.id} /> : null}
         {tab === "invites" ? <InvitesPanel /> : null}
+        {tab === "usage" ? <UsagePanel /> : null}
         {tab === "audit" ? <AuditPanel /> : null}
       </div>
     </section>
