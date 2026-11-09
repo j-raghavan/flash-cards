@@ -25,7 +25,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from flashcards.domain.anki import DECK_SEPARATOR
-from flashcards.domain.anki_schedule import sm2_from_schedule
+from flashcards.domain.anki_schedule import ANKI_EPOCH_START, revlog_kinds, sm2_from_schedule
 from flashcards.domain.deck_export import DeckExport, ExportedCard, ExportedNote, ExportFormat
 from flashcards.domain.notes import NoteType
 from flashcards.domain.scheduling import CardSchedule
@@ -34,6 +34,7 @@ BASIC_MODEL_ID = 1_700_000_000_001
 CLOZE_MODEL_ID = 1_700_000_000_002
 DEFAULT_DECK_ID = 1
 _SCHEMA_VERSION = 11
+FIELD_SEPARATOR = "\x1f"
 _HTML_TAG = re.compile(r"<[^>]*>")
 # A cell starting with one of these is a formula to Excel, LibreOffice and Sheets.
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -198,8 +199,11 @@ def _checksum(first_field: str) -> int:
 def _anki_fields(exported: ExportedNote) -> list[str]:
     note = exported.note
     if note.note_type is NoteType.CLOZE:
-        return [note.field("text") or "", note.field("extra") or ""]
-    return [note.field("front") or "", note.field("back") or ""]
+        values = [note.field("text") or "", note.field("extra") or ""]
+    else:
+        values = [note.field("front") or "", note.field("back") or ""]
+    # Anki separates fields with \x1f, so one inside a field would split it in two.
+    return [value.replace(FIELD_SEPARATOR, " ") for value in values]
 
 
 def _anki_ordinal(note_type: NoteType, ordinal: int) -> int:
@@ -352,7 +356,8 @@ def _origin(export: DeckExport) -> datetime:
     """Day zero for review dues: the earliest of now and every due date, at midnight UTC.
 
     Starting no later than any due date keeps every review card's due day number
-    non-negative.
+    non-negative. It is never before Anki existed, so an importer that checks the
+    creation time (ours does) trusts it.
     """
     moments = [export.exported_at] + [
         card.schedule.due_at
@@ -360,7 +365,7 @@ def _origin(export: DeckExport) -> datetime:
         for card in note.cards
         if card.schedule is not None
     ]
-    earliest = min(moment.astimezone(UTC) for moment in moments)
+    earliest = max(min(moment.astimezone(UTC) for moment in moments), ANKI_EPOCH_START)
     return earliest.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
@@ -425,7 +430,7 @@ def _fill_collection(connection: sqlite3.Connection, export: DeckExport) -> None
                 CLOZE_MODEL_ID if is_cloze else BASIC_MODEL_ID,
                 mod_s,
                 f" {' '.join(note.tags)} " if note.tags else "",
-                "\x1f".join(fields),
+                FIELD_SEPARATOR.join(fields),
                 _strip_html(fields[0]),
                 _checksum(fields[0]),
             ),
@@ -442,7 +447,7 @@ def _fill_collection(connection: sqlite3.Connection, export: DeckExport) -> None
             )
             new_position += card.schedule is None
             connection.execute(
-                "INSERT INTO cards VALUES (?, ?, ?, ?, ?, -1, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, '')",
+                "INSERT INTO cards VALUES (?, ?, ?, ?, ?, -1, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, '')",
                 (
                     card_id,
                     note_id,
@@ -456,17 +461,18 @@ def _fill_collection(connection: sqlite3.Connection, export: DeckExport) -> None
                     sm2.factor,
                     sm2.reps,
                     sm2.lapses,
+                    sm2.left,
                     card.card.flag,
                 ),
             )
-            for index, log in enumerate(card.reviews):
+            for log, kind in zip(card.reviews, revlog_kinds(ratings), strict=True):
                 revlog_id = int(log.reviewed_at.timestamp() * 1000)
                 while revlog_id in used_revlog_ids:  # the revlog id is its primary key
                     revlog_id += 1
                 used_revlog_ids.add(revlog_id)
                 connection.execute(
                     "INSERT INTO revlog VALUES (?, ?, -1, ?, 0, 0, 0, 0, ?)",
-                    (revlog_id, card_id, int(log.rating), 0 if index == 0 else 1),
+                    (revlog_id, card_id, int(log.rating), kind),
                 )
 
     connection.execute(

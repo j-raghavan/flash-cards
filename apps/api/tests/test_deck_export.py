@@ -186,7 +186,7 @@ async def test_apkg_export_is_an_anki_collection() -> None:
                 "SELECT sfld, csum FROM notes WHERE flds LIKE '<b>ser%'"
             ).fetchone()
             queues = sorted(row[0] for row in conn.execute("SELECT queue FROM cards"))
-            revlog_ids = [row[0] for row in conn.execute("SELECT id FROM revlog ORDER BY id")]
+            revlog_kinds = [row[0] for row in conn.execute("SELECT type FROM revlog ORDER BY id")]
         finally:
             conn.close()
     finally:
@@ -195,7 +195,7 @@ async def test_apkg_export_is_an_anki_collection() -> None:
     assert names == ["Default", "Spanish", "Spanish::Verbs:irregular"]
     assert sfld == "ser" and isinstance(csum, int)
     assert queues == [-1, 0, 0, 2]  # suspended, two new cloze cards, one review card
-    assert len(revlog_ids) == 4
+    assert revlog_kinds == [0, 1, 2, 1]  # Good, Again (a lapse), Good, Easy
 
 
 async def test_apkg_round_trip_keeps_notes_state_and_schedule() -> None:
