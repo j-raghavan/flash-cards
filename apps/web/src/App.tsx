@@ -22,6 +22,7 @@ import { StudyPage } from "./pages/StudyPage";
 const ProgressPage = lazy(() => import("./progress/ProgressPage").then((m) => ({ default: m.ProgressPage })));
 const MockExamPage = lazy(() => import("./aiStudy/MockExamPage").then((m) => ({ default: m.MockExamPage })));
 const AdminPage = lazy(() => import("./admin/AdminPage").then((m) => ({ default: m.AdminPage })));
+const AccountPage = lazy(() => import("./account/AccountPage").then((m) => ({ default: m.AccountPage })));
 const noteTypePages = () => import("./noteTypes/NoteTypesPage");
 const NoteTypesPage = lazy(() => noteTypePages().then((m) => ({ default: m.NoteTypesPage })));
 const NewNoteTypePage = lazy(() => noteTypePages().then((m) => ({ default: m.NewNoteTypePage })));
@@ -110,6 +111,14 @@ export function AppRoutes() {
           element={
             <Lazy>
               <AdminPage />
+            </Lazy>
+          }
+        />
+        <Route
+          path="/account"
+          element={
+            <Lazy>
+              <AccountPage />
             </Lazy>
           }
         />
