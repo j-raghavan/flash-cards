@@ -26,7 +26,12 @@ from flashcards.domain.ports import (
     QuotaRepository,
 )
 from flashcards.domain.quotas import QuotaExceeded, billing_period
-from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES, TooManyPages
+from flashcards.domain.sources import (
+    DEFAULT_MAX_UPLOAD_PAGES,
+    TooManyPages,
+    clean_source_name,
+    source_name_key,
+)
 from flashcards.domain.transcripts import (
     TRANSCRIPT_MEDIA_TYPE,
     Transcript,
@@ -64,16 +69,27 @@ class GenerationRequestService:
         self._max_pages = max_pages
 
     async def start(
-        self, *, owner_id: str, deck_id: str, data: bytes, thoroughness: Thoroughness
+        self,
+        *,
+        owner_id: str,
+        deck_id: str,
+        data: bytes,
+        thoroughness: Thoroughness,
+        source_name: str | None = None,
     ) -> AiJob:
-        """Validate and enqueue a generation job; raises before spending quota on bad input."""
+        """Validate and enqueue a generation job; raises before spending quota on bad input.
+
+        source_name is the uploaded file's name, kept only to label chat citations.
+        """
         # Raises DeckNotFound if the deck is missing or not the caller's; the drafts
         # are approved into this deck later (F-AI-4).
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
         # Raises UnsupportedMediaType on a disallowed type.
         media = self._extractor.sniff(data)
         pages = await self._extractor.count_pages(data)
-        return await self._enqueue(owner_id, deck_id, data, media, pages, thoroughness)
+        return await self._enqueue(
+            owner_id, deck_id, data, media, pages, thoroughness, clean_source_name(source_name)
+        )
 
     async def start_transcript(
         self,
@@ -90,8 +106,13 @@ class GenerationRequestService:
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
         data = encode_transcript(transcript)  # raises InvalidTranscript
         pages = len(chunk_transcript(transcript))
+        name = (
+            "Pasted transcript"
+            if transcript.video_id is None
+            else clean_source_name(f"YouTube video {transcript.video_id}")
+        )
         return await self._enqueue(
-            owner_id, deck_id, data, TRANSCRIPT_MEDIA_TYPE, pages, thoroughness
+            owner_id, deck_id, data, TRANSCRIPT_MEDIA_TYPE, pages, thoroughness, name
         )
 
     async def _enqueue(
@@ -102,6 +123,7 @@ class GenerationRequestService:
         media: str,
         pages: int,
         thoroughness: Thoroughness,
+        name: str | None,
     ) -> AiJob:
         if pages > self._max_pages:
             raise TooManyPages(f"{pages} pages (max {self._max_pages})")
@@ -116,6 +138,8 @@ class GenerationRequestService:
 
         source_id = str(uuid.uuid4())
         await self._store.put(source_id, data, media)
+        if name is not None:
+            await self._store.put(source_name_key(source_id), name.encode("utf-8"), "text/plain")
         job = new_generation_job(
             owner_id=owner_id,
             source_id=source_id,

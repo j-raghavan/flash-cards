@@ -135,9 +135,10 @@ function DraftReview({ jobId, deckId }: { jobId: string; deckId: string | null }
                 </span>
               </label>
               <CardContent
+                aiOutput
                 markdown={draft.note_type === "cloze" ? clozeRevealAll(draft.fields.text ?? "") : sides.front}
               />
-              {draft.note_type === "basic" ? <CardContent markdown={sides.back} className="back" /> : null}
+              {draft.note_type === "basic" ? <CardContent aiOutput markdown={sides.back} className="back" /> : null}
             </li>
           );
         })}

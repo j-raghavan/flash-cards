@@ -191,11 +191,20 @@ async def test_usage_is_summed_by_user_and_by_provider() -> None:
                 period="2026-10", created_at=NOW)
     )
 
+    # Pages come from the quota counters: u1 used 3, u3 reserved 4 with no call yet,
+    # u4 the same 4 (ties sort by id), and October's pages stay out of November.
+    assert await q.pages.try_reserve_pages("u1", 3, "2026-11", limit=10)
+    assert await q.pages.try_reserve_pages("u4", 4, "2026-11", limit=10)
+    assert await q.pages.try_reserve_pages("u3", 4, "2026-11", limit=10)
+    assert await q.pages.try_reserve_pages("u5", 1, "2026-10", limit=10)
+
     report = await q.service.usage_report("2026-11")
     assert report.cost_micro_usd == 18_000 and report.spend_cap_micro_usd is None
     assert report.by_user == [
-        UserUsage("u2", 2, 2000, 400, 12_000),
-        UserUsage("u1", 1, 1000, 200, 6000),
+        UserUsage("u2", 2, 2000, 400, 12_000, pages=0),
+        UserUsage("u1", 1, 1000, 200, 6000, pages=3),
+        UserUsage("u3", 0, 0, 0, 0, pages=4),
+        UserUsage("u4", 0, 0, 0, 0, pages=4),
     ]
     assert report.by_provider == [
         ProviderUsage("anthropic", "m2", 2, 2000, 400, 12_000),
@@ -345,6 +354,9 @@ def test_admins_read_and_set_quotas_over_http() -> None:
     assert _generate(member, 2) == 429
     assert _generate(member, 1) == 202
     assert member.get("/account/ai-quota").json()["used_pages"] == 1
+    # The admin usage report shows the same page count for the member.
+    rows = {row["user_id"]: row for row in admin.get("/admin/usage").json()["by_user"]}
+    assert rows[member_id]["pages"] == 1
 
     cleared = admin.put(f"/admin/users/{member_id}/quota", json={"monthly_pages": None})
     assert cleared.json()["override"] is None and cleared.json()["monthly_pages"] == 3
@@ -370,7 +382,7 @@ def test_ai_calls_are_recorded_and_reported_by_user_and_provider() -> None:
     assert report["cost_micro_usd"] == 12_000 and report["spend_cap_micro_usd"] is None
     assert report["by_user"] == [{
         "user_id": member_id, "calls": 2, "input_tokens": 2000, "output_tokens": 400,
-        "cost_micro_usd": 12_000,
+        "cost_micro_usd": 12_000, "pages": 0,
     }]
     assert report["by_provider"] == [{
         "provider": "anthropic", "model": "grader-1", "calls": 2, "input_tokens": 2000,

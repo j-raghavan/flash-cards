@@ -38,7 +38,7 @@ const session = {
 const graded = (over: Partial<Evaluation> = {}): Evaluation => ({
   verdict: "correct",
   score: 0.8,
-  explanation: "You named the **role**. <img src=x onerror=alert(1)>",
+  explanation: "You named the **role**. <img src=x onerror=alert(1)> [Review](https://evil.example/e)",
   ...over,
 });
 
@@ -75,6 +75,9 @@ describe("AI-evaluation study mode", () => {
     expect(screen.getByText("(80%)")).toBeInTheDocument();
     expect(screen.getByText("role")).toBeInTheDocument();
     expect(document.querySelector("img[onerror]")).toBeNull();
+    const evaluation = document.querySelector(".evaluation") as HTMLElement;
+    expect(evaluation.querySelector("a")).toBeNull();
+    expect(evaluation).toHaveTextContent("Review (https://evil.example/e)");
     expect(screen.getByText(/Checked: Correct\. Suggested rating: Good\./)).toBeInTheDocument();
     const good = screen.getByRole("button", { name: /Good/ });
     expect(good).toHaveTextContent("(suggested)");

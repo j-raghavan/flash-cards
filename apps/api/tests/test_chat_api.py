@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pymupdf
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -61,6 +62,25 @@ def test_chat_answers_with_a_page_citation() -> None:
     body = resp.json()
     assert body["answer"] == "In the mitochondria."
     assert len(body["citations"]) == 1 and body["citations"][0]["page"] == 1
+    assert body["citations"][0]["file_name"] == "Pasted transcript"
+
+
+def test_chat_cites_an_uploaded_file_by_its_name() -> None:
+    client = _member(_app(_FakeLLM()))
+    deck_id: str = client.post("/decks", json={"name": "Bio"}).json()["id"]
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Mitochondria make ATP for the cell.")
+    pdf = bytes(doc.tobytes())
+    doc.close()
+    resp = client.post(
+        "/ai/generate",
+        files={"file": ("lectures/Cell biology.pdf", pdf, "application/pdf")},
+        data={"deck_id": deck_id},
+    )
+    assert resp.status_code == 202
+    resp = client.post(f"/decks/{deck_id}/chat", json={"question": "Where is ATP made?"})
+    assert resp.status_code == 200
+    assert resp.json()["citations"][0]["file_name"] == "Cell biology.pdf"
 
 
 def test_chat_without_sources_is_409() -> None:

@@ -58,6 +58,8 @@ export const mockExams = {
 export interface Citation {
   file_id: string;
   page: number;
+  /** The uploaded file's name (the API caps it at 120 characters), or null when not known. */
+  file_name?: string | null;
 }
 
 export interface ChatAnswer {

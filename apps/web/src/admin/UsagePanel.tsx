@@ -75,6 +75,8 @@ interface Row {
   input_tokens: number;
   output_tokens: number;
   cost_micro_usd: number;
+  /** AI generation pages, for rows that count them (users). */
+  pages?: number;
 }
 
 function UsageFigure({
@@ -93,6 +95,7 @@ function UsageFigure({
   const format = priced ? formatUsd : (n: number) => `${count(n)} tokens`;
   const sorted = [...rows].sort((a, b) => measure(b) - measure(a) || a.label.localeCompare(b.label));
   const top = sorted[0];
+  const withPages = rows.some((row) => row.pages !== undefined);
   const summary =
     top === undefined
       ? "No AI use this month."
@@ -109,7 +112,7 @@ function UsageFigure({
           key: row.key,
           label: row.label,
           value: measure(row),
-          tooltip: `${row.label}: ${count(row.calls)} calls, ${count(row.input_tokens)} input and ${count(row.output_tokens)} output tokens, ${formatUsd(row.cost_micro_usd)}`,
+          tooltip: `${row.label}: ${row.pages === undefined ? "" : `${count(row.pages)} AI pages, `}${count(row.calls)} calls, ${count(row.input_tokens)} input and ${count(row.output_tokens)} output tokens, ${formatUsd(row.cost_micro_usd)}`,
         }))}
       />
       <div className="table-wrap">
@@ -118,6 +121,7 @@ function UsageFigure({
           <thead>
             <tr>
               <th scope="col">{head}</th>
+              {withPages ? <th scope="col">AI pages</th> : null}
               <th scope="col">Calls</th>
               <th scope="col">Input tokens</th>
               <th scope="col">Output tokens</th>
@@ -128,6 +132,8 @@ function UsageFigure({
             {sorted.map((row) => (
               <tr key={row.key}>
                 <th scope="row">{row.label}</th>
+                {/* Rows in one table all count pages, or none do. */}
+                {row.pages === undefined ? null : <td>{count(row.pages)}</td>}
                 <td>{count(row.calls)}</td>
                 <td>{count(row.input_tokens)}</td>
                 <td>{count(row.output_tokens)}</td>
@@ -145,6 +151,7 @@ function Report({ report, emails }: { report: UsageReport; emails: Map<string, s
   const calls = report.by_provider.reduce((sum, p) => sum + p.calls, 0);
   const input = report.by_provider.reduce((sum, p) => sum + p.input_tokens, 0);
   const output = report.by_provider.reduce((sum, p) => sum + p.output_tokens, 0);
+  const pages = report.by_user.reduce((sum, u) => sum + u.pages, 0);
   // Prices default to zero, which records tokens but no cost (ADR 0016).
   const unpriced = input + output > 0 && report.cost_micro_usd === 0;
   const name = (userId: string): string =>
@@ -161,6 +168,10 @@ function Report({ report, emails }: { report: UsageReport; emails: Map<string, s
           <div>
             <dt>Spend cap</dt>
             <dd>{report.spend_cap_micro_usd === null ? "No cap" : formatUsd(report.spend_cap_micro_usd)}</dd>
+          </div>
+          <div>
+            <dt>AI pages</dt>
+            <dd>{count(pages)}</dd>
           </div>
           <div>
             <dt>Calls</dt>

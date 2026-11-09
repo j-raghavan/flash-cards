@@ -17,7 +17,11 @@ const exam = (over: Partial<MockExam> = {}): MockExam => ({
   deadline: null,
   submitted_at: null,
   questions: [
-    { id: "q1", prompt: "What is **ATP**? <img src=x onerror=alert(1)>", topic: "Cells <script>alert(1)</script>" },
+    {
+      id: "q1",
+      prompt: "What is **ATP**? <img src=x onerror=alert(1)> [hint](https://evil.example/q)",
+      topic: "Cells <script>alert(1)</script> [t](https://evil.example/t)",
+    },
     { id: "q2", prompt: "Define osmosis.", topic: "Transport" },
   ],
   ...over,
@@ -26,7 +30,7 @@ const exam = (over: Partial<MockExam> = {}): MockExam => ({
 const RESULT: ExamResult = {
   overall_score: 0.4,
   topics: [
-    { topic: "Cells <b onclick=alert(1)>x</b>", score: 0.8, question_count: 1 },
+    { topic: "Cells <b onclick=alert(1)>x</b> [r](https://evil.example/r)", score: 0.8, question_count: 1 },
     { topic: "Transport", score: 0, question_count: 1 },
   ],
   question_scores: [{ question_id: "q1", score: 0.8 }],
@@ -75,6 +79,11 @@ describe("mock exam", () => {
     expect(screen.getByText("ATP")).toBeInTheDocument();
     expect(document.querySelector("img[onerror]")).toBeNull();
     expect(document.querySelector("main script")).toBeNull();
+    // Links in AI questions and topics are text showing the address.
+    const questions = document.querySelector(".exam-questions") as HTMLElement;
+    expect(questions.querySelector("a")).toBeNull();
+    expect(questions).toHaveTextContent("hint (https://evil.example/q)");
+    expect(questions).toHaveTextContent("t (https://evil.example/t)");
     expect(screen.getByText("2 unanswered questions will score zero.")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Answer to question 1"), "  The energy currency  ");
@@ -90,6 +99,10 @@ describe("mock exam", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByText("80%")).toBeInTheDocument();
     expect(table.querySelector("[onclick]")).toBeNull();
+    expect(table.querySelector("a")).toBeNull();
+    expect(table).toHaveTextContent("r (https://evil.example/r)");
+    expect(document.querySelector(".exam-questions a")).toBeNull();
+    expect(document.querySelector(".exam-questions")).toHaveTextContent("hint (https://evil.example/q)");
     expect(screen.getByText("The energy currency")).toBeInTheDocument();
     expect(screen.getByText("No answer")).toBeInTheDocument();
     expect(screen.getByText("Score: 0%")).toBeInTheDocument();
