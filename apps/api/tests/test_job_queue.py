@@ -53,3 +53,21 @@ async def test_start_is_idempotent_and_stop_is_safe_before_start() -> None:
     await queue.stop()
 
     assert calls == ["x"]
+
+
+async def test_a_job_already_waiting_is_not_queued_twice() -> None:
+    seen: list[str] = []
+
+    async def process(job_id: str) -> None:
+        seen.append(job_id)
+
+    queue = InProcessJobQueue()
+    await queue.enqueue("a")
+    await queue.enqueue("a")  # still waiting: ignored
+    queue.start(process)
+    await queue.join()
+    await queue.enqueue("a")  # taken by the worker already: offered again
+    await queue.join()
+    await queue.stop()
+
+    assert seen == ["a", "a"]

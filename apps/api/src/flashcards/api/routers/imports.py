@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
 from flashcards.api.schemas import ImportReportOut
+from flashcards.api.uploads import read_capped
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -23,10 +24,6 @@ async def import_apkg(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> ImportReportOut:
-    data = await file.read()
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File too large."
-        )
+    data = await read_capped(file, MAX_UPLOAD_BYTES)
     report = await container.apkg_import.import_package(owner_id=caller.user.id, data=data)
     return ImportReportOut.from_report(report)

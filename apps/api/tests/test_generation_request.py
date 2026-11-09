@@ -48,7 +48,7 @@ class FakeExtractor:
             raise self._sniff_error
         return self._media
 
-    def count_pages(self, data: bytes) -> int:
+    async def count_pages(self, data: bytes) -> int:
         return self._pages
 
     async def extract(

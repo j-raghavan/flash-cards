@@ -190,7 +190,7 @@ class _Inner:
     def sniff(self, data: bytes) -> str:
         return "application/pdf"
 
-    def count_pages(self, data: bytes) -> int:
+    async def count_pages(self, data: bytes) -> int:
         return 3
 
     async def extract(
@@ -202,7 +202,7 @@ class _Inner:
 async def test_extractor_decorator_delegates_non_transcripts() -> None:
     extractor = TranscriptAwareExtractor(_Inner())
     assert extractor.sniff(b"%PDF") == "application/pdf"
-    assert extractor.count_pages(b"%PDF") == 3
+    assert await extractor.count_pages(b"%PDF") == 3
     pages = [p async for p in extractor.extract(b"%PDF", file_id="f", max_pages=5)]
     assert [p.text for p in pages] == ["inner"]
 
@@ -211,7 +211,7 @@ async def test_extractor_decorator_splits_a_transcript_into_text_pages() -> None
     extractor = TranscriptAwareExtractor(_Inner())
     data = encode_transcript(_video("hello", "world"))
     assert extractor.sniff(data) == TRANSCRIPT_MEDIA_TYPE
-    assert extractor.count_pages(data) == 1
+    assert await extractor.count_pages(data) == 1
     pages = [p async for p in extractor.extract(data, file_id="src", max_pages=5)]
     assert len(pages) == 1
     assert pages[0].ref == SourceRef("src", 1) and pages[0].kind is PageKind.TEXT

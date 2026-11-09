@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Protocol, runtime_checkable
 
 from fastapi import FastAPI, Request
@@ -14,9 +16,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from flashcards import __version__
+from flashcards.api.body_limit import BodySizeLimitMiddleware
 from flashcards.api.container import Container
+from flashcards.api.csrf import CsrfOriginMiddleware
 from flashcards.api.job_events import StreamSlots
-from flashcards.api.provider import in_memory_provider, sql_provider
+from flashcards.api.provider import ServicesProvider, in_memory_provider, sql_provider
 from flashcards.api.routers import (
     account,
     admin,
@@ -67,7 +71,7 @@ from flashcards.domain.sharing import (
     CloneTooLarge,
     ShareNotFound,
 )
-from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
+from flashcards.domain.sources import TooManyPages, UnreadableDocument, UnsupportedMediaType
 from flashcards.domain.summary import SummaryLocked
 from flashcards.domain.tags import InvalidTags
 from flashcards.domain.transcripts import (
@@ -130,6 +134,10 @@ def _register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=413, content={"detail": "The document has too many pages."}
         )
+
+    async def unreadable_document(_request: Request, exc: Exception) -> JSONResponse:
+        logger.warning("unreadable upload: %s", exc)
+        return JSONResponse(status_code=422, content={"detail": "The document could not be read."})
 
     async def invalid_goal(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
@@ -267,6 +275,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
     app.add_exception_handler(TooManyPages, too_large)
+    app.add_exception_handler(UnreadableDocument, unreadable_document)
     app.add_exception_handler(InvalidVideoUrl, invalid_video_url)
     app.add_exception_handler(TranscriptUnavailable, no_transcript)
     app.add_exception_handler(InvalidTranscript, invalid_transcript)
@@ -298,11 +307,15 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             llm=configured_llm,
             mailer=mailer,
             public_base_url=settings.public_base_url,
+            max_upload_pages=settings.max_upload_pages,
         )
         container = None
     else:
         container, provider, job_queue = in_memory_provider(
-            llm=configured_llm, mailer=mailer, public_base_url=settings.public_base_url
+            llm=configured_llm,
+            mailer=mailer,
+            public_base_url=settings.public_base_url,
+            max_upload_pages=settings.max_upload_pages,
         )
         engine = None
 
@@ -314,8 +327,14 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             async for request_container in provider():
                 await request_container.card_generation.run(job_id)
 
+        await _recover_jobs(provider)
         job_queue.start(process)
+        sweeper = asyncio.create_task(_sweep_jobs(provider))
         yield
+        sweeper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweeper
+        # Stopping the worker hands its running job back as QUEUED (ADR 0017).
         await job_queue.stop()
         if isinstance(configured_llm, Closeable):
             await configured_llm.aclose()
@@ -337,6 +356,10 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.state.event_stream_slots = StreamSlots()
     app.state.bootstrap_invite_token = _maybe_bootstrap_invite(settings, container)
 
+    # Refuses unsafe requests that do not come from a trusted origin (ADR 0017).
+    app.add_middleware(CsrfOriginMiddleware, public_base_url=settings.public_base_url)
+    # Added last, so it runs first: no body is parsed or spooled past the cap.
+    app.add_middleware(BodySizeLimitMiddleware)
     _register_error_handlers(app)
     app.include_router(auth.router)
     app.include_router(admin.router)
@@ -359,6 +382,52 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         return {"status": "ok", "version": __version__}
 
     return app
+
+
+# How often the worker looks for jobs nobody is working on, and how long a job
+# must sit untouched first. The worker refreshes a running job with every page;
+# one page's provider call can take many minutes (with SDK retries), so a running
+# job is presumed abandoned only well after that (ADR 0017).
+JOB_SWEEP_SECONDS = 60.0
+QUEUED_IDLE = timedelta(minutes=1)
+RUNNING_IDLE = timedelta(minutes=45)
+
+
+async def _recover_jobs(
+    provider: ServicesProvider,
+    *,
+    queued_idle: timedelta = timedelta(0),
+    running_idle: timedelta = timedelta(0),
+) -> None:
+    """Requeue jobs left queued or running with nobody working on them (ADR 0017).
+
+    At startup every such job belongs to a process that is gone. In SQL mode this
+    is its own unit of work: the recovery commits, then the jobs reach the worker.
+    A failure is logged rather than raised, so a database that is briefly
+    unavailable does not stop the API from starting or the sweep from running.
+    """
+    recovered = 0
+    try:
+        async for container in provider():
+            recovered = await container.generation.recover_interrupted(
+                queued_idle=queued_idle, running_idle=running_idle
+            )
+    except Exception:
+        logger.exception("could not recover interrupted generation jobs")
+        return
+    if recovered:
+        logger.info("requeued %d interrupted generation job(s)", recovered)
+
+
+async def _sweep_jobs(provider: ServicesProvider) -> None:
+    """Periodically pick up jobs another process left behind while this one runs.
+
+    For example, during an overlapping deploy the old instance hands its running
+    job back as QUEUED after this one has started.
+    """
+    while True:
+        await asyncio.sleep(JOB_SWEEP_SECONDS)
+        await _recover_jobs(provider, queued_idle=QUEUED_IDLE, running_idle=RUNNING_IDLE)
 
 
 def _llm_from_settings(settings: Settings) -> LLMProvider:

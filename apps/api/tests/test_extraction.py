@@ -4,8 +4,15 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-from flashcards.adapters.extraction import PyMuPDFExtractor
-from flashcards.domain.sources import ExtractedPage, PageKind, TooManyPages, UnsupportedMediaType
+from flashcards.adapters import extraction
+from flashcards.adapters.extraction import MAX_RASTER_PIXELS, PyMuPDFExtractor, raster_zoom
+from flashcards.domain.sources import (
+    ExtractedPage,
+    PageKind,
+    TooManyPages,
+    UnreadableDocument,
+    UnsupportedMediaType,
+)
 
 # A valid 1x1 GIF: a real media type that is not on the allow-list.
 _GIF = (
@@ -83,7 +90,49 @@ async def test_too_many_pages_is_rejected() -> None:
         await _pages(_pdf(["one page of text here", "second page of text"]), max_pages=1)
 
 
-def test_count_pages() -> None:
+async def test_count_pages() -> None:
     extractor = PyMuPDFExtractor()
-    assert extractor.count_pages(_pdf(["a", "b", "c"])) == 3
-    assert extractor.count_pages(_png()) == 1
+    assert await extractor.count_pages(_pdf(["a", "b", "c"])) == 3
+    assert await extractor.count_pages(_png()) == 1
+
+
+def test_raster_zoom_keeps_normal_pages_at_150_dpi() -> None:
+    assert raster_zoom(612, 792) == pytest.approx(150 / 72)
+
+
+def test_raster_zoom_shrinks_huge_pages_under_the_pixel_cap() -> None:
+    width, height = 14_400.0, 14_400.0  # the largest page PDF allows without UserUnit
+    zoom = raster_zoom(width, height)
+    assert zoom < 150 / 72
+    assert (width * zoom) * (height * zoom) <= MAX_RASTER_PIXELS * 1.0001
+
+
+def test_raster_zoom_handles_an_empty_page() -> None:
+    assert raster_zoom(0, 0) == pytest.approx(150 / 72)
+
+
+async def test_a_huge_textless_page_renders_within_the_pixel_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A small cap keeps the test fast; at 150 DPI the page would be 9 million pixels.
+    monkeypatch.setattr(extraction, "MAX_RASTER_PIXELS", 40_000)
+    doc = pymupdf.open()
+    doc.new_page(width=1440, height=1440)
+    data: bytes = doc.tobytes()
+    doc.close()
+    pages = await _pages(data)
+    image = pymupdf.Pixmap(pages[0].image or b"")
+    assert image.width * image.height <= 40_000 + image.width + image.height + 1
+
+
+_CORRUPT_PDF = b"%PDF-1.4\n" + b"\x00garbage" * 64
+
+
+async def test_a_corrupt_pdf_is_unreadable_when_counting() -> None:
+    with pytest.raises(UnreadableDocument):
+        await PyMuPDFExtractor().count_pages(_CORRUPT_PDF)
+
+
+async def test_a_corrupt_pdf_is_unreadable_when_extracting() -> None:
+    with pytest.raises(UnreadableDocument):
+        await _pages(_CORRUPT_PDF)
