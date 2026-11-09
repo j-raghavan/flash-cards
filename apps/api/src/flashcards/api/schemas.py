@@ -8,7 +8,7 @@ what a valid address is and no extra email-parsing dependency.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
@@ -28,6 +28,12 @@ from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.mock_exam import ExamResult, MockExam
 from flashcards.domain.notes import MAX_FLAG, Card, Note, NoteType
 from flashcards.domain.planner import StudyPlan
+from flashcards.domain.progress import (
+    MAX_TIME_ZONE_LENGTH,
+    DailyProgress,
+    ProgressStats,
+    StudySettings,
+)
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import SharedDeckPreview, ShareLink
@@ -790,6 +796,7 @@ class AccountExportOut(BaseModel):
     media: list[MediaExportOut]
     mock_exams: list[MockExamExportOut]
     share_links: list[ShareLinkOut]
+    study_settings: StudySettingsOut | None = None
 
     @classmethod
     def from_export(cls, export: AccountExport) -> AccountExportOut:
@@ -878,4 +885,107 @@ class AccountExportOut(BaseModel):
                 for e in export.mock_exams
             ],
             share_links=[ShareLinkOut.from_link(link) for link in export.share_links],
+            study_settings=(
+                StudySettingsOut.from_settings(export.study_settings)
+                if export.study_settings is not None
+                else None
+            ),
+        )
+
+
+class StudySettingsOut(BaseModel):
+    daily_goal: int
+    time_zone: str
+
+    @classmethod
+    def from_settings(cls, settings: StudySettings) -> StudySettingsOut:
+        return cls(daily_goal=settings.daily_goal, time_zone=settings.time_zone)
+
+
+class StudySettingsUpdateRequest(BaseModel):
+    daily_goal: int | None = None
+    time_zone: Annotated[str, StringConstraints(max_length=MAX_TIME_ZONE_LENGTH)] | None = None
+
+
+class DailyGoalOut(BaseModel):
+    date: date
+    time_zone: str
+    reviews: int
+    daily_goal: int
+    goal_met: bool
+    # True exactly when the latest review reached the goal: the moment to celebrate.
+    just_completed: bool
+
+    @classmethod
+    def from_progress(cls, progress: DailyProgress) -> DailyGoalOut:
+        return cls(
+            date=progress.day,
+            time_zone=progress.time_zone,
+            reviews=progress.reviews,
+            daily_goal=progress.daily_goal,
+            goal_met=progress.goal_met,
+            just_completed=progress.just_completed,
+        )
+
+
+class TodayOut(DailyGoalOut):
+    streak: int  # consecutive days meeting the goal, ending today or yesterday
+
+    @classmethod
+    def from_today(cls, progress: DailyProgress) -> TodayOut:
+        return cls(
+            **DailyGoalOut.from_progress(progress).model_dump(), streak=progress.streak or 0
+        )
+
+
+class ReviewResultOut(CardScheduleOut):
+    daily_goal: DailyGoalOut
+
+    @classmethod
+    def from_schedule_and_progress(
+        cls, schedule: CardSchedule, progress: DailyProgress
+    ) -> ReviewResultOut:
+        return cls(
+            **CardScheduleOut.from_schedule(schedule).model_dump(),
+            daily_goal=DailyGoalOut.from_progress(progress),
+        )
+
+
+class HeatmapDayOut(BaseModel):
+    date: date
+    reviews: int
+
+
+class RetentionPointOut(BaseModel):
+    week_start: date
+    reviews: int
+    recalled: int
+    rate: float | None
+
+
+class ForecastDayOut(BaseModel):
+    date: date
+    due: int
+
+
+class ProgressStatsOut(BaseModel):
+    time_zone: str
+    deck_id: str | None
+    heatmap: list[HeatmapDayOut]
+    retention: list[RetentionPointOut]
+    forecast: list[ForecastDayOut]
+
+    @classmethod
+    def from_stats(cls, stats: ProgressStats) -> ProgressStatsOut:
+        return cls(
+            time_zone=stats.time_zone,
+            deck_id=stats.deck_id,
+            heatmap=[HeatmapDayOut(date=d.day, reviews=d.reviews) for d in stats.heatmap],
+            retention=[
+                RetentionPointOut(
+                    week_start=p.week_start, reviews=p.reviews, recalled=p.recalled, rate=p.rate
+                )
+                for p in stats.retention
+            ],
+            forecast=[ForecastDayOut(date=d.day, due=d.due) for d in stats.forecast],
         )

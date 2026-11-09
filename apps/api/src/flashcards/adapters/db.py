@@ -17,6 +17,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Identity,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -42,6 +43,7 @@ from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
@@ -232,6 +234,8 @@ class ReviewLogRow(Base):
         UniqueConstraint(
             "owner_id", "card_id", "idempotency_key", name="uq_review_owner_card_idempotency"
         ),
+        # Range reads per owner: the activity aggregates.
+        Index("ix_review_logs_owner_reviewed", "owner_id", "reviewed_at"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -739,6 +743,28 @@ def user_token_from_row(row: UserTokenRow) -> UserToken:
         created_at=row.created_at,
         expires_at=row.expires_at,
         used_at=row.used_at,
+    )
+
+
+class StudySettingsRow(Base):
+    __tablename__ = "study_settings"
+
+    owner_id: Mapped[str] = mapped_column(String, primary_key=True)
+    daily_goal: Mapped[int] = mapped_column(Integer)
+    time_zone: Mapped[str] = mapped_column(String)
+
+
+def study_settings_to_row(settings: StudySettings) -> StudySettingsRow:
+    return StudySettingsRow(
+        owner_id=settings.owner_id,
+        daily_goal=settings.daily_goal,
+        time_zone=settings.time_zone,
+    )
+
+
+def study_settings_from_row(row: StudySettingsRow) -> StudySettings:
+    return StudySettings(
+        owner_id=row.owner_id, daily_goal=row.daily_goal, time_zone=row.time_zone
     )
 
 

@@ -35,6 +35,8 @@ from flashcards.adapters.memory import (
     InMemoryScheduleRepository,
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
+    InMemoryStudySettingsRepository,
+    InMemoryStudyStatsRepository,
     InMemoryUserRepository,
     InMemoryUserTokenRepository,
     NullUnitOfWork,
@@ -64,6 +66,7 @@ from flashcards.application.media_service import MediaService
 from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
 from flashcards.application.planner_service import PlannerService
+from flashcards.application.progress_service import ProgressService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.sharing_service import SharingService
@@ -99,6 +102,8 @@ from flashcards.domain.ports import (
     ScheduleRepository,
     SessionRepository,
     ShareLinkRepository,
+    StudySettingsRepository,
+    StudyStatsRepository,
     TranscriptProvider,
     UnitOfWork,
     UserRepository,
@@ -142,6 +147,8 @@ class Repositories:
     login_throttle: LoginThrottleRepository
     user_tokens: UserTokenRepository
     mailer: Mailer
+    study_settings: StudySettingsRepository
+    study_stats: StudyStatsRepository
     dummy_hash: str | None = None
     # Where links in emails point (the web client).
     public_base_url: str = "http://localhost:5173"
@@ -168,6 +175,7 @@ class Container:
     card_generation: CardGenerationService
     goal_service: GoalService
     planner: PlannerService
+    progress: ProgressService
     apkg_import: ApkgImportService
     account: AccountService
     media: MediaService
@@ -226,6 +234,7 @@ def build_services(repos: Repositories) -> Container:
         repos.unit_of_work,
     )
     goal_service = GoalService(decks, repos.goals, repos.clock)
+    progress = ProgressService(decks, repos.study_settings, repos.study_stats, repos.clock)
     planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)
     apkg_import = ApkgImportService(repos.package_reader, decks, notes)
     account = AccountService(
@@ -251,6 +260,7 @@ def build_services(repos: Repositories) -> Container:
         repos.login_throttle,
         repos.user_tokens,
         invites,
+        repos.study_settings,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -335,6 +345,7 @@ def build_services(repos: Repositories) -> Container:
         card_generation=card_generation,
         goal_service=goal_service,
         planner=planner,
+        progress=progress,
         apkg_import=apkg_import,
         account=account,
         media=media,
@@ -365,6 +376,9 @@ def build_container(
     llm and job_queue can be supplied so a caller can inject a real LLM or share
     one worker queue; both default to the no-op/in-process implementations.
     """
+    cards = InMemoryCardRepository()
+    schedules = InMemoryScheduleRepository()
+    review_logs = InMemoryReviewLogRepository()
     return build_services(
         Repositories(
             clock=SystemClock(),
@@ -375,9 +389,9 @@ def build_container(
             sessions=InMemorySessionRepository(),
             decks=InMemoryDeckRepository(),
             notes=InMemoryNoteRepository(),
-            cards=InMemoryCardRepository(),
-            schedules=InMemoryScheduleRepository(),
-            review_logs=InMemoryReviewLogRepository(),
+            cards=cards,
+            schedules=schedules,
+            review_logs=review_logs,
             ai_jobs=InMemoryAiJobRepository(),
             draft_cards=InMemoryDraftCardRepository(),
             object_store=InMemoryObjectStore(),
@@ -399,6 +413,8 @@ def build_container(
             login_throttle=InMemoryLoginThrottleRepository(),
             user_tokens=InMemoryUserTokenRepository(),
             mailer=mailer or LogMailer(show_content=True),
+            study_settings=InMemoryStudySettingsRepository(),
+            study_stats=InMemoryStudyStatsRepository(cards, schedules, review_logs),
             public_base_url=public_base_url,
         )
     )

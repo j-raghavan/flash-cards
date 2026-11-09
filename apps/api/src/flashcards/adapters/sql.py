@@ -9,10 +9,27 @@ user insert together, or not at all.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import CursorResult, Result, and_, case, delete, func, null, or_, select, update
+from sqlalchemy import (
+    BigInteger,
+    ColumnElement,
+    CursorResult,
+    DateTime,
+    Result,
+    SQLColumnExpression,
+    and_,
+    case,
+    delete,
+    func,
+    literal,
+    null,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +53,7 @@ from flashcards.adapters.db import (
     ReviewLogRow,
     SessionRow,
     ShareLinkRow,
+    StudySettingsRow,
     UserRow,
     UserTokenRow,
     aijob_from_row,
@@ -67,6 +85,7 @@ from flashcards.adapters.db import (
     session_to_row,
     share_link_from_row,
     share_link_to_row,
+    study_settings_from_row,
     throttle_from_row,
     user_from_row,
     user_to_row,
@@ -90,8 +109,9 @@ from flashcards.domain.login_throttle import (
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.progress import BUCKET_SECONDS, ActivityBucket, DueBucket, StudySettings
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
-from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
+from flashcards.domain.scheduling import CardSchedule, DuplicateReview, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
@@ -932,6 +952,112 @@ class SqlUserTokenRepository:
 
     async def delete_for_user(self, user_id: str) -> None:
         await self._session.execute(delete(UserTokenRow).where(UserTokenRow.user_id == user_id))
+
+
+class SqlStudySettingsRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, owner_id: str) -> StudySettings | None:
+        # populate_existing: save() upserts past the identity map, so never trust a
+        # copy cached by an earlier get() in this session.
+        row = await self._session.get(StudySettingsRow, owner_id, populate_existing=True)
+        return study_settings_from_row(row) if row is not None else None
+
+    async def save(self, settings: StudySettings) -> None:
+        await self._session.execute(
+            pg_insert(StudySettingsRow)
+            .values(
+                owner_id=settings.owner_id,
+                daily_goal=settings.daily_goal,
+                time_zone=settings.time_zone,
+            )
+            .on_conflict_do_update(
+                index_elements=[StudySettingsRow.owner_id],
+                set_={"daily_goal": settings.daily_goal, "time_zone": settings.time_zone},
+            )
+        )
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(
+            delete(StudySettingsRow).where(StudySettingsRow.owner_id == owner_id)
+        )
+
+
+def _bucket(column: SQLColumnExpression[datetime]) -> ColumnElement[int]:
+    """The epoch second starting the 15-minute bucket holding a timestamp."""
+    epoch = func.floor(func.extract("epoch", column) / BUCKET_SECONDS) * BUCKET_SECONDS
+    return sa_cast(epoch, BigInteger)
+
+
+def _bucket_time(epoch: int) -> datetime:
+    return datetime.fromtimestamp(epoch, UTC)
+
+
+class SqlStudyStatsRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def review_activity(
+        self,
+        owner_id: str,
+        *,
+        since: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[ActivityBucket]:
+        # Bucket in a subquery, so the aggregate groups by a plain column.
+        inner = select(
+            _bucket(ReviewLogRow.reviewed_at).label("bucket"),
+            (ReviewLogRow.rating >= int(Rating.HARD)).label("recalled"),
+        ).where(
+            ReviewLogRow.owner_id == owner_id,
+            ReviewLogRow.reviewed_at >= since,
+            ReviewLogRow.reviewed_at < until,
+        )
+        if deck_ids is not None:
+            inner = inner.join(CardRow, CardRow.id == ReviewLogRow.card_id).where(
+                CardRow.deck_id.in_(list(deck_ids))
+            )
+        logs = inner.subquery()
+        stmt = (
+            select(logs.c.bucket, func.count(), func.count().filter(logs.c.recalled))
+            .group_by(logs.c.bucket)
+            .order_by(logs.c.bucket)
+        )
+        rows = await self._session.execute(stmt)
+        return [
+            ActivityBucket(_bucket_time(int(start)), int(reviews), int(recalled))
+            for start, reviews, recalled in rows
+        ]
+
+    async def due_forecast(
+        self,
+        owner_id: str,
+        *,
+        floor: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[DueBucket]:
+        clamped = func.greatest(CardScheduleRow.due_at, literal(floor, DateTime(timezone=True)))
+        inner = (
+            select(_bucket(clamped).label("bucket"))
+            .select_from(CardScheduleRow)
+            .join(CardRow, CardRow.id == CardScheduleRow.card_id)
+            .where(
+                CardRow.owner_id == owner_id,
+                CardRow.suspended_at.is_(None),
+                CardScheduleRow.due_at < until,
+            )
+        )
+        if deck_ids is not None:
+            inner = inner.where(CardRow.deck_id.in_(list(deck_ids)))
+        due = inner.subquery()
+        stmt = (
+            select(due.c.bucket, func.count()).group_by(due.c.bucket).order_by(due.c.bucket)
+        )
+        rows = await self._session.execute(stmt)
+        return [DueBucket(_bucket_time(int(start)), int(cards)) for start, cards in rows]
 
 
 class SqlUnitOfWork:

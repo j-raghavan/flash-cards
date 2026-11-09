@@ -23,8 +23,14 @@ from flashcards.domain.login_throttle import ThrottleState, after_attempt
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.progress import (
+    ActivityBucket,
+    DueBucket,
+    StudySettings,
+    bucket_start,
+)
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
-from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
+from flashcards.domain.scheduling import CardSchedule, DuplicateReview, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
@@ -587,6 +593,83 @@ class InMemoryUserTokenRepository:
     async def delete_for_user(self, user_id: str) -> None:
         for token_id in [t.id for t in self._by_id.values() if t.user_id == user_id]:
             del self._by_id[token_id]
+
+
+class InMemoryStudySettingsRepository:
+    def __init__(self) -> None:
+        self._by_owner: dict[str, StudySettings] = {}
+
+    async def get(self, owner_id: str) -> StudySettings | None:
+        return self._by_owner.get(owner_id)
+
+    async def save(self, settings: StudySettings) -> None:
+        self._by_owner[settings.owner_id] = settings
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        self._by_owner.pop(owner_id, None)
+
+
+class InMemoryStudyStatsRepository:
+    """Aggregates over the in-memory repositories, bucketed like the SQL adapter."""
+
+    def __init__(
+        self,
+        cards: InMemoryCardRepository,
+        schedules: InMemoryScheduleRepository,
+        logs: InMemoryReviewLogRepository,
+    ) -> None:
+        self._cards = cards
+        self._schedules = schedules
+        self._logs = logs
+
+    async def review_activity(
+        self,
+        owner_id: str,
+        *,
+        since: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[ActivityBucket]:
+        in_decks = await self._card_ids(owner_id, deck_ids)
+        totals: dict[datetime, tuple[int, int]] = {}
+        for log in await self._logs.list_for_owner(owner_id):
+            if not since <= log.reviewed_at < until:
+                continue
+            if in_decks is not None and log.card_id not in in_decks:
+                continue
+            start = bucket_start(log.reviewed_at)
+            reviews, recalled = totals.get(start, (0, 0))
+            totals[start] = (reviews + 1, recalled + (log.rating >= Rating.HARD))
+        return [ActivityBucket(start, r, k) for start, (r, k) in sorted(totals.items())]
+
+    async def due_forecast(
+        self,
+        owner_id: str,
+        *,
+        floor: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[DueBucket]:
+        wanted = None if deck_ids is None else set(deck_ids)
+        cards = [
+            c
+            for c in await self._cards.list_for_owner(owner_id)
+            if not c.is_suspended and (wanted is None or c.deck_id in wanted)
+        ]
+        schedules = await self._schedules.get_many([c.id for c in cards])
+        totals: dict[datetime, int] = {}
+        for schedule in schedules.values():
+            if schedule.due_at >= until:
+                continue
+            start = bucket_start(max(schedule.due_at, floor))
+            totals[start] = totals.get(start, 0) + 1
+        return [DueBucket(start, n) for start, n in sorted(totals.items())]
+
+    async def _card_ids(self, owner_id: str, deck_ids: Sequence[str] | None) -> set[str] | None:
+        if deck_ids is None:
+            return None
+        wanted = set(deck_ids)
+        return {c.id for c in await self._cards.list_for_owner(owner_id) if c.deck_id in wanted}
 
 
 class NullUnitOfWork:

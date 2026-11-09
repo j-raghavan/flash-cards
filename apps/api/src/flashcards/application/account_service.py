@@ -36,9 +36,11 @@ from flashcards.domain.ports import (
     ScheduleRepository,
     SessionRepository,
     ShareLinkRepository,
+    StudySettingsRepository,
     UserRepository,
     UserTokenRepository,
 )
+from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import CardSchedule, ReviewLog
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.users import LastActiveAdmin, User
@@ -56,6 +58,7 @@ class AccountExport:
     media: tuple[MediaAsset, ...]
     mock_exams: tuple[MockExam, ...]
     share_links: tuple[ShareLink, ...]
+    study_settings: StudySettings | None = None
 
 
 class AccountService:
@@ -83,6 +86,7 @@ class AccountService:
         login_throttle: LoginThrottleRepository,
         user_tokens: UserTokenRepository,
         invites: InviteService,
+        study_settings: StudySettingsRepository,
     ) -> None:
         self._library = library
         self._decks = decks
@@ -106,6 +110,7 @@ class AccountService:
         self._login_throttle = login_throttle
         self._user_tokens = user_tokens
         self._invites = invites
+        self._study_settings = study_settings
 
     async def export(self, *, user: User) -> AccountExport:
         decks = await self._decks.list_for_owner(user.id)
@@ -131,6 +136,7 @@ class AccountService:
             media=tuple(await self._media.list_for_owner(user.id)),
             mock_exams=tuple(await self._mock_exams.list_for_owner(user.id)),
             share_links=tuple(await self._share_links.list_for_owner(user.id)),
+            study_settings=await self._study_settings.get(user.id),
         )
 
     async def delete(self, *, user: User) -> list[str]:
@@ -165,6 +171,7 @@ class AccountService:
         await self._ai_calls.delete_for_owner(owner_id)
         await self._share_links.delete_for_owner(owner_id)
         await self._clone_quota.delete_for_owner(owner_id)
+        await self._study_settings.delete_for_owner(owner_id)
         # The throttle key is derived from the email, so it goes with the account.
         await self._login_throttle.delete(throttle_key(user.email))
         await self._user_tokens.delete_for_user(owner_id)

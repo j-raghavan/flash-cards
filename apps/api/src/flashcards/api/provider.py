@@ -42,6 +42,8 @@ from flashcards.adapters.sql import (
     SqlScheduleRepository,
     SqlSessionRepository,
     SqlShareLinkRepository,
+    SqlStudySettingsRepository,
+    SqlStudyStatsRepository,
     SqlUnitOfWork,
     SqlUserRepository,
     SqlUserTokenRepository,
@@ -159,6 +161,8 @@ def sql_provider(
                         login_throttle=SqlLoginThrottleRepository(session),
                         user_tokens=SqlUserTokenRepository(session),
                         mailer=provider_mailer,
+                        study_settings=SqlStudySettingsRepository(session),
+                        study_stats=SqlStudyStatsRepository(session),
                         public_base_url=public_base_url,
                         unit_of_work=SqlUnitOfWork(session),
                     )

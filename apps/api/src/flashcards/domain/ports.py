@@ -20,6 +20,7 @@ from flashcards.domain.mail import OutgoingEmail
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.progress import ActivityBucket, DueBucket, StudySettings
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
@@ -580,3 +581,47 @@ class UserTokenRepository(Protocol):
         ...
 
     async def delete_for_user(self, user_id: str) -> None: ...
+
+
+class StudySettingsRepository(Protocol):
+    async def get(self, owner_id: str) -> StudySettings | None:
+        """The owner's saved settings; None means the defaults apply."""
+        ...
+
+    async def save(self, settings: StudySettings) -> None:
+        """Insert or replace the owner's settings."""
+        ...
+
+    async def delete_for_owner(self, owner_id: str) -> None: ...
+
+
+class StudyStatsRepository(Protocol):
+    """Aggregated reads over review logs and schedules (F-PROG-1/3, F-PLAN-3).
+
+    Results are grouped into epoch-aligned 15-minute buckets in storage, so the
+    amount returned is bounded by the time range, never by the number of rows.
+    deck_ids, when given, keeps only cards in those decks.
+    """
+
+    async def review_activity(
+        self,
+        owner_id: str,
+        *,
+        since: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[ActivityBucket]:
+        """The owner's reviews with since <= reviewed_at < until, bucketed."""
+        ...
+
+    async def due_forecast(
+        self,
+        owner_id: str,
+        *,
+        floor: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[DueBucket]:
+        """Schedules of the owner's unsuspended cards due before until, bucketed,
+        with anything due before floor counted at floor (overdue cards)."""
+        ...
