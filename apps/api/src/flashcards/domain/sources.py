@@ -16,12 +16,20 @@ class PageKind(enum.StrEnum):
     IMAGE = "image"  # scanned/photo/formula/handwriting: hand to the vision model
 
 
+# Most pages (or transcript chunks) an AI source document may have, by default.
+DEFAULT_MAX_UPLOAD_PAGES = 20
+
+
 class UnsupportedMediaType(Exception):
     """The upload is not an allowed type (application/pdf, image/png, image/jpeg)."""
 
 
 class TooManyPages(Exception):
     """The document has more pages than the configured cap."""
+
+
+class UnreadableDocument(Exception):
+    """The document is of an allowed type but could not be parsed (corrupt or hostile)."""
 
 
 @dataclass(frozen=True, slots=True)

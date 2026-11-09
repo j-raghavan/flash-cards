@@ -38,11 +38,11 @@ class _Hasher:
     def __init__(self) -> None:
         self.hashed = 0
 
-    def hash(self, password: str) -> str:
+    async def hash(self, password: str) -> str:
         self.hashed += 1
         return f"hashed:{password}"
 
-    def verify(self, password_hash: str, password: str) -> bool:
+    async def verify(self, password_hash: str, password: str) -> bool:
         return password_hash == f"hashed:{password}"  # pragma: no cover - unused here
 
 

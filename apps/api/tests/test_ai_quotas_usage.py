@@ -208,7 +208,7 @@ class _Extractor:
     def sniff(self, data: bytes) -> str:  # pragma: no cover - not used by the worker
         return "application/pdf"
 
-    def count_pages(self, data: bytes) -> int:  # pragma: no cover - not used by the worker
+    async def count_pages(self, data: bytes) -> int:  # pragma: no cover - not used by the worker
         return 1
 
     async def extract(

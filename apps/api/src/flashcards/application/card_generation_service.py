@@ -10,6 +10,8 @@ cooperative: the flag is checked between pages.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 
 from flashcards.application.ai_prompts import prompt_for
@@ -17,11 +19,13 @@ from flashcards.application.ai_spend import AiSpend
 from flashcards.domain.ai import (
     DRAFT_CARDS_SCHEMA,
     DraftCardRecord,
+    InvalidModelOutput,
     LlmDocument,
+    LlmError,
     StructuredRequest,
     parse_draft_cards,
 )
-from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.jobs import AiJob, JobFailure, JobStatus
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
@@ -31,10 +35,58 @@ from flashcards.domain.ports import (
     ObjectStore,
     UnitOfWork,
 )
-from flashcards.domain.sources import ExtractedPage, PageKind
+from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
+from flashcards.domain.sources import (
+    DEFAULT_MAX_UPLOAD_PAGES,
+    ExtractedPage,
+    PageKind,
+    TooManyPages,
+    UnreadableDocument,
+    UnsupportedMediaType,
+)
+from flashcards.domain.transcripts import InvalidTranscript
 from flashcards.domain.usage import AiFeature
 
 MAX_OUTPUT_TOKENS = 4096
+
+logger = logging.getLogger("flashcards")
+
+_DOCUMENT_ERRORS = (UnreadableDocument, UnsupportedMediaType, TooManyPages, InvalidTranscript)
+_QUOTA_ERRORS = (QuotaExceeded, AiCallLimitReached)
+
+
+class _Superseded(Exception):
+    """This run's job was requeued as a new attempt, or vanished, while it ran."""
+
+
+def _owned(latest: AiJob | None, run: AiJob) -> AiJob | None:
+    """The stored job if it still belongs to this run (same RUNNING attempt), else None."""
+    if latest is None or latest.status is not JobStatus.RUNNING or latest.attempt != run.attempt:
+        return None
+    return latest
+
+
+def classify_failure(exc: Exception) -> JobFailure:
+    """The user-facing category for a failure; the exception text itself is never shown."""
+    if isinstance(exc, InvalidModelOutput):
+        return JobFailure.BAD_MODEL_OUTPUT
+    if isinstance(exc, LlmError):
+        return JobFailure.PROVIDER_UNAVAILABLE
+    if isinstance(exc, _DOCUMENT_ERRORS):
+        return JobFailure.UNREADABLE_DOCUMENT
+    if isinstance(exc, _QUOTA_ERRORS):
+        return JobFailure.QUOTA_EXCEEDED
+    return JobFailure.INTERNAL
+
+
+def _log_failure(job_id: str, exc: Exception) -> None:
+    # The details stay in the server log: expected failures as warnings, anything
+    # else with its traceback as an error.
+    failure = classify_failure(exc)
+    if failure is JobFailure.INTERNAL:
+        logger.exception("generation job %s failed unexpectedly", job_id)
+    else:
+        logger.warning("generation job %s failed (%s): %s", job_id, failure.name, exc)
 
 
 class CardGenerationService:
@@ -48,7 +100,7 @@ class CardGenerationService:
         clock: Clock,
         unit_of_work: UnitOfWork,
         spend: AiSpend,
-        max_pages: int = 20,
+        max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     ) -> None:
         self._uow = unit_of_work
         self._spend = spend
@@ -70,16 +122,42 @@ class CardGenerationService:
         await self._uow.commit()
         try:
             await self._process(job)
+        except asyncio.CancelledError:
+            # The worker is stopping (shutdown or deploy): hand the job back so the
+            # next worker resumes it instead of leaving it RUNNING with nobody on it.
+            await self._release(job)
+            raise
+        except _Superseded:
+            # The job was requeued after this run was presumed interrupted (ADR 0017):
+            # the new run owns it now. Drop this page's work and write nothing.
+            await self._uow.rollback()
+            logger.info("generation job %s attempt %d was superseded", job_id, job.attempt)
         except Exception as exc:  # any failure is captured on the job, never raised
+            _log_failure(job_id, exc)
             # Discard the failed page's partial work (its drafts were not counted),
             # then fail the latest committed state, so completed_units and
             # total_units survive and a retry resumes without duplicating drafts.
-            # Only a still-RUNNING job can go to FAILED, which it always is here.
             await self._uow.rollback()
-            current = await self._jobs.get(job_id)
-            if current is None or current.status is not JobStatus.RUNNING:
-                return  # pragma: no cover - defensive: the claimed job is RUNNING here
-            await self._jobs.update(current.failed(str(exc), self._clock.now()))
+            current = _owned(await self._jobs.get(job_id), job)
+            if current is None:
+                return  # finished, cancelled or superseded meanwhile: not ours to fail
+            await self._jobs.update(current.failed(classify_failure(exc), self._clock.now()))
+
+    async def _release(self, job: AiJob) -> None:
+        try:
+            await self._uow.rollback()  # the in-flight page is regenerated next time
+            await self._jobs.try_requeue_interrupted(job.id, job.attempt, self._clock.now())
+            await self._uow.commit()
+        except Exception:
+            # Startup recovery picks the job up later; never mask the cancellation.
+            logger.exception("could not release generation job %s on shutdown", job.id)
+
+    async def _current(self, job: AiJob) -> AiJob:
+        """Re-read the job, or raise _Superseded if this run no longer owns it."""
+        latest = _owned(await self._jobs.get(job.id), job)
+        if latest is None:
+            raise _Superseded()
+        return latest
 
     async def _process(self, job: AiJob) -> None:
         data = await self._store.get(job.source_id)
@@ -94,44 +172,41 @@ class CardGenerationService:
         ]
         if not pages:
             # An empty/garbage upload must not look like a done job stuck at 0%.
+            current = await self._current(job)
             await self._jobs.update(
-                job.failed("the document has no readable pages", self._clock.now())
+                current.failed(JobFailure.NO_READABLE_PAGES, self._clock.now())
             )
             return
 
         # On a retry, completed_units marks the pages already generated on an earlier
         # attempt; resume from there so their drafts are not regenerated and duplicated.
         resume_from = job.completed_units
-        await self._jobs.update(job.with_total(len(pages), self._clock.now()))
+        current = await self._current(job)
+        await self._jobs.update(current.with_total(len(pages), self._clock.now()))
         await self._uow.commit()
 
         for index, page in enumerate(pages):
             if index < resume_from:
                 continue
-            current = await self._jobs.get(job.id)
-            if current is None:
-                return  # pragma: no cover - the job cannot vanish mid-run
+            current = await self._current(job)
             if current.cancel_requested:
                 await self._jobs.update(current.cancelled(self._clock.now()))
                 return
             records = await self._generate_page(current, page)
             for record in records:
                 await self._drafts.add(record)
-            # Re-read before advancing: generation is the slow step, so a cancel can
-            # arrive during it. Advancing a fresh read records progress AND preserves
-            # that flag, where writing the pre-generation snapshot would wipe it.
-            latest = await self._jobs.get(job.id)
-            if latest is None:
-                return  # pragma: no cover - the job cannot vanish mid-run
+            # Re-read before advancing: generation is the slow step, so a cancel or a
+            # requeue can arrive during it. Advancing a fresh read records progress
+            # AND preserves a cancel flag, where writing the pre-generation snapshot
+            # would wipe it; a requeued job raises _Superseded and its page is dropped.
+            latest = await self._current(job)
             if latest.cancel_requested:
                 await self._jobs.update(latest.cancelled(self._clock.now()))
                 return  # this page's drafts are kept; later pages are not generated
             await self._jobs.update(latest.advanced(self._clock.now()))
             await self._uow.commit()  # this page's drafts and its progress, together
 
-        final = await self._jobs.get(job.id)
-        if final is None:
-            return  # pragma: no cover - the job cannot vanish mid-run
+        final = await self._current(job)
         await self._jobs.update(final.succeeded(self._clock.now()))
 
     async def _generate_page(self, job: AiJob, page: ExtractedPage) -> list[DraftCardRecord]:

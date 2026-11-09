@@ -56,7 +56,7 @@ class RegistrationService:
         user = User(
             id=str(uuid.uuid4()),
             email=normalized_email,
-            password_hash=self._hasher.hash(password),
+            password_hash=await self._hasher.hash(password),
             role=invite.role,
             created_at=self._clock.now(),
         )

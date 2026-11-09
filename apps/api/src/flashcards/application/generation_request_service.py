@@ -4,12 +4,19 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from flashcards.application.ai_spend import AiSpend
 from flashcards.application.deck_service import DeckService
 from flashcards.application.quota_service import QuotaService
 from flashcards.domain.ai import Thoroughness
-from flashcards.domain.jobs import AiJob, IllegalJobTransition, JobNotFound, new_generation_job
+from flashcards.domain.jobs import (
+    AiJob,
+    IllegalJobTransition,
+    JobNotFound,
+    JobStatus,
+    new_generation_job,
+)
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
@@ -19,7 +26,7 @@ from flashcards.domain.ports import (
     QuotaRepository,
 )
 from flashcards.domain.quotas import QuotaExceeded, billing_period
-from flashcards.domain.sources import TooManyPages
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES, TooManyPages
 from flashcards.domain.transcripts import (
     TRANSCRIPT_MEDIA_TYPE,
     Transcript,
@@ -40,7 +47,7 @@ class GenerationRequestService:
         clock: Clock,
         limits: QuotaService,
         spend: AiSpend,
-        max_pages: int = 20,
+        max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     ) -> None:
         self._decks = decks
         self._extractor = extractor
@@ -62,7 +69,7 @@ class GenerationRequestService:
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
         # Raises UnsupportedMediaType on a disallowed type.
         media = self._extractor.sniff(data)
-        pages = self._extractor.count_pages(data)
+        pages = await self._extractor.count_pages(data)
         return await self._enqueue(owner_id, deck_id, data, media, pages, thoroughness)
 
     async def start_transcript(
@@ -136,6 +143,44 @@ class GenerationRequestService:
             raise IllegalJobTransition(f"cannot retry from {job.status}")
         await self._queue.enqueue(job.id)
         return queued
+
+    async def recover_interrupted(
+        self,
+        *,
+        queued_idle: timedelta = timedelta(0),
+        running_idle: timedelta = timedelta(0),
+    ) -> int:
+        """Hand jobs nobody is working on to this worker; return how many (ADR 0017).
+
+        Only jobs untouched for at least the given idle time are considered: at
+        startup both are zero (anything queued or running belongs to a process that
+        is gone); a periodic sweep uses longer times. The worker refreshes a job's
+        updated_at with every page, so a RUNNING job idle that long has lost its
+        runner.
+
+        QUEUED jobs are enqueued again (the queue lives in memory, and claiming is
+        conditional, so a duplicate is harmless). RUNNING jobs are recovered as the
+        next attempt and resume from completed_units, so pages already generated are
+        neither regenerated nor charged again; a job whose attempts are spent fails
+        instead, so a job that crashes the process cannot loop forever. Recovery is
+        conditional, so a job that finished meanwhile is left alone, and a runner
+        elsewhere that still holds the old attempt stops at its next progress check.
+        """
+        now = self._clock.now()
+        recovered = [
+            job.id
+            for job in await self._jobs.list_queued()
+            if job.updated_at <= now - queued_idle
+        ]
+        for job in await self._jobs.list_running():
+            if job.updated_at > now - running_idle:
+                continue
+            after = await self._jobs.try_requeue_interrupted(job.id, job.attempt, now)
+            if after is not None and after.status is JobStatus.QUEUED:
+                recovered.append(job.id)
+        for job_id in recovered:
+            await self._queue.enqueue(job_id)
+        return len(recovered)
 
     async def cancel(self, *, owner_id: str, job_id: str) -> None:
         await self.get(owner_id=owner_id, job_id=job_id)  # ownership check

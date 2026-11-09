@@ -62,25 +62,29 @@ class AuthService:
         # A throwaway hash verified when no user matches, so an absent account and a
         # wrong password cost the same work and cannot be told apart by timing.
         # Callers that build one AuthService per request pass a precomputed value
-        # so the Argon2 work happens once at startup, not on every request.
-        self._dummy_hash = dummy_hash if dummy_hash is not None else hasher.hash(
-            secrets.token_urlsafe(TOKEN_BYTES)
-        )
+        # so the Argon2 work happens once at startup, not on every request; without
+        # one it is computed on first use.
+        self._dummy_hash = dummy_hash
 
     async def login(
         self, *, email: str, password: str, device: str = UNKNOWN_DEVICE
     ) -> IssuedSession:
         user = await self._users.get_by_email(normalize_email(email))
         if user is None:
-            self._hasher.verify(self._dummy_hash, password)
+            await self._hasher.verify(await self._dummy(), password)
             raise InvalidCredentials()
-        if not self._hasher.verify(user.password_hash, password):
+        if not await self._hasher.verify(user.password_hash, password):
             raise InvalidCredentials()
         if user.status() is UserStatus.SUSPENDED:
             raise AccountSuspended()
         if self._require_verified and not user.is_verified:
             raise EmailNotVerified()
         return await self.start_session(user, device=device)
+
+    async def _dummy(self) -> str:
+        if self._dummy_hash is None:
+            self._dummy_hash = await self._hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
+        return self._dummy_hash
 
     async def start_session(self, user: User, *, device: str = UNKNOWN_DEVICE) -> IssuedSession:
         """Issue a session for an already-authenticated user (e.g. just after signup).

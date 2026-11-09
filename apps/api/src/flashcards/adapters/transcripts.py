@@ -42,10 +42,10 @@ class TranscriptAwareExtractor:
             return TRANSCRIPT_MEDIA_TYPE
         return self._inner.sniff(data)
 
-    def count_pages(self, data: bytes) -> int:
+    async def count_pages(self, data: bytes) -> int:
         if is_transcript_envelope(data):
             return len(chunk_transcript(decode_transcript(data)))
-        return self._inner.count_pages(data)
+        return await self._inner.count_pages(data)
 
     async def extract(
         self, data: bytes, *, file_id: str, max_pages: int

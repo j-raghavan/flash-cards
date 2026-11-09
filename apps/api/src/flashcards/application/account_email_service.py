@@ -142,7 +142,7 @@ class AccountEmailService:
         token = await self._consume(raw_token, TokenPurpose.PASSWORD_RESET)
         user = await self._live_user(token.user_id)
         now = self._clock.now()
-        await self._users.update(user.with_password_hash(self._hasher.hash(new_password)))
+        await self._users.update(user.with_password_hash(await self._hasher.hash(new_password)))
         # Whoever held the old password, or a session, loses access now.
         await self._sessions.revoke_all_for_user(user.id, now)
         await self._throttle.delete(throttle_key(user.email))

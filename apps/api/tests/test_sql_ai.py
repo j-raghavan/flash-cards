@@ -20,7 +20,7 @@ from flashcards.adapters.sql import (
     SqlQuotaRepository,
 )
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
-from flashcards.domain.jobs import AiJob, JobStatus, new_generation_job
+from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
 from flashcards.domain.notes import NoteType
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
@@ -184,7 +184,7 @@ async def test_try_retry_requeues_a_failed_job_once(engine: AsyncEngine) -> None
         running = await SqlAiJobRepository(s).try_claim(job.id, NOW)
         assert running is not None
         assert await SqlAiJobRepository(s).try_retry(job.id, NOW) is None  # still running
-        await SqlAiJobRepository(s).update(running.failed("boom", NOW))
+        await SqlAiJobRepository(s).update(running.failed(JobFailure.INTERNAL, NOW))
 
     async with sm() as s, s.begin():
         queued = await SqlAiJobRepository(s).try_retry(job.id, NOW)
@@ -248,7 +248,7 @@ async def test_jobs_reach_the_worker_only_after_their_unit_commits(
             await SqlAiJobRepository(s).add(job)
             running = await SqlAiJobRepository(s).try_claim(job.id, NOW)
             assert running is not None
-            await SqlAiJobRepository(s).update(running.failed("boom", NOW))
+            await SqlAiJobRepository(s).update(running.failed(JobFailure.INTERNAL, NOW))
 
     own_engine, provider, queue = sql_provider(pg_url)
     seen: list[str] = []
@@ -277,3 +277,77 @@ async def test_jobs_reach_the_worker_only_after_their_unit_commits(
     finally:
         await queue.stop()
         await own_engine.dispose()
+
+
+async def test_list_queued_and_try_requeue_interrupted(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    queued, running = _job(), _job()
+    async with sm() as s, s.begin():
+        repo = SqlAiJobRepository(s)
+        await repo.add(queued)
+        await repo.add(running)
+        claimed = await repo.try_claim(running.id, NOW)
+        assert claimed is not None
+    async with sm() as s, s.begin():
+        repo = SqlAiJobRepository(s)
+        assert [j.id for j in await repo.list_queued()] == [queued.id]
+        # A stale attempt, an unknown id and a QUEUED job are all left alone.
+        assert await repo.try_requeue_interrupted(running.id, claimed.attempt + 1, NOW) is None
+        assert await repo.try_requeue_interrupted("missing", 1, NOW) is None
+        assert await repo.try_requeue_interrupted(queued.id, queued.attempt, NOW) is None
+        requeued = await repo.try_requeue_interrupted(running.id, claimed.attempt, NOW)
+        assert requeued is not None and requeued.status is JobStatus.QUEUED
+        assert (requeued.attempt, requeued.max_attempts) == (
+            claimed.attempt + 1,
+            claimed.max_attempts,
+        )
+        # Only once: the job is no longer RUNNING at that attempt.
+        assert await repo.try_requeue_interrupted(running.id, claimed.attempt, NOW) is None
+    async with sm() as s:
+        assert {j.id for j in await SqlAiJobRepository(s).list_queued()} == {
+            queued.id,
+            running.id,
+        }
+
+
+async def test_get_sees_changes_committed_by_another_session(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlUnitOfWork
+
+    sm = create_sessionmaker(engine)
+    job = _job()
+    async with sm() as worker:
+        repo, uow = SqlAiJobRepository(worker), SqlUnitOfWork(worker)
+        await repo.add(job)
+        claimed = await repo.try_claim(job.id, NOW)
+        assert claimed is not None
+        await uow.commit()
+        assert (await repo.get(job.id)) is not None  # cached in the worker's session
+
+        async with sm() as other, other.begin():
+            assert await SqlAiJobRepository(other).request_cancel(job.id, NOW) is True
+
+        # The worker's session lives across commits and must not read its stale copy.
+        seen = await repo.get(job.id)
+        assert seen is not None and seen.cancel_requested is True
+        await worker.commit()
+
+
+async def test_try_requeue_interrupted_fails_a_job_with_no_attempts_left(
+    engine: AsyncEngine,
+) -> None:
+    from dataclasses import replace
+
+    sm = create_sessionmaker(engine)
+    job = replace(_job(), max_attempts=1)
+    async with sm() as s, s.begin():
+        repo = SqlAiJobRepository(s)
+        await repo.add(job)
+        claimed = await repo.try_claim(job.id, NOW)
+        assert claimed is not None
+    async with sm() as s, s.begin():
+        failed = await SqlAiJobRepository(s).try_requeue_interrupted(job.id, 1, NOW)
+        assert failed is not None and failed.status is JobStatus.FAILED
+        assert failed.attempt == 1 and failed.error == JobFailure.INTERNAL.value
+    async with sm() as s:
+        stored = await SqlAiJobRepository(s).get(job.id)
+        assert stored is not None and stored.status is JobStatus.FAILED

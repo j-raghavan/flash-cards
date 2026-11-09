@@ -46,10 +46,10 @@ class _Clock:
 
 
 class _Hasher:
-    def hash(self, password: str) -> str:
+    async def hash(self, password: str) -> str:
         return f"hashed:{password}"
 
-    def verify(self, password_hash: str, password: str) -> bool:
+    async def verify(self, password_hash: str, password: str) -> bool:
         return password_hash == f"hashed:{password}"
 
 
@@ -208,7 +208,7 @@ async def test_revoke_others_keeps_the_current_session() -> None:
 def _member(app: FastAPI, agent: str) -> TestClient:
     container: Container = app.state.container
     token = asyncio.run(container.invites.create(created_by="seed", role=Role.MEMBER)).raw_token
-    client = TestClient(app, headers={"User-Agent": agent})
+    client = TestClient(app, headers={"User-Agent": agent, "X-Requested-With": "fetch"})
     response = client.post(
         "/auth/signup", json={"token": token, "email": "m@example.com", "password": PASSWORD}
     )
@@ -219,7 +219,7 @@ def _member(app: FastAPI, agent: str) -> TestClient:
 def test_the_device_list_over_http() -> None:
     app = create_app(Settings(environment="test", session_cookie_secure=False))
     laptop = _member(app, FIREFOX_MAC)
-    desktop = TestClient(app, headers={"User-Agent": CHROME_WINDOWS})
+    desktop = TestClient(app, headers={"User-Agent": CHROME_WINDOWS, "X-Requested-With": "fetch"})
     login = desktop.post("/auth/login", json={"email": "m@example.com", "password": PASSWORD})
     assert login.status_code == 200
 

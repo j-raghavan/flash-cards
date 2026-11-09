@@ -9,6 +9,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, MAX_MONTHLY_PAGES
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 
 
 class Settings(BaseSettings):
@@ -18,7 +19,9 @@ class Settings(BaseSettings):
     # F-AUTH-7: with false, anyone can create a member account at POST /auth/register
     # (throttled per client, verification email sent). Invites keep working either way.
     invite_only: bool = True
-    max_upload_pages: int = 20
+    # Most pages (or transcript chunks) an AI source document may have, for card
+    # generation and document chat.
+    max_upload_pages: int = Field(default=DEFAULT_MAX_UPLOAD_PAGES, ge=1)
     # Session cookie is marked Secure by default; turn off only for HTTP in tests.
     session_cookie_secure: bool = True
     # Dev convenience: seed one admin invite at startup and log its token, so a

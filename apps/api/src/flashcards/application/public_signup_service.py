@@ -70,7 +70,7 @@ class PublicSignupService:
             raise LoginLocked(state.locked_for(now) or LOCKOUT)
         normalized = validate_email(email)
         validate_password(password)
-        password_hash = self._hasher.hash(password)  # before the lookup: same work either way
+        password_hash = await self._hasher.hash(password)  # before the lookup: same work either way
         existing = await self._users.get_by_email(normalized)
         if existing is not None:
             return SignupOutcome(user=existing, created=False)

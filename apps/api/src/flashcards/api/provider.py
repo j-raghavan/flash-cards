@@ -8,7 +8,6 @@ that commits on success and rolls back on any error.
 
 from __future__ import annotations
 
-import secrets
 from collections.abc import AsyncIterator, Callable
 
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -22,6 +21,7 @@ from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import SystemClock
+from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
     SqlAiJobRepository,
@@ -61,6 +61,7 @@ from flashcards.api.container import (
 )
 from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 from flashcards.domain.usage import AiMetering
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
@@ -81,8 +82,6 @@ class _AfterCommitQueue:
             await self._queue.enqueue(job_id)
         self._pending.clear()
 
-TOKEN_BYTES = 32
-
 
 def in_memory_provider(
     llm: LLMProvider | None = None,
@@ -91,6 +90,7 @@ def in_memory_provider(
     public_base_url: str = "http://localhost:5173",
     metering: AiMetering | None = None,
     require_verified_sign_in: bool = False,
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
 ) -> tuple[Container, ServicesProvider, InProcessJobQueue]:
     job_queue = InProcessJobQueue()
     container = build_container(
@@ -100,6 +100,7 @@ def in_memory_provider(
         public_base_url=public_base_url,
         metering=metering,
         require_verified_sign_in=require_verified_sign_in,
+        max_upload_pages=max_upload_pages,
     )
 
     async def provider() -> AsyncIterator[Container]:
@@ -116,17 +117,18 @@ def sql_provider(
     public_base_url: str = "http://localhost:5173",
     metering: AiMetering | None = None,
     require_verified_sign_in: bool = False,
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
     clock = SystemClock()
     hasher = Argon2PasswordHasher()
     scheduler = FsrsScheduler()
-    dummy_hash = hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
+    dummy_hash = hasher.dummy_hash()
     # Stateless/process-level singletons, shared across requests.
     extractor = TranscriptAwareExtractor(PyMuPDFExtractor())
     transcripts = NullTranscriptProvider()
-    package_reader = ApkgReader()
+    package_reader = BlockingPackageReader(ApkgReader().read)
     media_sniffer = PuremagicMediaSniffer()
     job_queue = InProcessJobQueue()
     provider_llm = llm or NullLLMProvider()
@@ -185,6 +187,7 @@ def sql_provider(
                         plan_baselines=SqlPlanBaselineRepository(session),
                         study_stats=SqlStudyStatsRepository(session),
                         public_base_url=public_base_url,
+                        max_upload_pages=max_upload_pages,
                         unit_of_work=SqlUnitOfWork(session),
                     )
                 )

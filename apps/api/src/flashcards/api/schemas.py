@@ -643,7 +643,7 @@ class JobOut(BaseModel):
             total_units=job.total_units,
             completed_units=job.completed_units,
             cancel_requested=job.cancel_requested,
-            error=job.error,
+            error=job.public_error,
             created_at=job.created_at,
             updated_at=job.updated_at,
         )

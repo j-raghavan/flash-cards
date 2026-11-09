@@ -37,7 +37,7 @@ from flashcards.domain.ports import (
     ObjectStore,
     PassageRepository,
 )
-from flashcards.domain.sources import PageKind
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES, PageKind
 from flashcards.domain.usage import AiFeature
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class ChatService:
         llm: LLMProvider,
         budget: AiCallBudget,
         *,
-        max_pages: int = 20,
+        max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     ) -> None:
         self._decks = decks
         self._jobs = jobs
