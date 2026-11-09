@@ -106,7 +106,7 @@ from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
-from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.jobs import AiJob, JobFailure, JobStatus
 from flashcards.domain.login_throttle import (
     FAILURE_WINDOW,
     LOCKOUT,
@@ -646,7 +646,10 @@ class SqlAiJobRepository:
         await self._session.flush()
 
     async def get(self, job_id: str) -> AiJob | None:
-        row = await self._session.get(AiJobRow, job_id)
+        # populate_existing: the row as committed, not the session's cached copy.
+        # The worker's session lives across commits (expire_on_commit=False), and
+        # it must see a cancel or a requeue that another session committed.
+        row = await self._session.get(AiJobRow, job_id, populate_existing=True)
         return aijob_from_row(row) if row is not None else None
 
     async def update(self, job: AiJob) -> None:
@@ -702,6 +705,39 @@ class SqlAiJobRepository:
             select(AiJobRow).where(AiJobRow.status == JobStatus.RUNNING.value)
         )
         return [aijob_from_row(row) for row in rows]
+
+    async def list_queued(self) -> list[AiJob]:
+        rows = await self._session.scalars(
+            select(AiJobRow).where(AiJobRow.status == JobStatus.QUEUED.value)
+        )
+        return [aijob_from_row(row) for row in rows]
+
+    async def try_requeue_interrupted(
+        self, job_id: str, attempt: int, now: datetime
+    ) -> AiJob | None:
+        # Mirrors AiJob.requeued_after_interruption in one conditional UPDATE: a job
+        # that finished, or was recovered by another process, is left alone. Every
+        # SET expression sees the row as it was, so all of them test the same
+        # attempts_left.
+        attempts_left = AiJobRow.attempt < AiJobRow.max_attempts
+        row = await self._session.scalar(
+            update(AiJobRow)
+            .where(
+                AiJobRow.id == job_id,
+                AiJobRow.status == JobStatus.RUNNING.value,
+                AiJobRow.attempt == attempt,
+            )
+            .values(
+                status=case(
+                    (attempts_left, JobStatus.QUEUED.value), else_=JobStatus.FAILED.value
+                ),
+                attempt=case((attempts_left, AiJobRow.attempt + 1), else_=AiJobRow.attempt),
+                error=case((attempts_left, null()), else_=JobFailure.INTERNAL.value),
+                updated_at=now,
+            )
+            .returning(AiJobRow)
+        )
+        return aijob_from_row(row) if row is not None else None
 
     async def list_for_owner(self, owner_id: str) -> list[AiJob]:
         rows = await self._session.scalars(

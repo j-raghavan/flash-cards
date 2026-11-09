@@ -61,7 +61,7 @@ The mapping is conservative: it never makes a card look better known than its hi
   - A note is selected when its deck is one of `deck` or a sub-deck of one (ignoring case), and it carries one of `tag` or a descendant tag. An empty list means no filter.
   - At most 50 decks and 50 tags, each 1 to 200 characters. Otherwise the request answers 422.
 - The import is planned before anything is written: selection, mapping, our note validation and card matching. A dry run returns that plan and writes nothing (200). A real import executes the same plan (201).
-- Reading the package, planning and replaying histories run in a worker thread (`asyncio.to_thread`), so one large import does not stall other requests. The FSRS adapter passes a fixed card id to py-fsrs, which otherwise sleeps 1 ms for every card it builds.
+- None of it runs on the event loop, so one large import does not stall other requests. The package is parsed behind the async `PackageReader` port, in the bounded worker pool of the security hardening (`BlockingPackageReader`). Planning and replaying histories run in a worker thread (`asyncio.to_thread`). The FSRS adapter passes a fixed card id to py-fsrs, which otherwise sleeps 1 ms for every card it builds.
 - The report adds `notes_not_selected`, `cards_scheduled`, `reviews_imported`, `dry_run` and `unsupported`. Each `unsupported` entry has a kind, a count and up to three short examples (note type or deck names from the caller's own package). The kinds:
   - `unknown_note_type`, `unmappable_note`, `invalid_note` and `duplicate_note`: skipped notes
   - `dropped_fields`: non-empty fields beyond the ones we map

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
 from flashcards.api.schemas import ImportReportOut
+from flashcards.api.uploads import read_capped
 from flashcards.domain.anki import MAX_SELECTION_ITEMS, MAX_SELECTION_LENGTH, ImportSelection
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -50,11 +51,7 @@ async def import_apkg(
     import only notes carrying one of those tags (or a descendant tag).
     """
     selection = _selection(deck, tag)
-    data = await file.read()
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File too large."
-        )
+    data = await read_capped(file, MAX_UPLOAD_BYTES)
     report = await container.apkg_import.import_package(
         owner_id=caller.user.id, data=data, selection=selection, dry_run=dry_run
     )

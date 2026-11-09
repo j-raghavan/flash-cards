@@ -24,6 +24,7 @@ from flashcards.adapters.memory import (
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
 )
+from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.deck_export_service import DeckExportService
 from flashcards.application.deck_service import DeckService
@@ -79,7 +80,7 @@ class _World:
             self.clock,
         )
         self.importer = ApkgImportService(
-            ApkgReader(),
+            BlockingPackageReader(ApkgReader().read),
             self.decks,
             self.notes,
             self.card_repo,

@@ -160,9 +160,10 @@ class ApkgImportService:
         selection: ImportSelection | None = None,
         dry_run: bool = False,
     ) -> ImportReport:
-        # Parsing, planning and replaying histories are CPU work on untrusted input;
-        # they run in a worker thread so one large import never stalls other requests.
-        package = await asyncio.to_thread(self._reader.read, data)
+        # The reader port parses off the event loop (a bounded worker pool). Planning
+        # and replaying histories are CPU work too, so they run in a worker thread,
+        # and one large import never stalls other requests.
+        package = await self._reader.read(data)
         now = self._clock.now()
         plan = await asyncio.to_thread(_plan, package, selection or ImportSelection(), now)
         if dry_run:
