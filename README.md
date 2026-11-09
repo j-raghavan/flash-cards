@@ -2,7 +2,7 @@
 
 Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, photos of notes or a YouTube link, review the generated cards, set an exam date and target grade, and follow a daily plan.
 
-> **Status:** pre-alpha. The backend API is functional; the web client is in development. See [docs/PRD.md](docs/PRD.md) for the full product requirements.
+> **Status:** pre-alpha. The backend API and a first web client are functional. See [docs/PRD.md](docs/PRD.md) for the full product requirements.
 
 ## Features
 
@@ -18,16 +18,40 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - Administrator user management (suspend, role changes, deletion) with an append-only audit log
 - Deck sharing by revocable link, with optional cloning
 - Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint, including locally hosted models
+- Installable web client (PWA): invite sign-up, sign-in, email verification and password reset; nested decks with statistics and a proficiency ring; keyboard-first study sessions for every note type, including Image Occlusion and custom templates (Space to reveal, 1 to 4 to rate); a Basic and Cloze card editor with Markdown and KaTeX preview; the card browser with bulk actions; and AI generation with live progress and draft approval
+- Offline review: the app shell and recently opened decks stay available offline, and answers given offline are kept on the device and synced when the connection returns
 
 ## Roadmap
 
-- Web client: installable PWA with offline review
+- Web client screens for exam goals and study plans, mock exams, document chat, deck sharing, Anki import and the admin console
+- Web editors for Image Occlusion masks and custom note types
+- Interface translations
 - Anki `.apkg` export
 - Automatic YouTube transcript retrieval
 
 ## Stack
 
 FastAPI, SQLAlchemy 2, PostgreSQL (including the job queue), React, TypeScript, Vite. The hosted instance starts on free tiers (Render + Supabase) and moves to Fly.io + Supabase Pro as usage grows; self-hostable with Docker Compose.
+
+## Web client
+
+The client lives in `apps/web` (React, TypeScript, Vite). It calls the API only on its own origin, under `/api` unless `VITE_API_BASE_URL` names another path; in development, Vite proxies `/api` to the API at `http://localhost:8000` (override with `FLASHCARDS_API_PROXY_TARGET`). In production, serve the built app and the API from one origin, with the API under `/api`.
+
+The build adds a strict Content-Security-Policy as a `<meta>` tag. A reverse proxy in front of it should also send the same policy as a header, since browsers ignore `frame-ancestors` in a `<meta>` tag:
+
+```
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+`style-src` allows inline styles because KaTeX positions math with style attributes; card text itself is sanitized and may not carry styles. Scripts are never inline.
+
+```sh
+cd apps/web
+npm ci
+npm run dev        # http://localhost:5173
+npm test           # Vitest, fails below 97% line and branch coverage
+npm run build
+```
 
 ## Documentation
 
