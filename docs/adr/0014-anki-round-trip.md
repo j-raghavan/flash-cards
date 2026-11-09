@@ -1,4 +1,4 @@
-# ADR 0013: Anki round trip: review history, selective import, dry run and export
+# ADR 0014: Anki round trip: review history, selective import, dry run and export
 
 - **Status:** Accepted
 - **Date:** 2026-11-08

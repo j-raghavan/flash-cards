@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Importing a parsed Anki package into decks and cards (F-IMP-1..3, ADR 0013).
+"""Importing a parsed Anki package into decks and cards (F-IMP-1..3, ADR 0014).
 
 The import is planned first, without writing anything: each note is selected or
 not (by deck or tag), mapped to Basic or Cloze and validated, and its Anki cards

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""A deck and its subdecks gathered for export (F-IMP-4, ADR 0013).
+"""A deck and its subdecks gathered for export (F-IMP-4, ADR 0014).
 
 The application service collects one owner's deck tree into a DeckExport; a
 DeckExportWriter adapter turns it into .apkg, CSV or JSON bytes.

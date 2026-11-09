@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Mapping scheduling state between Anki's SM-2 fields and our FSRS schedule (ADR 0013).
+"""Mapping scheduling state between Anki's SM-2 fields and our FSRS schedule (ADR 0014).
 
 Importing (F-IMP-2): a card's review history is the authority. Each revlog
 answer becomes a Rating and is replayed through our Scheduler, so the schedule is
