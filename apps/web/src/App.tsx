@@ -21,6 +21,10 @@ import { StudyPage } from "./pages/StudyPage";
 // Screens with charts or editors load on first visit, keeping the start small.
 const ProgressPage = lazy(() => import("./progress/ProgressPage").then((m) => ({ default: m.ProgressPage })));
 const AdminPage = lazy(() => import("./admin/AdminPage").then((m) => ({ default: m.AdminPage })));
+const noteTypePages = () => import("./noteTypes/NoteTypesPage");
+const NoteTypesPage = lazy(() => noteTypePages().then((m) => ({ default: m.NoteTypesPage })));
+const NewNoteTypePage = lazy(() => noteTypePages().then((m) => ({ default: m.NewNoteTypePage })));
+const EditNoteTypePage = lazy(() => noteTypePages().then((m) => ({ default: m.EditNoteTypePage })));
 
 function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<Loading />}>{children}</Suspense>;
@@ -65,6 +69,30 @@ export function AppRoutes() {
           element={
             <Lazy>
               <ProgressPage />
+            </Lazy>
+          }
+        />
+        <Route
+          path="/note-types"
+          element={
+            <Lazy>
+              <NoteTypesPage />
+            </Lazy>
+          }
+        />
+        <Route
+          path="/note-types/new"
+          element={
+            <Lazy>
+              <NewNoteTypePage />
+            </Lazy>
+          }
+        />
+        <Route
+          path="/note-types/:noteTypeId"
+          element={
+            <Lazy>
+              <EditNoteTypePage />
             </Lazy>
           }
         />

@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Create or edit a note (F-CARD-1, F-CARD-2, F-CARD-6): Basic or Cloze, with
-// tags and a live preview; the fields of custom and image occlusion notes are
-// edited as plain fields. Ctrl or Cmd + Enter saves.
+// Create or edit a note (F-CARD-1..4, F-CARD-6): Basic, Cloze, a custom note
+// type or Image Occlusion, with tags and a live preview. Ctrl or Cmd + Enter
+// saves.
 
-import { useId, useRef, useState, type SubmitEvent, type KeyboardEvent, type RefObject } from "react";
+import { lazy, Suspense, useId, useRef, useState, type KeyboardEvent, type RefObject, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { describeError } from "../api/client";
-import { notes } from "../api/endpoints";
-import type { Fields, Note, NoteType } from "../api/types";
+import { notes, noteTypes, type NoteExtras } from "../api/endpoints";
+import type { Fields, Note, NoteType, Occlusion } from "../api/types";
 import { CardContent, ConfirmButton, ErrorText, Loading } from "../components/ui";
 import { cardSides } from "../lib/cardSides";
 import { clozeNumbers, nextClozeNumber } from "../lib/cloze";
 import { parseTags } from "../lib/text";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
-import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 interface EditorProps {
   deckId: string;
@@ -30,6 +30,20 @@ const FIELD_LABELS: Record<string, string> = { header: "Header", back_extra: "Ba
 function fieldLabel(name: string): string {
   return FIELD_LABELS[name] ?? name;
 }
+
+const TYPES: { type: NoteType; label: string }[] = [
+  { type: "basic", label: "Basic" },
+  { type: "cloze", label: "Cloze" },
+  { type: "custom", label: "Custom" },
+  { type: "image_occlusion", label: "Image occlusion" },
+];
+
+const OCCLUSION_FIELDS = ["header", "back_extra"];
+
+// The mask editor loads only when an image occlusion note is opened.
+const OcclusionEditor = lazy(() =>
+  import("../occlusion/OcclusionEditor").then((module) => ({ default: module.OcclusionEditor })),
+);
 
 function TextArea({
   label,
@@ -77,12 +91,23 @@ export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: Edi
   const [text, setText] = useState(initial?.fields.text ?? "");
   const [extra, setExtra] = useState(initial?.fields.extra ?? "");
   const [others, setOthers] = useState<Fields>(initial?.fields ?? {});
+  const [typeId, setTypeId] = useState(initial?.note_type_id ?? "");
+  const [occlusion, setOcclusion] = useState<Occlusion | null>(initial?.occlusion ?? null);
   const [tags, setTags] = useState(initial?.tags.join(" ") ?? "");
   const clozeRef = useRef<HTMLTextAreaElement>(null);
   const submit = useSubmit();
 
-  const generic = noteType === "custom" || noteType === "image_occlusion";
-  const own: Fields = noteType === "basic" ? { front, back } : noteType === "cloze" ? { text, extra } : others;
+  const custom = noteType === "custom";
+  const types = useResource(() => (custom ? noteTypes.list() : Promise.resolve([])), custom ? "note-types" : "none");
+  const definition = (types.data ?? []).find((t) => t.id === typeId);
+  const generic = custom || noteType === "image_occlusion";
+  const fieldNames = custom ? (definition?.fields ?? Object.keys(others)) : OCCLUSION_FIELDS;
+  const own: Fields =
+    noteType === "basic"
+      ? { front, back }
+      : noteType === "cloze"
+        ? { text, extra }
+        : Object.fromEntries(fieldNames.map((name) => [name, others[name] ?? ""]));
   // Fields this editor does not show (from an import, say) are kept as they are.
   const fields: Fields = { ...initial?.fields, ...own };
   const numbers = noteType === "cloze" ? clozeNumbers(text) : [];
@@ -91,8 +116,11 @@ export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: Edi
       ? front.trim() !== "" && back.trim() !== ""
       : noteType === "cloze"
         ? numbers.length > 0
-        : noteType === "image_occlusion" || Object.values(others).some((value) => value.trim() !== "");
-  const preview = cardSides(noteType, fields, numbers[0] ?? 1);
+        : custom
+          ? (editing || definition !== undefined) && Object.values(own).some((value) => value.trim() !== "")
+          : occlusion !== null && occlusion.masks.length > 0;
+  const template = definition?.templates[0];
+  const preview = cardSides(noteType, fields, template?.ordinal ?? numbers[0] ?? 1, template);
 
   const addDeletion = (): void => {
     const area = clozeRef.current;
@@ -110,15 +138,19 @@ export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: Edi
     }
     void submit.run(async () => {
       const tagList = parseTags(tags);
+      const masks = noteType === "image_occlusion" && occlusion !== null ? occlusion : undefined;
       if (initial === undefined) {
-        const made = await notes.create(deckId, noteType, fields, tagList);
+        const extras: NoteExtras = custom ? { note_type_id: typeId } : masks === undefined ? {} : { occlusion: masks };
+        const made = await notes.create(deckId, noteType, fields, tagList, extras);
         setFront("");
         setBack("");
         setText("");
         setExtra("");
+        setOthers({});
+        setOcclusion(null);
         onSaved(`Added ${made.length} card${made.length === 1 ? "" : "s"}.`);
       } else {
-        await notes.update(initial.id, fields, tagList);
+        await notes.update(initial.id, fields, tagList, masks);
         onSaved("Saved.");
       }
     });
@@ -139,8 +171,52 @@ export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: Edi
   return (
     <form onSubmit={onSubmit} onKeyDown={onKeyDown} className={withPreview ? "editor" : "editor single"}>
       <div className="stack">
+        <fieldset className="segmented" disabled={editing}>
+          <legend>Card type</legend>
+          {TYPES.map(({ type, label }) => (
+            <label key={type}>
+              <input
+                type="radio"
+                name="note-type"
+                value={type}
+                checked={noteType === type}
+                onChange={() => {
+                  setNoteType(type);
+                }}
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+        {custom && !editing ? (
+          <>
+            <ErrorText message={types.error} />
+            {types.data === undefined ? null : types.data.length === 0 ? (
+              <p className="muted">
+                No custom note types yet. <Link to="/note-types/new">Create one</Link> first.
+              </p>
+            ) : (
+              <label className="field">
+                <span>Note type</span>
+                <select
+                  value={typeId}
+                  onChange={(event) => {
+                    setTypeId(event.target.value);
+                  }}
+                >
+                  <option value="">Choose a note type</option>
+                  {types.data.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </>
+        ) : null}
         {generic ? (
-          Object.keys(others).map((name) => (
+          fieldNames.map((name) => (
             <TextArea
               key={name}
               label={fieldLabel(name)}
@@ -150,26 +226,7 @@ export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: Edi
               }}
             />
           ))
-        ) : (
-          <fieldset className="segmented" disabled={editing}>
-            <legend>Card type</legend>
-            {(["basic", "cloze"] as const).map((type) => (
-              <label key={type}>
-                <input
-                  type="radio"
-                  name="note-type"
-                  value={type}
-                  checked={noteType === type}
-                  onChange={() => {
-                    setNoteType(type);
-                  }}
-                />
-                {type === "basic" ? "Basic" : "Cloze"}
-              </label>
-            ))}
-          </fieldset>
-        )}
-        {generic ? null : noteType === "basic" ? (
+        ) : noteType === "basic" ? (
           <>
             <TextArea label="Front" value={front} onChange={setFront} hint="Markdown and $math$ are supported." />
             <TextArea label="Back" value={back} onChange={setBack} />
@@ -196,6 +253,11 @@ export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: Edi
             <TextArea label="Extra" value={extra} onChange={setExtra} hint="Shown with the answer. Optional." />
           </>
         )}
+        {noteType === "image_occlusion" ? (
+          <Suspense fallback={<Loading label="Loading the image editor…" />}>
+            <OcclusionEditor occlusion={occlusion} onChange={setOcclusion} />
+          </Suspense>
+        ) : null}
         <div className="field">
           <label htmlFor="note-tags">Tags</label>
           <input
@@ -221,7 +283,7 @@ export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: Edi
           </span>
         </div>
       </div>
-      {withPreview && noteType !== "custom" ? (
+      {withPreview && (!custom || template !== undefined) ? (
         <aside className="preview" aria-label="Preview">
           <h2>Preview</h2>
           <CardContent markdown={preview.front} />

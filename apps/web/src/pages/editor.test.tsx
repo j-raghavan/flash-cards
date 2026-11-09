@@ -141,7 +141,8 @@ describe("edit card", () => {
     const { unmount } = renderApp("/notes/n1/edit");
     const user = userEvent.setup();
     const meaning = await screen.findByLabelText("Meaning");
-    expect(screen.queryByRole("radio", { name: "Basic" })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Custom" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Custom" })).toBeDisabled();
     expect(screen.queryByRole("complementary", { name: "Preview" })).not.toBeInTheDocument();
     await user.clear(screen.getByLabelText("Word"));
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
@@ -153,15 +154,26 @@ describe("edit card", () => {
       tags: ["bio", "ch::1"],
     });
     unmount();
-    mockApi({
+    const occlusion = { image_id: "m1", masks: [{ id: 1, left: 0.1, top: 0.1, width: 0.2, height: 0.2 }] };
+    const second = mockApi({
       ...me,
-      "GET /notes/n1": { body: note({ note_type: "image_occlusion", fields: { header: "Heart", back_extra: "" } }) },
+      "GET /notes/n1": {
+        body: note({ note_type: "image_occlusion", fields: { header: "Heart", back_extra: "" }, occlusion }),
+      },
+      "PATCH /notes/n1": { body: note() },
     });
     renderApp("/notes/n1/edit");
     expect(await screen.findByLabelText("Header")).toHaveValue("Heart");
     expect(screen.getByLabelText("Back extra")).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
     expect(screen.queryByLabelText("Front")).not.toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "The image to hide parts of" })).toHaveAttribute("src", "/api/media/m1");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(second.find((c) => c.method === "PATCH")?.body).toEqual({
+      fields: { header: "Heart", back_extra: "" },
+      tags: ["bio", "ch::1"],
+      occlusion,
+    });
   });
 
   it("shows a note that cannot load", async () => {
