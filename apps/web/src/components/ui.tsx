@@ -25,13 +25,24 @@ export function Loading({ label = "Loading…" }: { label?: string }) {
   );
 }
 
-/** Rendered, sanitized card text. */
-export function CardContent({ markdown, className }: { markdown: string; className?: string }) {
+/**
+ * Rendered, sanitized card text. Pass aiOutput for model output: its links are
+ * shown as text with their address, never as something to click.
+ */
+export function CardContent({
+  markdown,
+  className,
+  aiOutput = false,
+}: {
+  markdown: string;
+  className?: string;
+  aiOutput?: boolean;
+}) {
   return (
     <div
       className={className === undefined ? "card-content" : `card-content ${className}`}
       // renderMarkdown sanitizes its output with DOMPurify.
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) }}
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown, { linksAsText: aiOutput }) }}
     />
   );
 }

@@ -536,6 +536,10 @@ class QuotaRepository(Protocol):
         """How much the owner has reserved in the period."""
         ...
 
+    async def used_by_owner(self, period: str) -> dict[str, int]:
+        """Pages reserved in the period, by owner, for every owner who reserved any."""
+        ...
+
     async def delete_for_owner(self, owner_id: str) -> None:
         """Delete the owner's quota counters (account deletion, F-IMP-5)."""
         ...
