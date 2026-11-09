@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Start AI generation from a PDF or image (F-AI-1, F-AI-3). Generation runs in
+// the background; the job page shows progress and the drafts to review.
+
+import { useState, type SubmitEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+
+import { ai } from "../api/endpoints";
+import type { Thoroughness } from "../api/types";
+import { ErrorText } from "../components/ui";
+import { recentJobs, rememberJob } from "../lib/recentJobs";
+import { useSubmit } from "../lib/useSubmit";
+
+const MAX_BYTES = 25 * 1024 * 1024;
+const ACCEPTED = ["application/pdf", "image/png", "image/jpeg"];
+
+const LEVELS: { value: Thoroughness; label: string; hint: string }[] = [
+  { value: "concise", label: "Concise", hint: "Key ideas only." },
+  { value: "standard", label: "Standard", hint: "A balanced set." },
+  { value: "thorough", label: "Thorough", hint: "Detailed coverage." },
+];
+
+export function GeneratePage() {
+  const { deckId = "" } = useParams();
+  const navigate = useNavigate();
+  const [file, setFile] = useState<File | null>(null);
+  const [level, setLevel] = useState<Thoroughness>("standard");
+  const submit = useSubmit();
+  const recent = recentJobs(deckId);
+
+  const onSubmit = (event: SubmitEvent): void => {
+    event.preventDefault();
+    if (file === null) {
+      return;
+    }
+    if (!ACCEPTED.includes(file.type)) {
+      submit.setError("Choose a PDF, PNG or JPEG file.");
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      submit.setError("That file is larger than 25 MB.");
+      return;
+    }
+    void submit.run(async () => {
+      const job = await ai.generate(deckId, file, level);
+      rememberJob({ jobId: job.id, deckId, fileName: file.name, startedAt: job.created_at });
+      void navigate(`/jobs/${job.id}?deck=${encodeURIComponent(deckId)}`);
+    });
+  };
+
+  return (
+    <section>
+      <nav aria-label="Breadcrumb" className="breadcrumb">
+        <Link to={`/decks/${deckId}`}>Back to deck</Link>
+      </nav>
+      <h1>Generate cards from a file</h1>
+      <p className="muted">
+        Upload lecture slides, a PDF or a photo of your notes. The AI drafts cards; nothing is added to the deck until
+        you approve it.
+      </p>
+      <form onSubmit={onSubmit} className="stack">
+        <label className="field">
+          <span>File (PDF, PNG or JPEG, up to 25 MB)</span>
+          <input
+            type="file"
+            accept={ACCEPTED.join(",")}
+            onChange={(event) => {
+              setFile(event.target.files?.[0] ?? null);
+              submit.setError(null);
+            }}
+          />
+        </label>
+        <fieldset className="segmented">
+          <legend>Thoroughness</legend>
+          {LEVELS.map((option) => (
+            <label key={option.value} title={option.hint}>
+              <input
+                type="radio"
+                name="thoroughness"
+                value={option.value}
+                checked={level === option.value}
+                onChange={() => {
+                  setLevel(option.value);
+                }}
+              />
+              {option.label}
+            </label>
+          ))}
+        </fieldset>
+        <ErrorText message={submit.error} />
+        <div>
+          <button type="submit" className="button primary" disabled={file === null || submit.busy}>
+            {submit.busy ? "Uploading…" : "Generate drafts"}
+          </button>
+        </div>
+      </form>
+      {recent.length > 0 ? (
+        <>
+          <h2>Recent generations</h2>
+          <ul className="plain-list">
+            {recent.map((job) => (
+              <li key={job.jobId}>
+                <Link to={`/jobs/${job.jobId}?deck=${encodeURIComponent(deckId)}`}>{job.fileName}</Link>{" "}
+                <span className="muted">{new Date(job.startedAt).toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </section>
+  );
+}
