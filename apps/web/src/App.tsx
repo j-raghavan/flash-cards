@@ -20,6 +20,7 @@ import { StudyPage } from "./pages/StudyPage";
 
 // Screens with charts or editors load on first visit, keeping the start small.
 const ProgressPage = lazy(() => import("./progress/ProgressPage").then((m) => ({ default: m.ProgressPage })));
+const MockExamPage = lazy(() => import("./aiStudy/MockExamPage").then((m) => ({ default: m.MockExamPage })));
 const AdminPage = lazy(() => import("./admin/AdminPage").then((m) => ({ default: m.AdminPage })));
 const AccountPage = lazy(() => import("./account/AccountPage").then((m) => ({ default: m.AccountPage })));
 const noteTypePages = () => import("./noteTypes/NoteTypesPage");
@@ -57,6 +58,14 @@ export function AppRoutes() {
         <Route path="/decks/:deckId/study" element={<StudyPage />} />
         <Route path="/decks/:deckId/notes/new" element={<NewNotePage />} />
         <Route path="/decks/:deckId/generate" element={<GeneratePage />} />
+        <Route
+          path="/decks/:deckId/exam"
+          element={
+            <Lazy>
+              <MockExamPage />
+            </Lazy>
+          }
+        />
         <Route path="/notes/:noteId/edit" element={<EditNotePage />} />
         <Route path="/cards" element={<BrowserPage />} />
         <Route path="/jobs/:jobId" element={<JobPage />} />

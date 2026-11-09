@@ -901,3 +901,83 @@ h2:focus {
     animation: none !important;
   }
 }
+
+/* AI study: mock exams, summaries, document chat and typed answers. */
+.ai-label {
+  margin: 0.25rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.card-content.inline,
+.card-content.inline p {
+  display: inline;
+  margin: 0;
+}
+
+.exam-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-left: 1.5rem;
+}
+
+.exam-topic {
+  font-size: 0.9rem;
+}
+
+.exam-timer {
+  position: sticky;
+  top: 0;
+  padding: 4px 0;
+  background: var(--bg);
+}
+
+.typed-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-question {
+  margin: 0;
+  font-weight: 600;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-answer {
+  padding-left: 12px;
+  border-left: 3px solid var(--line);
+}
+
+.citations {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.study-mode {
+  margin: 0 0 12px;
+}
+
+.evaluation {
+  margin: 12px 0;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.suggested {
+  font-size: 0.85rem;
+}
