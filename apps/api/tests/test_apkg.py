@@ -226,3 +226,154 @@ def test_oversized_collection_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(apkg, "MAX_COLLECTION_BYTES", 10)
     with pytest.raises(UnsupportedPackage):
         ApkgReader().read(_apkg(_collection()))  # a real SQLite file exceeds 10 bytes
+
+
+# --- F-IMP-2: scheduling columns, review history and hardening -----------------
+
+FULL_CARDS = [
+    # nid, did, ord, id, type, queue, due, ivl, factor, reps, lapses, odid, flags
+    (10, 100, 0, 1000, 2, -1, 300, 20, 2300, 7, 1, 0, 0b1011),
+    (11, 100, 0, 1001, 0, 0, 1, 0, 0, 0, 0, 0, 0),
+]
+REVLOG = [
+    # id (ms), cid, ease, type
+    (1_700_000_000_000, 1000, 3, 0),
+    (1_700_000_100_000, 1000, 1, 1),
+    (1_700_000_200_000, 4242, 3, 1),  # a card that is not in the package
+]
+
+
+def _sqlite_bytes(statements: Sequence[tuple[str, Sequence[Sequence[object]]]]) -> bytes:
+    fd, path = tempfile.mkstemp(suffix=".anki2")
+    os.close(fd)
+    try:
+        conn = sqlite3.connect(path)
+        for sql, rows in statements:
+            if rows:
+                conn.executemany(sql, rows)
+            else:
+                conn.execute(sql)
+        conn.commit()
+        conn.close()
+        with open(path, "rb") as handle:
+            return handle.read()
+    finally:
+        os.unlink(path)
+
+
+def _full_collection(
+    *,
+    revlog: Sequence[Sequence[object]] | None = REVLOG,
+    crt: object = 1_690_000_000,
+    with_row: bool = True,
+    models: object = MODELS,
+    decks: object = DECKS,
+) -> bytes:
+    statements: list[tuple[str, Sequence[Sequence[object]]]] = [
+        ("CREATE TABLE col (crt INTEGER, models TEXT, decks TEXT)", ()),
+        ("CREATE TABLE notes (id INTEGER, guid TEXT, mid INTEGER, tags TEXT, flds TEXT)", ()),
+        ("INSERT INTO notes VALUES (?, ?, ?, ?, ?)", NOTES),
+        (
+            "CREATE TABLE cards (nid INTEGER, did INTEGER, ord INTEGER, id INTEGER, "
+            "type INTEGER, queue INTEGER, due INTEGER, ivl INTEGER, factor INTEGER, "
+            "reps INTEGER, lapses INTEGER, odid INTEGER, flags INTEGER)",
+            (),
+        ),
+        ("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", FULL_CARDS),
+    ]
+    if with_row:
+        statements.append(
+            ("INSERT INTO col VALUES (?, ?, ?)", [(crt, _as_text(models), _as_text(decks))])
+        )
+    if revlog is not None:
+        statements.append(
+            ("CREATE TABLE revlog (id INTEGER, cid INTEGER, ease INTEGER, type INTEGER)", ())
+        )
+        if revlog:
+            statements.append(("INSERT INTO revlog VALUES (?, ?, ?, ?)", revlog))
+    return _sqlite_bytes(statements)
+
+
+def test_reads_scheduling_columns_history_and_creation_time() -> None:
+    package = ApkgReader().read(_apkg(_full_collection(), extra={"0": b"img", "1": b"snd"}))
+
+    assert package.created_at_s == 1_690_000_000
+    assert package.media_count == 2
+    review_card = next(card for card in package.cards if card.id == 1000)
+    assert (review_card.card_type, review_card.queue, review_card.due) == (2, -1, 300)
+    assert (review_card.interval, review_card.factor) == (20, 2300)
+    assert (review_card.reps, review_card.lapses, review_card.flag) == (7, 1, 3)
+    # Only the history of cards in the package is kept, oldest first.
+    assert [(r.card_id, r.ease, r.kind) for r in package.reviews] == [(1000, 3, 0), (1000, 1, 1)]
+    assert package.history_truncated is False
+
+
+def test_minimal_cards_table_reads_every_card_as_new() -> None:
+    package = ApkgReader().read(_apkg(_collection()))
+    assert all(card.card_type == 0 and card.id == 0 for card in package.cards)
+    assert package.reviews == () and package.created_at_s is None and package.media_count == 0
+
+
+def test_collection_without_revlog_has_no_history() -> None:
+    package = ApkgReader().read(_apkg(_full_collection(revlog=None)))
+    assert package.reviews == () and package.history_truncated is False
+
+
+def test_history_over_the_limit_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(apkg, "MAX_REVIEWS", 2)
+    package = ApkgReader().read(_apkg(_full_collection()))
+    assert package.reviews == () and package.history_truncated is True
+    assert len(package.cards) == 2  # the cards still import
+
+
+def test_empty_full_collection_is_invalid() -> None:
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_full_collection(with_row=False)))
+
+
+def test_non_integer_creation_time_is_invalid() -> None:
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_full_collection(crt="soon")))
+
+
+def test_non_integer_revlog_value_is_invalid() -> None:
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_full_collection(revlog=[(None, 1000, 3, 0)])))
+
+
+def test_template_count_and_filtered_decks_are_read() -> None:
+    models = {
+        "1": {
+            "name": "Reversed",
+            "type": 0,
+            "flds": [{"name": "F"}, {"name": "B"}],
+            "tmpls": [{"name": "Card 1"}, {"name": "Card 2"}],
+        },
+        "2": {"name": "Cloze", "type": 1, "flds": [{"name": "Text"}], "tmpls": "odd"},
+    }
+    decks = {"100": {"name": "Biology"}, "200": {"name": "Cram", "dyn": 1}}
+    package = ApkgReader().read(_apkg(_full_collection(models=models, decks=decks)))
+    assert package.note_types[1].template_count == 2
+    assert package.note_types[2].template_count == 1
+    assert package.decks[200].is_filtered and not package.decks[100].is_filtered
+
+
+def test_a_view_in_place_of_a_table_is_rejected() -> None:
+    collection = _sqlite_bytes(
+        [
+            ("CREATE TABLE col (models TEXT, decks TEXT)", ()),
+            ("INSERT INTO col VALUES (?, ?)", [(json.dumps(MODELS), json.dumps(DECKS))]),
+            ("CREATE TABLE real_notes (id INTEGER, guid TEXT, mid INTEGER, flds TEXT)", ()),
+            ("CREATE VIEW notes AS SELECT * FROM real_notes", ()),
+            ("CREATE TABLE cards (nid INTEGER, did INTEGER, ord INTEGER)", ()),
+        ]
+    )
+    with pytest.raises(UnsupportedPackage):
+        ApkgReader().read(_apkg(collection))
+
+
+def test_runaway_queries_are_interrupted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(apkg, "_SQL_STEP_GRANULARITY", 1)
+    monkeypatch.setattr(apkg, "MAX_SQL_STEPS", 5)
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(_apkg(_full_collection()))

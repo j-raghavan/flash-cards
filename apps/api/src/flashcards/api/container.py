@@ -235,7 +235,16 @@ def build_services(repos: Repositories) -> Container:
     )
     goal_service = GoalService(decks, repos.goals, repos.clock)
     planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)
-    apkg_import = ApkgImportService(repos.package_reader, decks, notes)
+    apkg_import = ApkgImportService(
+        repos.package_reader,
+        decks,
+        notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+        repos.scheduler,
+        repos.clock,
+    )
     account = AccountService(
         library,
         repos.decks,

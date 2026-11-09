@@ -78,7 +78,16 @@ def test_import_creates_a_deck_with_cards(member: TestClient) -> None:
     resp = _upload(member, _apkg_bytes())
     assert resp.status_code == 201
     report = resp.json()
-    assert report == {"decks_created": 1, "notes_imported": 2, "notes_skipped": 0}
+    assert report == {
+        "decks_created": 1,
+        "notes_imported": 2,
+        "notes_skipped": 0,
+        "notes_not_selected": 0,
+        "cards_scheduled": 0,
+        "reviews_imported": 0,
+        "dry_run": False,
+        "unsupported": [],
+    }
 
     decks = member.get("/decks").json()
     spanish = next(deck for deck in decks if deck["name"] == "Spanish")
@@ -99,3 +108,39 @@ def test_import_rejects_oversized_upload(
 ) -> None:
     monkeypatch.setattr("flashcards.api.routers.imports.MAX_UPLOAD_BYTES", 10)
     assert _upload(member, _apkg_bytes()).status_code == 413
+
+
+def test_dry_run_reports_without_importing(member: TestClient) -> None:
+    resp = member.post(
+        "/import/apkg",
+        files={"file": ("deck.apkg", _apkg_bytes(), "application/octet-stream")},
+        data={"dry_run": "true"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["dry_run"] is True and resp.json()["notes_imported"] == 2
+    assert member.get("/decks").json() == []
+
+
+def test_import_selection_by_deck_and_tag(member: TestClient) -> None:
+    resp = member.post(
+        "/import/apkg",
+        files={"file": ("deck.apkg", _apkg_bytes(), "application/octet-stream")},
+        data={"deck": ["Biology", "Chemistry"], "tag": ["verbs"]},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["notes_imported"] == 0 and resp.json()["notes_not_selected"] == 2
+    assert member.get("/decks").json() == []
+
+
+@pytest.mark.parametrize(
+    "data",
+    [{"deck": ["   "]}, {"tag": ["x" * 201]}, {"deck": [f"d{i}" for i in range(51)]}],
+)
+def test_import_rejects_a_bad_selection(member: TestClient, data: dict[str, list[str]]) -> None:
+    resp = member.post(
+        "/import/apkg",
+        files={"file": ("deck.apkg", _apkg_bytes(), "application/octet-stream")},
+        data=data,
+    )
+    assert resp.status_code == 422
+
