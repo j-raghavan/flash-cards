@@ -105,7 +105,7 @@ def test_login_unknown_email_is_401(client: TestClient) -> None:
 def test_login_suspended_account_is_403(app: FastAPI, client: TestClient) -> None:
     container = app.state.container
     now = container.clock.now()
-    hashed = Argon2PasswordHasher().hash(PASSWORD)
+    hashed = asyncio.run(Argon2PasswordHasher().hash(PASSWORD))
     asyncio.run(
         container.user_repo.add(
             User(

@@ -34,6 +34,7 @@ from flashcards.api.schemas import (
     TranscriptGenerateRequest,
     YouTubeGenerateRequest,
 )
+from flashcards.api.uploads import read_capped
 from flashcards.domain.ai import Thoroughness
 from flashcards.domain.jobs import AiJob, JobNotFound
 
@@ -50,11 +51,7 @@ async def start_generation(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> JobOut:
-    data = await file.read()
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File too large."
-        )
+    data = await read_capped(file, MAX_UPLOAD_BYTES)
     job = await container.generation.start(
         owner_id=caller.user.id, deck_id=deck_id, data=data, thoroughness=thoroughness
     )

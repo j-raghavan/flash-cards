@@ -3,16 +3,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from pydantic import BaseModel
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, current_user, get_container
+from flashcards.api.uploads import read_capped
 
 router = APIRouter(prefix="/media", tags=["media"])
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-_CHUNK = 1024 * 1024
 # Private, immutable (addressed by a random id), and never sniffed into markup.
 _SERVE_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -26,28 +26,13 @@ class MediaOut(BaseModel):
     content_type: str
 
 
-async def _read_capped(file: UploadFile, limit: int) -> bytes:
-    # Read in bounded chunks and abort once over the limit, so a huge upload never
-    # materializes fully in memory before the size check.
-    chunks: list[bytes] = []
-    total = 0
-    while chunk := await file.read(_CHUNK):
-        total += len(chunk)
-        if total > limit:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File too large."
-            )
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=MediaOut)
 async def upload_media(
     file: UploadFile = File(...),
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> MediaOut:
-    data = await _read_capped(file, MAX_UPLOAD_BYTES)
+    data = await read_capped(file, MAX_UPLOAD_BYTES)
     asset = await container.media.upload(owner_id=caller.user.id, data=data)
     return MediaOut(id=asset.id, content_type=asset.content_type)
 

@@ -34,10 +34,10 @@ class FakeClock:
 class FakeHasher:
     """Deterministic stand-in so service tests stay fast and assertable."""
 
-    def hash(self, password: str) -> str:
+    async def hash(self, password: str) -> str:
         return f"hashed:{password}"
 
-    def verify(self, password_hash: str, password: str) -> bool:
+    async def verify(self, password_hash: str, password: str) -> bool:
         return password_hash == f"hashed:{password}"
 
 

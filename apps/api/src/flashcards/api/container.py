@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from flashcards.adapters.apkg import ApkgReader
+from flashcards.adapters.deck_export import FileDeckExportWriter
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
@@ -44,6 +45,7 @@ from flashcards.adapters.memory import (
     NullUnitOfWork,
     SystemClock,
 )
+from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.application.account_email_service import AccountEmailService
@@ -57,6 +59,7 @@ from flashcards.application.bulk_card_service import BulkCardService
 from flashcards.application.card_browser_service import CardBrowserService
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.chat_service import ChatService
+from flashcards.application.deck_export_service import DeckExportService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
 from flashcards.application.evaluation_service import EvaluationService
@@ -82,6 +85,7 @@ from flashcards.domain.ports import (
     AuditRepository,
     CardRepository,
     Clock,
+    DeckExportWriter,
     DeckRepository,
     DocumentExtractor,
     DraftCardRepository,
@@ -115,6 +119,7 @@ from flashcards.domain.ports import (
     UserTokenRepository,
 )
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
 
 
@@ -159,8 +164,13 @@ class Repositories:
     dummy_hash: str | None = None
     # Where links in emails point (the web client).
     public_base_url: str = "http://localhost:5173"
+    # Most pages (or transcript chunks) one AI source document may have
+    # (FLASHCARDS_MAX_UPLOAD_PAGES).
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES
     # Lets the generation worker commit progress as it goes (ADR 0012).
     unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
+    # Serializes deck exports (F-IMP-4); stateless, so every provider shares it.
+    deck_export_writer: DeckExportWriter = field(default_factory=FileDeckExportWriter)
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +195,7 @@ class Container:
     planner: PlannerService
     progress: ProgressService
     apkg_import: ApkgImportService
+    deck_export: DeckExportService
     account: AccountService
     media: MediaService
     evaluation: EvaluationService
@@ -230,6 +241,7 @@ def build_services(repos: Repositories) -> Container:
         repos.ai_jobs,
         repos.job_queue,
         repos.clock,
+        max_pages=repos.max_upload_pages,
     )
     draft_review = DraftReviewService(repos.ai_jobs, repos.draft_cards, notes)
     card_generation = CardGenerationService(
@@ -240,6 +252,7 @@ def build_services(repos: Repositories) -> Container:
         repos.llm,
         repos.clock,
         repos.unit_of_work,
+        max_pages=repos.max_upload_pages,
     )
     note_types = NoteTypeService(
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock
@@ -254,7 +267,25 @@ def build_services(repos: Repositories) -> Container:
         progress,
         repos.clock,
     )
-    apkg_import = ApkgImportService(repos.package_reader, decks, notes)
+    apkg_import = ApkgImportService(
+        repos.package_reader,
+        decks,
+        notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+        repos.scheduler,
+        repos.clock,
+    )
+    deck_export = DeckExportService(
+        decks,
+        repos.notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+        repos.deck_export_writer,
+        repos.clock,
+    )
     account = AccountService(
         library,
         repos.decks,
@@ -311,6 +342,7 @@ def build_services(repos: Repositories) -> Container:
         repos.passages,
         repos.llm,
         ai_budget,
+        max_pages=repos.max_upload_pages,
     )
     sharing = SharingService(
         decks,
@@ -369,6 +401,7 @@ def build_services(repos: Repositories) -> Container:
         planner=planner,
         progress=progress,
         apkg_import=apkg_import,
+        deck_export=deck_export,
         account=account,
         media=media,
         evaluation=evaluation,
@@ -392,12 +425,14 @@ def build_container(
     transcripts: TranscriptProvider | None = None,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
     llm and job_queue can be supplied so a caller can inject a real LLM or share
     one worker queue; both default to the no-op/in-process implementations.
     """
+    hasher = Argon2PasswordHasher()
     cards = InMemoryCardRepository()
     schedules = InMemoryScheduleRepository()
     review_logs = InMemoryReviewLogRepository()
@@ -405,7 +440,8 @@ def build_container(
     return build_services(
         Repositories(
             clock=SystemClock(),
-            hasher=Argon2PasswordHasher(),
+            hasher=hasher,
+            dummy_hash=hasher.dummy_hash(),
             scheduler=FsrsScheduler(),
             invites=InMemoryInviteRepository(),
             users=InMemoryUserRepository(),
@@ -424,7 +460,7 @@ def build_container(
             job_queue=job_queue or InProcessJobQueue(),
             llm=llm or NullLLMProvider(),
             goals=goals,
-            package_reader=ApkgReader(),
+            package_reader=BlockingPackageReader(ApkgReader().read),
             media=InMemoryMediaRepository(),
             media_sniffer=PuremagicMediaSniffer(),
             mock_exams=InMemoryMockExamRepository(),
@@ -441,5 +477,6 @@ def build_container(
             plan_baselines=InMemoryPlanBaselineRepository(goals),
             study_stats=InMemoryStudyStatsRepository(cards, schedules, review_logs),
             public_base_url=public_base_url,
+            max_upload_pages=max_upload_pages,
         )
     )
