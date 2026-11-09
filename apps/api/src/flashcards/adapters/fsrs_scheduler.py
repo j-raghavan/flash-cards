@@ -24,6 +24,10 @@ _TO_DOMAIN_STATE = {
 _FROM_DOMAIN_STATE = {domain: fsrs for fsrs, domain in _TO_DOMAIN_STATE.items()}
 
 DEFAULT_RETENTION = 0.9
+# py-fsrs stamps a Card built without an id with the current time and then sleeps
+# 1 ms to keep ids unique. We never use that id, so a fixed one avoids the sleep,
+# which otherwise blocks the event loop on every review and import replay.
+_UNUSED_CARD_ID = 0
 
 
 class FsrsScheduler:
@@ -35,7 +39,8 @@ class FsrsScheduler:
         )
 
     def new_schedule(self, card_id: str, now: datetime) -> CardSchedule:
-        return self._to_domain(card_id, FsrsCard(due=now, last_review=None))
+        fresh = FsrsCard(card_id=_UNUSED_CARD_ID, due=now, last_review=None)
+        return self._to_domain(card_id, fresh)
 
     def review(self, schedule: CardSchedule, rating: Rating, now: datetime) -> CardSchedule:
         reviewed, _log = self._engine.review_card(
@@ -56,6 +61,7 @@ class FsrsScheduler:
 
     def _from_domain(self, schedule: CardSchedule) -> FsrsCard:
         return FsrsCard(
+            card_id=_UNUSED_CARD_ID,
             state=_FROM_DOMAIN_STATE[schedule.state],
             step=schedule.step,
             stability=schedule.stability,
