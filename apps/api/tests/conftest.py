@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Callable, Iterator
+from functools import partialmethod
 
 # Testcontainers' Ryuk reaper fails to start under some Docker Desktop setups;
 # the container context managers clean up their own containers, so disable it.
@@ -22,6 +23,19 @@ from flashcards.config import Settings
 from flashcards.domain.invites import Role
 
 PASSWORD = "correct-horse-battery"
+
+
+# The header the web client sends on every request. The CSRF middleware accepts an
+# unsafe request that carries no Origin, Sec-Fetch-Site or Referer only with it
+# (ADR 0017), so every test client sends it, as a non-browser client must.
+WEB_CLIENT_HEADERS = {"X-Requested-With": "fetch"}
+
+
+@pytest.fixture(autouse=True)
+def _clients_identify_as_the_web_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        TestClient, "__init__", partialmethod(TestClient.__init__, headers=WEB_CLIENT_HEADERS)
+    )
 
 
 @pytest.fixture(scope="session")

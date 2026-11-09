@@ -103,6 +103,14 @@ def test_generate_rejects_unsupported_media(member: tuple[TestClient, str]) -> N
     assert resp.status_code == 415
 
 
+def test_generate_rejects_a_corrupt_pdf(member: tuple[TestClient, str]) -> None:
+    client, _ = member
+    deck_id = _make_deck(client)
+    resp = _upload(client, deck_id, b"%PDF-1.4\n" + b"\x00garbage" * 64)
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "The document could not be read."}
+
+
 def test_generate_rejects_too_many_pages(member: tuple[TestClient, str]) -> None:
     client, _ = member
     deck_id = _make_deck(client)
@@ -272,3 +280,20 @@ def test_generate_end_to_end_through_the_worker() -> None:
         )
         assert approved.status_code == 201
         assert len(client.get(f"/decks/{deck_id}/cards").json()) == 2
+
+
+def test_max_upload_pages_setting_sets_the_page_cap() -> None:
+    from pydantic import ValidationError
+
+    from flashcards.domain.invites import Role as _Role
+
+    app = create_app(Settings(environment="test", session_cookie_secure=False, max_upload_pages=2))
+    token = asyncio.run(app.state.container.invites.create(created_by="t", role=_Role.MEMBER))
+    client = TestClient(app)
+    body = {"token": token.raw_token, "email": "pages@example.com", "password": PASSWORD}
+    assert client.post("/auth/signup", json=body).status_code == 201
+    deck_id = _make_deck(client)
+    assert _upload(client, deck_id, _pdf(3)).status_code == 413
+    assert _upload(client, deck_id, _pdf(2)).status_code == 202
+    with pytest.raises(ValidationError):
+        Settings(max_upload_pages=0)

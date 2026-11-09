@@ -36,7 +36,7 @@ class FakeReader:
     def __init__(self, package: AnkiPackage) -> None:
         self._package = package
 
-    def read(self, data: bytes) -> AnkiPackage:
+    async def read(self, data: bytes) -> AnkiPackage:
         return self._package
 
 

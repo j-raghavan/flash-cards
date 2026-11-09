@@ -10,6 +10,7 @@ from flashcards.domain.ai import Thoroughness
 from flashcards.domain.jobs import (
     AiJob,
     IllegalJobTransition,
+    JobFailure,
     JobStatus,
     new_generation_job,
 )
@@ -52,9 +53,9 @@ def test_terminal_transitions() -> None:
     running = _job().started(NOW)
     assert running.succeeded(NOW).is_terminal
     assert _job().cancelled(NOW).is_terminal  # cancel is allowed from QUEUED
-    failed = running.failed("boom", NOW)
+    failed = running.failed(JobFailure.INTERNAL, NOW)
     assert failed.is_terminal
-    assert failed.error == "boom"
+    assert failed.error == JobFailure.INTERNAL.value
 
 
 def test_illegal_transitions_raise() -> None:
@@ -68,19 +69,19 @@ def test_illegal_transitions_raise() -> None:
         done.started(NOW)  # cannot restart a terminal job
     with pytest.raises(IllegalJobTransition):
         done.cancelled(NOW)
-    exhausted = _job(max_attempts=1).started(NOW).failed("e", NOW)
+    exhausted = _job(max_attempts=1).started(NOW).failed(JobFailure.INTERNAL, NOW)
     with pytest.raises(IllegalJobTransition):
         exhausted.retried(NOW)  # the attempt cap is enforced, not advisory
 
 
 def test_retry_spends_attempts_until_exhausted() -> None:
-    job = _job(max_attempts=2).started(NOW).failed("e", NOW)
+    job = _job(max_attempts=2).started(NOW).failed(JobFailure.INTERNAL, NOW)
     assert job.can_retry
     job = job.retried(NOW)
     assert job.status is JobStatus.QUEUED
     assert job.attempt == 2
     assert job.error is None
-    job = job.started(NOW).failed("e", NOW)
+    job = job.started(NOW).failed(JobFailure.INTERNAL, NOW)
     assert not job.can_retry  # attempt == max_attempts
 
 
@@ -143,3 +144,34 @@ async def test_list_running_returns_claimed_jobs() -> None:
     await repo.add(b)
     await repo.try_claim(a.id, NOW + timedelta(seconds=1))
     assert [j.id for j in await repo.list_running()] == [a.id]
+
+
+def test_public_error_never_exposes_raw_text() -> None:
+    from dataclasses import replace
+
+    job = _job()
+    assert job.public_error is None
+    failed = job.started(NOW).failed(JobFailure.QUOTA_EXCEEDED, NOW)
+    assert failed.public_error == JobFailure.QUOTA_EXCEEDED.value
+    # A row written before failures were categorized holds raw exception text.
+    legacy = replace(failed, error="anthropic.APIStatusError: key sk-123 revoked")
+    assert legacy.public_error == JobFailure.INTERNAL.value
+
+
+def test_requeue_after_interruption_spends_an_attempt() -> None:
+    running = _job(max_attempts=2).started(NOW).with_total(4, NOW).advanced(NOW)
+    queued = running.requeued_after_interruption(NOW)
+    assert queued.status is JobStatus.QUEUED
+    assert (queued.attempt, queued.max_attempts) == (2, 2)
+    assert queued.completed_units == 1  # resumes where it stopped
+    with pytest.raises(IllegalJobTransition):
+        queued.requeued_after_interruption(NOW)
+
+
+def test_an_interrupted_job_with_no_attempts_left_fails() -> None:
+    # A job that crashes the process every time it runs must not loop forever.
+    running = _job(max_attempts=1).started(NOW)
+    failed = running.requeued_after_interruption(NOW)
+    assert failed.status is JobStatus.FAILED
+    assert failed.error == JobFailure.INTERNAL.value
+    assert not failed.can_retry

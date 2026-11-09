@@ -29,6 +29,7 @@ from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import InMemoryJobQueue, SystemClock
+from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
     SqlAiJobRepository,
@@ -92,7 +93,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         job_queue=InMemoryJobQueue(),
         llm=NullLLMProvider(),
         goals=SqlGoalRepository(session),
-        package_reader=ApkgReader(),
+        package_reader=BlockingPackageReader(ApkgReader().read),
         media=SqlMediaRepository(session),
         media_sniffer=PuremagicMediaSniffer(),
         mock_exams=SqlMockExamRepository(session),

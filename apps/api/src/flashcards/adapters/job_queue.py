@@ -21,9 +21,15 @@ JobProcessor = Callable[[str], Awaitable[None]]
 class InProcessJobQueue:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._waiting: set[str] = set()
         self._worker: asyncio.Task[None] | None = None
 
     async def enqueue(self, job_id: str) -> None:
+        # Idempotent: a job already waiting is not queued twice, so the periodic
+        # recovery sweep can re-offer every QUEUED job without piling up duplicates.
+        if job_id in self._waiting:
+            return
+        self._waiting.add(job_id)
         await self._queue.put(job_id)
 
     def start(self, process: JobProcessor) -> None:
@@ -34,6 +40,7 @@ class InProcessJobQueue:
     async def _run(self, process: JobProcessor) -> None:
         while True:
             job_id = await self._queue.get()
+            self._waiting.discard(job_id)
             try:
                 await process(job_id)
             except Exception:  # one bad job must never kill the worker
