@@ -109,6 +109,7 @@ from flashcards.domain.ports import (
     UserTokenRepository,
 )
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
 
 
@@ -150,6 +151,9 @@ class Repositories:
     dummy_hash: str | None = None
     # Where links in emails point (the web client).
     public_base_url: str = "http://localhost:5173"
+    # Most pages (or transcript chunks) one AI source document may have
+    # (FLASHCARDS_MAX_UPLOAD_PAGES).
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES
     # Lets the generation worker commit progress as it goes (ADR 0012).
     unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
 
@@ -220,6 +224,7 @@ def build_services(repos: Repositories) -> Container:
         repos.ai_jobs,
         repos.job_queue,
         repos.clock,
+        max_pages=repos.max_upload_pages,
     )
     draft_review = DraftReviewService(repos.ai_jobs, repos.draft_cards, notes)
     card_generation = CardGenerationService(
@@ -230,6 +235,7 @@ def build_services(repos: Repositories) -> Container:
         repos.llm,
         repos.clock,
         repos.unit_of_work,
+        max_pages=repos.max_upload_pages,
     )
     note_types = NoteTypeService(
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock
@@ -292,6 +298,7 @@ def build_services(repos: Repositories) -> Container:
         repos.passages,
         repos.llm,
         ai_budget,
+        max_pages=repos.max_upload_pages,
     )
     sharing = SharingService(
         decks,
@@ -372,6 +379,7 @@ def build_container(
     transcripts: TranscriptProvider | None = None,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -416,5 +424,6 @@ def build_container(
             user_tokens=InMemoryUserTokenRepository(),
             mailer=mailer or LogMailer(show_content=True),
             public_base_url=public_base_url,
+            max_upload_pages=max_upload_pages,
         )
     )

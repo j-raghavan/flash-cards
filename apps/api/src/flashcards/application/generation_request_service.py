@@ -17,7 +17,7 @@ from flashcards.domain.ports import (
     QuotaRepository,
 )
 from flashcards.domain.quotas import QuotaExceeded, billing_period
-from flashcards.domain.sources import TooManyPages
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES, TooManyPages
 from flashcards.domain.transcripts import (
     TRANSCRIPT_MEDIA_TYPE,
     Transcript,
@@ -36,7 +36,7 @@ class GenerationRequestService:
         jobs: AiJobRepository,
         queue: JobQueue,
         clock: Clock,
-        max_pages: int = 20,
+        max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     ) -> None:
         self._decks = decks
         self._extractor = extractor

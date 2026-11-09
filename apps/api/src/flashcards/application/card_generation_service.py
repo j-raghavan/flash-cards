@@ -35,6 +35,7 @@ from flashcards.domain.ports import (
 )
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sources import (
+    DEFAULT_MAX_UPLOAD_PAGES,
     ExtractedPage,
     PageKind,
     TooManyPages,
@@ -95,7 +96,7 @@ class CardGenerationService:
         llm: LLMProvider,
         clock: Clock,
         unit_of_work: UnitOfWork,
-        max_pages: int = 20,
+        max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     ) -> None:
         self._uow = unit_of_work
         self._jobs = jobs

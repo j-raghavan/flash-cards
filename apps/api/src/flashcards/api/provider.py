@@ -56,6 +56,7 @@ from flashcards.api.container import (
 )
 from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
+from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
 
@@ -81,10 +82,15 @@ def in_memory_provider(
     *,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
 ) -> tuple[Container, ServicesProvider, InProcessJobQueue]:
     job_queue = InProcessJobQueue()
     container = build_container(
-        llm=llm, job_queue=job_queue, mailer=mailer, public_base_url=public_base_url
+        llm=llm,
+        job_queue=job_queue,
+        mailer=mailer,
+        public_base_url=public_base_url,
+        max_upload_pages=max_upload_pages,
     )
 
     async def provider() -> AsyncIterator[Container]:
@@ -99,6 +105,7 @@ def sql_provider(
     *,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
@@ -160,6 +167,7 @@ def sql_provider(
                         user_tokens=SqlUserTokenRepository(session),
                         mailer=provider_mailer,
                         public_base_url=public_base_url,
+                        max_upload_pages=max_upload_pages,
                         unit_of_work=SqlUnitOfWork(session),
                     )
                 )

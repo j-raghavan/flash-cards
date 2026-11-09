@@ -290,11 +290,15 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             llm=configured_llm,
             mailer=mailer,
             public_base_url=settings.public_base_url,
+            max_upload_pages=settings.max_upload_pages,
         )
         container = None
     else:
         container, provider, job_queue = in_memory_provider(
-            llm=configured_llm, mailer=mailer, public_base_url=settings.public_base_url
+            llm=configured_llm,
+            mailer=mailer,
+            public_base_url=settings.public_base_url,
+            max_upload_pages=settings.max_upload_pages,
         )
         engine = None
 
