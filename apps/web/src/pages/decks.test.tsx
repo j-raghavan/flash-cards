@@ -228,6 +228,38 @@ describe("layout", () => {
     expect(remove).toHaveBeenCalledWith("flashcards-study-data");
   });
 
+  it("sends waiting answers before signing out", async () => {
+    await enqueue({ idempotency_key: "k1", user_id: USER.id, card_id: "c1", deck_id: "d1", rating: 3, queued_at: 1 });
+    let sent = 0;
+    const calls = mockApi({
+      "GET /auth/me": { body: USER },
+      "GET /decks": { body: [] },
+      "POST /cards/c1/review": () => {
+        sent += 1;
+        return sent === 1 ? { status: 503 } : { body: {} };
+      },
+      "POST /auth/logout": { status: 204 },
+    });
+    renderApp("/");
+    await screen.findByText(/1 answer is waiting/);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    const paths = calls.map((c) => c.path);
+    expect(paths.lastIndexOf("/cards/c1/review")).toBeLessThan(paths.indexOf("/auth/logout"));
+  });
+
+  it("will not pretend to sign out offline", async () => {
+    mockApi({
+      "GET /auth/me": { body: USER },
+      "GET /decks": { body: [] },
+      "POST /auth/logout": new TypeError("offline"),
+    });
+    renderApp("/");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connect to the internet to sign out.");
+    expect(localStorage.getItem("flashcards.lastUser")).not.toBeNull();
+  });
+
   it("treats an expired session as signed out and reports other sign-out failures", async () => {
     mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [] }, "POST /auth/logout": { status: 500 } });
     renderApp("/");
@@ -249,7 +281,9 @@ describe("layout", () => {
       "POST /cards/c1/review": { status: 503 },
     });
     renderApp("/");
-    expect(await screen.findByText(/You are offline/)).toHaveTextContent("1 answer is waiting to sync.");
+    await waitFor(() => {
+      expect(screen.getByText(/You are offline/)).toHaveTextContent("1 answer is waiting to sync.");
+    });
 
     Object.defineProperty(navigator, "onLine", { configurable: true, get: () => true });
     act(() => {

@@ -9,6 +9,7 @@ import { auth } from "../api/endpoints";
 import type { User } from "../api/types";
 import { forgetAllJobs } from "../lib/recentJobs";
 import { clearStudyDataCache } from "../offline/apiCache";
+import { flush } from "../offline/reviewQueue";
 
 // Who was last signed in on this device, so the app can open for offline study
 // when /auth/me cannot be reached. It holds no secret: the cookie does that.
@@ -91,16 +92,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   const signOut = useCallback(async () => {
+    if (user !== null) {
+      // Send answers given offline while the session can still carry them.
+      await flush(user.id);
+    }
     try {
       await auth.logout();
     } catch (error) {
+      if (error instanceof NetworkError) {
+        // The session cookie is HttpOnly: only the server can end it, so signing
+        // out offline would leave it live. Say so instead of pretending.
+        throw new Error("You are offline. Connect to the internet to sign out.", { cause: error });
+      }
       // An expired session is already signed out; anything else is reported.
       if (!(error instanceof ApiError && error.status === 401)) {
         throw error;
       }
     }
     signedOut();
-  }, [signedOut]);
+  }, [user, signedOut]);
 
   useEffect(() => {
     onUnauthorized(signedOut);

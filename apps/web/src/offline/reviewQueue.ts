@@ -99,7 +99,8 @@ export async function submitReview(review: Omit<QueuedReview, "queued_at">): Pro
     await cards.review(review.card_id, review.rating, review.idempotency_key);
     return "sent";
   } catch (error) {
-    if (isTransient(error)) {
+    // A lapsed session is kept too: it is replayed after the user signs in again.
+    if (isTransient(error) || (error instanceof ApiError && error.status === 401)) {
       await enqueue(queued);
       return "queued";
     }
@@ -113,7 +114,7 @@ export interface FlushResult {
   remaining: number;
 }
 
-let flushing: Promise<FlushResult> | null = null;
+const flushing = new Map<string, Promise<FlushResult>>();
 
 /**
  * Replay the user's queued answers in order. Stops at the first transient
@@ -121,10 +122,14 @@ let flushing: Promise<FlushResult> | null = null;
  * drops an answer the server rejects for good, such as one for a deleted card.
  */
 export function flush(userId: string): Promise<FlushResult> {
-  flushing ??= doFlush(userId).finally(() => {
-    flushing = null;
-  });
-  return flushing;
+  let running = flushing.get(userId);
+  if (running === undefined) {
+    running = doFlush(userId).finally(() => {
+      flushing.delete(userId);
+    });
+    flushing.set(userId, running);
+  }
+  return running;
 }
 
 async function doFlush(userId: string): Promise<FlushResult> {

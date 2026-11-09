@@ -46,6 +46,12 @@ describe("submitReview", () => {
     expect(await pending("u1")).toHaveLength(4);
   });
 
+  it("keeps an answer whose session has lapsed, to send after signing in again", async () => {
+    mockApi({ "POST /cards/c1/review": { status: 401, body: { detail: "Not authenticated." } } });
+    await expect(submitReview(answer)).resolves.toBe("queued");
+    expect(await pending("u1")).toHaveLength(1);
+  });
+
   it("reports a permanent rejection instead of queueing it", async () => {
     mockApi({ "POST /cards/c1/review": { status: 404, body: { detail: "Not found." } } });
     await expect(submitReview(answer)).rejects.toThrow("Not found.");
@@ -94,6 +100,7 @@ describe("flush", () => {
     subscribe(listener);
     const first = flush("u1");
     expect(flush("u1")).toBe(first);
+    expect(flush("u2")).not.toBe(first);
     await expect(first).resolves.toEqual({ sent: 0, dropped: 0, remaining: 0 });
     expect(listener).not.toHaveBeenCalled();
   });
