@@ -1,15 +1,22 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Review use cases: submit a grade and fetch the due queue (F-SRS-2, F-STUDY-1).
+"""Review use cases: submit a grade, undo it, and fetch the due queue
+(F-SRS-2, F-STUDY-1, F-STUDY-3).
 
-Review logs are the append-only source of truth; the card schedule is a
-projection the scheduler advances on each review. Submissions are idempotent on
-a client-supplied key so a retry never double-counts a review (NF-REL-1).
+Review logs are the source of truth; the card schedule is a projection the
+scheduler advances on each review. Submissions are idempotent on a
+client-supplied key so a retry never double-counts a review (NF-REL-1).
+
+Each log keeps the schedule the card had just before it, so the caller's most
+recent answer can be taken back for a short while: the log is removed and the
+schedule restored. Answers and undos of one owner are serialized (lock_owner),
+so an undo can never interleave with a new answer.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import timedelta
 
 from flashcards.application.note_service import NoteService
 from flashcards.domain.notes import Card
@@ -21,13 +28,30 @@ from flashcards.domain.ports import (
 )
 from flashcards.domain.scheduling import (
     MATURE_DAYS,
+    UNDO_WINDOW,
     CardSchedule,
     DeckStats,
     DuplicateReview,
     Rating,
     ReviewLog,
+    ReviewNotFound,
     ScheduleState,
+    UndoRejected,
+    UndoSnapshot,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewOutcome:
+    review_id: str
+    schedule: CardSchedule
+
+
+@dataclass(frozen=True, slots=True)
+class UndoOutcome:
+    review_id: str
+    card_id: str
+    schedule: CardSchedule | None  # the restored schedule; None: the card is new again
 
 
 class ReviewService:
@@ -52,31 +76,83 @@ class ReviewService:
         card_id: str,
         rating: Rating,
         idempotency_key: str | None = None,
-    ) -> CardSchedule:
+    ) -> ReviewOutcome:
         # Raises CardNotFound if the card is missing or not the caller's.
         await self._notes.get_card(owner_id=owner_id, card_id=card_id)
+        await self._logs.lock_owner(owner_id)
         now = self._clock.now()
-        current = await self._current_schedule(card_id, now)
+        existing = await self._schedules.get(card_id)
+        current = existing or self._scheduler.new_schedule(card_id, now)
         updated = self._scheduler.review(current, rating, now)
+        log = ReviewLog(
+            id=str(uuid.uuid4()),
+            owner_id=owner_id,
+            card_id=card_id,
+            rating=rating,
+            reviewed_at=now,
+            idempotency_key=idempotency_key,
+            undo=UndoSnapshot(existing),
+        )
+
+        # An undone answer's log is gone, so its key no longer collides; a late
+        # retry of that answer must not record it again behind the user's back.
+        last = await self._logs.last_answer(owner_id)
+        if (
+            idempotency_key is not None
+            and last is not None
+            and last.undone
+            and last.card_id == card_id
+            and last.idempotency_key == idempotency_key
+        ):
+            raise UndoRejected("This answer was undone.")
 
         # Append first: the storage layer rejects a duplicate idempotency key
         # atomically, so the schedule is only advanced when a new review lands.
         try:
-            await self._logs.append(
-                ReviewLog(
-                    id=str(uuid.uuid4()),
-                    owner_id=owner_id,
-                    card_id=card_id,
-                    rating=rating,
-                    reviewed_at=now,
-                    idempotency_key=idempotency_key,
-                )
-            )
+            await self._logs.append(log)
         except DuplicateReview:
-            return await self._current_schedule(card_id, now)
+            original = await self._logs.find_by_key(owner_id, card_id, idempotency_key or "")
+            if original is None:  # cannot happen under the owner lock; never guess
+                raise ReviewNotFound(card_id) from None
+            stored = await self._schedules.get(card_id)
+            return ReviewOutcome(original.id, stored or current)
 
         await self._schedules.upsert(updated)
-        return updated
+        await self._logs.set_last_answer(log)
+        return ReviewOutcome(log.id, updated)
+
+    async def undo(self, *, owner_id: str, review_id: str) -> UndoOutcome:
+        """Take back the caller's most recent answer, within UNDO_WINDOW.
+
+        "Most recent" is a per-owner pointer set by every new answer, not the
+        newest surviving log, so deleting a card never exposes an older answer.
+        One step only: once undone, the pointer stays spent until the next answer.
+        Repeating an undo changes nothing (ReviewNotFound).
+        """
+        await self._logs.lock_owner(owner_id)
+        log = await self._logs.get(review_id)
+        if log is None or log.owner_id != owner_id:
+            raise ReviewNotFound(review_id)
+        last = await self._logs.last_answer(owner_id)
+        if last is None or last.review_id != log.id or last.undone:
+            raise UndoRejected("Only the most recent answer can be undone.")
+        if log.undo is None:
+            raise UndoRejected("This answer cannot be undone.")
+        if self._clock.now() - log.reviewed_at > UNDO_WINDOW:
+            raise UndoRejected("The time to undo this answer has passed.")
+        # Something other than this answer (a reset, an import) moved the card on.
+        current = await self._schedules.get(log.card_id)
+        if current is None or current.last_reviewed_at != log.reviewed_at:
+            raise UndoRejected("The card has changed since this answer.")
+        if not await self._logs.try_delete(log.id):
+            raise ReviewNotFound(review_id)
+        await self._logs.mark_undone(owner_id)
+        previous = log.undo.schedule
+        if previous is None:
+            await self._schedules.delete(log.card_id)
+        else:
+            await self._schedules.upsert(previous)
+        return UndoOutcome(review_id=log.id, card_id=log.card_id, schedule=previous)
 
     async def due_queue(self, *, owner_id: str, deck_id: str, limit: int = 50) -> list[Card]:
         # Raises DeckNotFound if the deck is missing or not the caller's.
@@ -133,8 +209,3 @@ class ReviewService:
             proficiency=proficiency,
         )
 
-    async def _current_schedule(self, card_id: str, now: datetime) -> CardSchedule:
-        existing = await self._schedules.get(card_id)
-        if existing is not None:
-            return existing
-        return self._scheduler.new_schedule(card_id, now)

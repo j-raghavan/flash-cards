@@ -34,6 +34,7 @@ from flashcards.api.routers import (
     media,
     mock_exams,
     note_types,
+    progress,
     review,
     sharing,
 )
@@ -61,7 +62,9 @@ from flashcards.domain.notes import (
     NoteNotFound,
 )
 from flashcards.domain.ports import LLMProvider, Mailer
+from flashcards.domain.progress import InvalidRange, InvalidStudySettings
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
+from flashcards.domain.scheduling import ReviewNotFound, UndoRejected
 from flashcards.domain.sharing import (
     CloneLimitReached,
     CloneNotAllowed,
@@ -138,6 +141,13 @@ def _register_error_handlers(app: FastAPI) -> None:
 
     async def invalid_goal(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    async def invalid_progress(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    async def undo_rejected(_request: Request, exc: Exception) -> JSONResponse:
+        # The answer exists but cannot be taken back; the message says why.
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     async def bad_package(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": "The .apkg could not be imported."})
@@ -239,6 +249,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         ShareNotFound,
         UserNotFound,
         NoteTypeNotFound,
+        ReviewNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -253,6 +264,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidFlag, invalid_note)
     app.add_exception_handler(InvalidBury, invalid_note)
     app.add_exception_handler(InvalidGoal, invalid_goal)
+    app.add_exception_handler(InvalidStudySettings, invalid_progress)
+    app.add_exception_handler(InvalidRange, invalid_progress)
+    app.add_exception_handler(UndoRejected, undo_rejected)
     app.add_exception_handler(InvalidPackage, bad_package)
     app.add_exception_handler(UnsupportedPackage, bad_package)
     app.add_exception_handler(UnsupportedMedia, unsupported_media)
@@ -354,6 +368,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(review.router)
     app.include_router(ai.router)
     app.include_router(goals.router)
+    app.include_router(progress.router)
     app.include_router(imports.router)
     app.include_router(account.router)
     app.include_router(media.router)

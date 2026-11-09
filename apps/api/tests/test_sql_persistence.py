@@ -46,11 +46,14 @@ from flashcards.adapters.sql import (
     SqlNoteTypeRepository,
     SqlObjectStore,
     SqlPassageRepository,
+    SqlPlanBaselineRepository,
     SqlQuotaRepository,
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
     SqlShareLinkRepository,
+    SqlStudySettingsRepository,
+    SqlStudyStatsRepository,
     SqlUserRepository,
     SqlUserTokenRepository,
 )
@@ -103,6 +106,9 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         login_throttle=SqlLoginThrottleRepository(session),
         user_tokens=SqlUserTokenRepository(session),
         mailer=LogMailer(show_content=False),
+        study_settings=SqlStudySettingsRepository(session),
+        plan_baselines=SqlPlanBaselineRepository(session),
+        study_stats=SqlStudyStatsRepository(session),
     )
 
 PASSWORD = "correct-horse-battery"

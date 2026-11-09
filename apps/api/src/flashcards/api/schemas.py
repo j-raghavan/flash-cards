@@ -8,7 +8,7 @@ what a valid address is and no extra email-parsing dependency.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
@@ -16,6 +16,8 @@ from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_v
 from flashcards.api.note_type_schemas import CardTemplateOut, NoteTypeOut, OcclusionModel
 from flashcards.application.account_service import AccountExport
 from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
+from flashcards.application.planner_service import PlanReport
+from flashcards.application.review_service import ReviewOutcome, UndoOutcome
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.audit import AuditEvent
@@ -29,7 +31,13 @@ from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.mock_exam import ExamResult, MockExam
 from flashcards.domain.note_types import CardTemplate
 from flashcards.domain.notes import MAX_FLAG, MAX_MEDIA_ID_LEN, Card, Note, NoteType
-from flashcards.domain.planner import StudyPlan
+from flashcards.domain.planner import ChangeReason, PlanChange, StudyPlan
+from flashcards.domain.progress import (
+    MAX_TIME_ZONE_LENGTH,
+    DailyProgress,
+    ProgressStats,
+    StudySettings,
+)
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import SharedDeckPreview, ShareLink
@@ -816,6 +824,7 @@ class AccountExportOut(BaseModel):
     mock_exams: list[MockExamExportOut]
     share_links: list[ShareLinkOut]
     note_types: list[NoteTypeOut] = Field(default_factory=list)
+    study_settings: StudySettingsOut | None = None
 
     @classmethod
     def from_export(cls, export: AccountExport) -> AccountExportOut:
@@ -907,4 +916,162 @@ class AccountExportOut(BaseModel):
             ],
             share_links=[ShareLinkOut.from_link(link) for link in export.share_links],
             note_types=[NoteTypeOut.from_note_type(t) for t in export.note_types],
+            study_settings=(
+                StudySettingsOut.from_settings(export.study_settings)
+                if export.study_settings is not None
+                else None
+            ),
+        )
+
+
+class StudySettingsOut(BaseModel):
+    daily_goal: int
+    time_zone: str
+
+    @classmethod
+    def from_settings(cls, settings: StudySettings) -> StudySettingsOut:
+        return cls(daily_goal=settings.daily_goal, time_zone=settings.time_zone)
+
+
+class StudySettingsUpdateRequest(BaseModel):
+    daily_goal: int | None = None
+    time_zone: Annotated[str, StringConstraints(max_length=MAX_TIME_ZONE_LENGTH)] | None = None
+
+
+class DailyGoalOut(BaseModel):
+    date: date
+    time_zone: str
+    reviews: int
+    daily_goal: int
+    goal_met: bool
+    # True exactly when the latest review reached the goal: the moment to celebrate.
+    just_completed: bool
+
+    @classmethod
+    def from_progress(cls, progress: DailyProgress) -> DailyGoalOut:
+        return cls(
+            date=progress.day,
+            time_zone=progress.time_zone,
+            reviews=progress.reviews,
+            daily_goal=progress.daily_goal,
+            goal_met=progress.goal_met,
+            just_completed=progress.just_completed,
+        )
+
+
+class TodayOut(DailyGoalOut):
+    streak: int  # consecutive days meeting the goal, ending today or yesterday
+
+    @classmethod
+    def from_today(cls, progress: DailyProgress) -> TodayOut:
+        return cls(
+            **DailyGoalOut.from_progress(progress).model_dump(), streak=progress.streak or 0
+        )
+
+
+class ReviewResultOut(CardScheduleOut):
+    review_id: str  # pass to POST /reviews/{review_id}/undo to take the answer back
+    daily_goal: DailyGoalOut
+
+    @classmethod
+    def from_outcome(cls, outcome: ReviewOutcome, progress: DailyProgress) -> ReviewResultOut:
+        return cls(
+            **CardScheduleOut.from_schedule(outcome.schedule).model_dump(),
+            review_id=outcome.review_id,
+            daily_goal=DailyGoalOut.from_progress(progress),
+        )
+
+
+class UndoOut(BaseModel):
+    review_id: str
+    card_id: str
+    schedule: CardScheduleOut | None  # None: the card is new again
+    daily_goal: DailyGoalOut  # today's count without the undone answer
+
+    @classmethod
+    def from_outcome(cls, outcome: UndoOutcome, progress: DailyProgress) -> UndoOut:
+        restored = outcome.schedule
+        return cls(
+            review_id=outcome.review_id,
+            card_id=outcome.card_id,
+            schedule=CardScheduleOut.from_schedule(restored) if restored is not None else None,
+            daily_goal=DailyGoalOut.from_progress(progress),
+        )
+
+
+class HeatmapDayOut(BaseModel):
+    date: date
+    reviews: int
+
+
+class RetentionPointOut(BaseModel):
+    week_start: date
+    reviews: int
+    recalled: int
+    rate: float | None
+
+
+class ForecastDayOut(BaseModel):
+    date: date
+    due: int
+
+
+class ProgressStatsOut(BaseModel):
+    time_zone: str
+    deck_id: str | None
+    heatmap: list[HeatmapDayOut]
+    retention: list[RetentionPointOut]
+    forecast: list[ForecastDayOut]
+
+    @classmethod
+    def from_stats(cls, stats: ProgressStats) -> ProgressStatsOut:
+        return cls(
+            time_zone=stats.time_zone,
+            deck_id=stats.deck_id,
+            heatmap=[HeatmapDayOut(date=d.day, reviews=d.reviews) for d in stats.heatmap],
+            retention=[
+                RetentionPointOut(
+                    week_start=p.week_start, reviews=p.reviews, recalled=p.recalled, rate=p.rate
+                )
+                for p in stats.retention
+            ],
+            forecast=[ForecastDayOut(date=d.day, due=d.due) for d in stats.forecast],
+        )
+
+
+class PlanChangeReasonOut(BaseModel):
+    reason: ChangeReason
+    count: int
+
+
+class PlanChangeOut(BaseModel):
+    since: datetime
+    changed: bool
+    daily_load_before: int
+    daily_load_after: int
+    before: StudyPlanOut
+    reasons: list[PlanChangeReasonOut]
+
+    @classmethod
+    def from_change(cls, change: PlanChange) -> PlanChangeOut:
+        return cls(
+            since=change.since,
+            changed=change.changed,
+            daily_load_before=change.daily_load_before,
+            daily_load_after=change.daily_load_after,
+            before=StudyPlanOut.from_plan(change.before),
+            reasons=[PlanChangeReasonOut(reason=r, count=n) for r, n in change.reasons],
+        )
+
+
+class PlanReportOut(StudyPlanOut):
+    # What changed since the plan was last accepted; None for a goal's first plan.
+    changes: PlanChangeOut | None
+
+    @classmethod
+    def from_report(cls, report: PlanReport) -> PlanReportOut:
+        change = report.change
+        return cls(
+            **StudyPlanOut.from_plan(report.plan).model_dump(),
+            changes=PlanChangeOut.from_change(change) if change is not None else None,
         )

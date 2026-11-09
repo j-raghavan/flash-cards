@@ -9,10 +9,27 @@ user insert together, or not at all.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import CursorResult, Result, and_, case, delete, func, null, or_, select, update
+from sqlalchemy import (
+    BigInteger,
+    ColumnElement,
+    CursorResult,
+    DateTime,
+    Result,
+    SQLColumnExpression,
+    and_,
+    case,
+    delete,
+    func,
+    literal,
+    null,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,15 +45,18 @@ from flashcards.adapters.db import (
     DraftCardRow,
     GoalRow,
     InviteRow,
+    LastAnswerRow,
     LoginThrottleRow,
     MediaRow,
     MockExamRow,
     NoteRow,
     NoteTypeRow,
     PassageRow,
+    PlanBaselineRow,
     ReviewLogRow,
     SessionRow,
     ShareLinkRow,
+    StudySettingsRow,
     UserRow,
     UserTokenRow,
     aijob_from_row,
@@ -53,6 +73,7 @@ from flashcards.adapters.db import (
     goal_to_row,
     invite_from_row,
     invite_to_row,
+    last_answer_from_row,
     media_from_row,
     media_to_row,
     mock_exam_from_row,
@@ -62,6 +83,8 @@ from flashcards.adapters.db import (
     note_type_from_row,
     note_type_to_row,
     passage_from_row,
+    plan_baseline_from_row,
+    plan_baseline_to_row,
     review_log_from_row,
     review_log_to_row,
     schedule_from_row,
@@ -70,6 +93,7 @@ from flashcards.adapters.db import (
     session_to_row,
     share_link_from_row,
     share_link_to_row,
+    study_settings_from_row,
     throttle_from_row,
     user_from_row,
     user_to_row,
@@ -94,14 +118,24 @@ from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.planner import PlanBaseline
+from flashcards.domain.progress import BUCKET_SECONDS, ActivityBucket, DueBucket, StudySettings
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
-from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
+from flashcards.domain.scheduling import (
+    CardSchedule,
+    DuplicateReview,
+    LastAnswer,
+    Rating,
+    ReviewLog,
+)
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 _IN_CHUNK = 5_000  # ids per IN (...) list, well under the bind-parameter cap
+# First key of the two-key advisory lock that serializes one owner's review writes.
+_REVIEW_LOCK_CLASS = 7301
 _TERMINAL = (JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value)
 
 
@@ -519,6 +553,62 @@ class SqlReviewLogRepository:
         )
         return [review_log_from_row(row) for row in rows]
 
+    async def lock_owner(self, owner_id: str) -> None:
+        # Transaction-scoped: released at commit or rollback. A hash collision only
+        # makes two owners wait for each other briefly; it never breaks correctness.
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(_REVIEW_LOCK_CLASS, func.hashtext(owner_id)))
+        )
+
+    async def get(self, log_id: str) -> ReviewLog | None:
+        # A query, not session.get: try_delete deletes past the identity map.
+        row = await self._session.scalar(select(ReviewLogRow).where(ReviewLogRow.id == log_id))
+        return review_log_from_row(row) if row is not None else None
+
+    async def find_by_key(
+        self, owner_id: str, card_id: str, idempotency_key: str
+    ) -> ReviewLog | None:
+        row = await self._session.scalar(
+            select(ReviewLogRow).where(
+                ReviewLogRow.owner_id == owner_id,
+                ReviewLogRow.card_id == card_id,
+                ReviewLogRow.idempotency_key == idempotency_key,
+            )
+        )
+        return review_log_from_row(row) if row is not None else None
+
+    async def set_last_answer(self, log: ReviewLog) -> None:
+        values = {
+            "review_id": log.id,
+            "card_id": log.card_id,
+            "idempotency_key": log.idempotency_key,
+            "undone": False,
+        }
+        await self._session.execute(
+            pg_insert(LastAnswerRow)
+            .values(owner_id=log.owner_id, **values)
+            .on_conflict_do_update(index_elements=[LastAnswerRow.owner_id], set_=values)
+        )
+
+    async def last_answer(self, owner_id: str) -> LastAnswer | None:
+        row = await self._session.scalar(
+            select(LastAnswerRow)
+            .where(LastAnswerRow.owner_id == owner_id)
+            .execution_options(populate_existing=True)
+        )
+        return last_answer_from_row(row) if row is not None else None
+
+    async def mark_undone(self, owner_id: str) -> None:
+        await self._session.execute(
+            update(LastAnswerRow).where(LastAnswerRow.owner_id == owner_id).values(undone=True)
+        )
+
+    async def try_delete(self, log_id: str) -> bool:
+        deleted = await self._session.scalar(
+            delete(ReviewLogRow).where(ReviewLogRow.id == log_id).returning(ReviewLogRow.id)
+        )
+        return deleted is not None
+
     async def append(self, log: ReviewLog) -> None:
         if log.idempotency_key is None:
             self._session.add(review_log_to_row(log))
@@ -541,6 +631,9 @@ class SqlReviewLogRepository:
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(
             delete(ReviewLogRow).where(ReviewLogRow.owner_id == owner_id)
+        )
+        await self._session.execute(
+            delete(LastAnswerRow).where(LastAnswerRow.owner_id == owner_id)
         )
 
 
@@ -1036,6 +1129,150 @@ class SqlUserTokenRepository:
 
     async def delete_for_user(self, user_id: str) -> None:
         await self._session.execute(delete(UserTokenRow).where(UserTokenRow.user_id == user_id))
+
+
+class SqlStudySettingsRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, owner_id: str) -> StudySettings | None:
+        # populate_existing: save() upserts past the identity map, so never trust a
+        # copy cached by an earlier get() in this session.
+        row = await self._session.get(StudySettingsRow, owner_id, populate_existing=True)
+        return study_settings_from_row(row) if row is not None else None
+
+    async def save(self, settings: StudySettings) -> None:
+        await self._session.execute(
+            pg_insert(StudySettingsRow)
+            .values(
+                owner_id=settings.owner_id,
+                daily_goal=settings.daily_goal,
+                time_zone=settings.time_zone,
+            )
+            .on_conflict_do_update(
+                index_elements=[StudySettingsRow.owner_id],
+                set_={"daily_goal": settings.daily_goal, "time_zone": settings.time_zone},
+            )
+        )
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(
+            delete(StudySettingsRow).where(StudySettingsRow.owner_id == owner_id)
+        )
+
+
+def _baseline_values(baseline: PlanBaseline) -> dict[str, object]:
+    row = plan_baseline_to_row(baseline)
+    return {column.key: getattr(row, column.key) for column in PlanBaselineRow.__table__.columns}
+
+
+class SqlPlanBaselineRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, goal_id: str) -> PlanBaseline | None:
+        row = await self._session.scalar(
+            select(PlanBaselineRow)
+            .where(PlanBaselineRow.goal_id == goal_id)
+            .execution_options(populate_existing=True)
+        )
+        return plan_baseline_from_row(row) if row is not None else None
+
+    async def add_if_absent(self, baseline: PlanBaseline) -> PlanBaseline:
+        await self._session.execute(
+            pg_insert(PlanBaselineRow)
+            .values(**_baseline_values(baseline))
+            .on_conflict_do_nothing(index_elements=[PlanBaselineRow.goal_id])
+        )
+        stored = await self.get(baseline.goal_id)
+        return stored or baseline
+
+    async def save(self, baseline: PlanBaseline) -> None:
+        values = _baseline_values(baseline)
+        await self._session.execute(
+            pg_insert(PlanBaselineRow)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[PlanBaselineRow.goal_id],
+                set_={k: v for k, v in values.items() if k != "goal_id"},
+            )
+        )
+
+
+def _bucket(column: SQLColumnExpression[datetime]) -> ColumnElement[int]:
+    """The epoch second starting the 15-minute bucket holding a timestamp."""
+    epoch = func.floor(func.extract("epoch", column) / BUCKET_SECONDS) * BUCKET_SECONDS
+    return sa_cast(epoch, BigInteger)
+
+
+def _bucket_time(epoch: int) -> datetime:
+    return datetime.fromtimestamp(epoch, UTC)
+
+
+class SqlStudyStatsRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def review_activity(
+        self,
+        owner_id: str,
+        *,
+        since: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[ActivityBucket]:
+        # Bucket in a subquery, so the aggregate groups by a plain column.
+        inner = select(
+            _bucket(ReviewLogRow.reviewed_at).label("bucket"),
+            (ReviewLogRow.rating >= int(Rating.HARD)).label("recalled"),
+        ).where(
+            ReviewLogRow.owner_id == owner_id,
+            ReviewLogRow.reviewed_at >= since,
+            ReviewLogRow.reviewed_at < until,
+        )
+        if deck_ids is not None:
+            inner = inner.join(CardRow, CardRow.id == ReviewLogRow.card_id).where(
+                CardRow.deck_id.in_(list(deck_ids))
+            )
+        logs = inner.subquery()
+        stmt = (
+            select(logs.c.bucket, func.count(), func.count().filter(logs.c.recalled))
+            .group_by(logs.c.bucket)
+            .order_by(logs.c.bucket)
+        )
+        rows = await self._session.execute(stmt)
+        return [
+            ActivityBucket(_bucket_time(int(start)), int(reviews), int(recalled))
+            for start, reviews, recalled in rows
+        ]
+
+    async def due_forecast(
+        self,
+        owner_id: str,
+        *,
+        floor: datetime,
+        until: datetime,
+        deck_ids: Sequence[str] | None = None,
+    ) -> list[DueBucket]:
+        clamped = func.greatest(CardScheduleRow.due_at, literal(floor, DateTime(timezone=True)))
+        inner = (
+            select(_bucket(clamped).label("bucket"))
+            .select_from(CardScheduleRow)
+            .join(CardRow, CardRow.id == CardScheduleRow.card_id)
+            .where(
+                CardRow.owner_id == owner_id,
+                CardRow.suspended_at.is_(None),
+                CardScheduleRow.due_at < until,
+            )
+        )
+        if deck_ids is not None:
+            inner = inner.where(CardRow.deck_id.in_(list(deck_ids)))
+        due = inner.subquery()
+        stmt = (
+            select(due.c.bucket, func.count()).group_by(due.c.bucket).order_by(due.c.bucket)
+        )
+        rows = await self._session.execute(stmt)
+        return [DueBucket(_bucket_time(int(start)), int(cards)) for start, cards in rows]
 
 
 class SqlUnitOfWork:

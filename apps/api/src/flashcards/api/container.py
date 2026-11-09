@@ -31,11 +31,14 @@ from flashcards.adapters.memory import (
     InMemoryNoteTypeRepository,
     InMemoryObjectStore,
     InMemoryPassageRepository,
+    InMemoryPlanBaselineRepository,
     InMemoryQuotaRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
+    InMemoryStudySettingsRepository,
+    InMemoryStudyStatsRepository,
     InMemoryUserRepository,
     InMemoryUserTokenRepository,
     NullUnitOfWork,
@@ -67,6 +70,7 @@ from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
 from flashcards.application.note_type_service import NoteTypeService
 from flashcards.application.planner_service import PlannerService
+from flashcards.application.progress_service import ProgressService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.sharing_service import SharingService
@@ -97,12 +101,15 @@ from flashcards.domain.ports import (
     PackageReader,
     PassageRepository,
     PasswordHasher,
+    PlanBaselineRepository,
     QuotaRepository,
     ReviewLogRepository,
     Scheduler,
     ScheduleRepository,
     SessionRepository,
     ShareLinkRepository,
+    StudySettingsRepository,
+    StudyStatsRepository,
     TranscriptProvider,
     UnitOfWork,
     UserRepository,
@@ -148,6 +155,9 @@ class Repositories:
     login_throttle: LoginThrottleRepository
     user_tokens: UserTokenRepository
     mailer: Mailer
+    study_settings: StudySettingsRepository
+    plan_baselines: PlanBaselineRepository
+    study_stats: StudyStatsRepository
     dummy_hash: str | None = None
     # Where links in emails point (the web client).
     public_base_url: str = "http://localhost:5173"
@@ -178,6 +188,7 @@ class Container:
     card_generation: CardGenerationService
     goal_service: GoalService
     planner: PlannerService
+    progress: ProgressService
     apkg_import: ApkgImportService
     account: AccountService
     media: MediaService
@@ -241,7 +252,15 @@ def build_services(repos: Repositories) -> Container:
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock
     )
     goal_service = GoalService(decks, repos.goals, repos.clock)
-    planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)
+    progress = ProgressService(decks, repos.study_settings, repos.study_stats, repos.clock)
+    planner = PlannerService(
+        goal_service,
+        repos.cards,
+        repos.schedules,
+        repos.plan_baselines,
+        progress,
+        repos.clock,
+    )
     apkg_import = ApkgImportService(repos.package_reader, decks, notes)
     account = AccountService(
         library,
@@ -267,6 +286,7 @@ def build_services(repos: Repositories) -> Container:
         repos.user_tokens,
         invites,
         repos.note_types,
+        repos.study_settings,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
@@ -355,6 +375,7 @@ def build_services(repos: Repositories) -> Container:
         card_generation=card_generation,
         goal_service=goal_service,
         planner=planner,
+        progress=progress,
         apkg_import=apkg_import,
         account=account,
         media=media,
@@ -387,6 +408,10 @@ def build_container(
     one worker queue; both default to the no-op/in-process implementations.
     """
     hasher = Argon2PasswordHasher()
+    cards = InMemoryCardRepository()
+    schedules = InMemoryScheduleRepository()
+    review_logs = InMemoryReviewLogRepository()
+    goals = InMemoryGoalRepository()
     return build_services(
         Repositories(
             clock=SystemClock(),
@@ -399,9 +424,9 @@ def build_container(
             decks=InMemoryDeckRepository(),
             notes=InMemoryNoteRepository(),
             note_types=InMemoryNoteTypeRepository(),
-            cards=InMemoryCardRepository(),
-            schedules=InMemoryScheduleRepository(),
-            review_logs=InMemoryReviewLogRepository(),
+            cards=cards,
+            schedules=schedules,
+            review_logs=review_logs,
             ai_jobs=InMemoryAiJobRepository(),
             draft_cards=InMemoryDraftCardRepository(),
             object_store=InMemoryObjectStore(),
@@ -409,7 +434,7 @@ def build_container(
             extractor=TranscriptAwareExtractor(PyMuPDFExtractor()),
             job_queue=job_queue or InProcessJobQueue(),
             llm=llm or NullLLMProvider(),
-            goals=InMemoryGoalRepository(),
+            goals=goals,
             package_reader=BlockingPackageReader(ApkgReader().read),
             media=InMemoryMediaRepository(),
             media_sniffer=PuremagicMediaSniffer(),
@@ -423,6 +448,9 @@ def build_container(
             login_throttle=InMemoryLoginThrottleRepository(),
             user_tokens=InMemoryUserTokenRepository(),
             mailer=mailer or LogMailer(show_content=True),
+            study_settings=InMemoryStudySettingsRepository(),
+            plan_baselines=InMemoryPlanBaselineRepository(goals),
+            study_stats=InMemoryStudyStatsRepository(cards, schedules, review_logs),
             public_base_url=public_base_url,
             max_upload_pages=max_upload_pages,
         )

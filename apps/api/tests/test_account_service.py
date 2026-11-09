@@ -23,6 +23,7 @@ from flashcards.adapters.memory import (
     InMemoryScheduleRepository,
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
+    InMemoryStudySettingsRepository,
     InMemoryUserRepository,
     InMemoryUserTokenRepository,
 )
@@ -40,6 +41,7 @@ from flashcards.domain.jobs import new_generation_job
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import NoteType
+from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
@@ -81,6 +83,7 @@ class _Fixture:
         self.clone_quota = InMemoryQuotaRepository(limit=100)
         self.throttle = InMemoryLoginThrottleRepository()
         self.user_tokens = InMemoryUserTokenRepository()
+        self.study_settings = InMemoryStudySettingsRepository()
         self.invite_repo = InMemoryInviteRepository()
         self.note_types = InMemoryNoteTypeRepository()
         self.invites = InviteService(self.invite_repo, clock)
@@ -97,7 +100,7 @@ class _Fixture:
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
             self.passages, self.ai_calls, self.share_links, self.clone_quota, self.throttle,
-            self.user_tokens, self.invites, self.note_types,
+            self.user_tokens, self.invites, self.note_types, self.study_settings,
         )
 
     async def seed_full_account(self, owner: str) -> None:
@@ -173,6 +176,9 @@ class _Fixture:
                 allow_clone=False, created_at=NOW,
             )
         )
+        await self.study_settings.save(
+            StudySettings(owner_id=owner, daily_goal=30, time_zone="Europe/Berlin")
+        )
 
 
 async def test_export_gathers_everything_the_user_owns() -> None:
@@ -190,6 +196,7 @@ async def test_export_gathers_everything_the_user_owns() -> None:
     assert [m.id for m in export.media] == ["media-alice"]
     assert [e.id for e in export.mock_exams] == ["exam-alice"]
     assert [s.id for s in export.share_links] == ["share-alice"]
+    assert export.study_settings == StudySettings(ALICE.id, 30, "Europe/Berlin")
 
 
 async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> None:
@@ -239,6 +246,8 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.throttle.get(throttle_key(ALICE.email)) is None
     assert await fx.user_tokens.latest_for_user(ALICE.id, TokenPurpose.PASSWORD_RESET) is None
     assert await fx.share_links.get("share-bob") is not None
+    assert await fx.study_settings.get(ALICE.id) is None
+    assert await fx.study_settings.get(BOB) is not None
     assert await fx.passages.indexed_files(fx_alice_deck) == set()
     assert await fx.quotas.try_reserve_pages(ALICE.id, 1, "2026-11") is True  # counter reset
     assert await fx.ai_calls.try_reserve_pages(ALICE.id, 1, "calls:2026-11-08") is True
