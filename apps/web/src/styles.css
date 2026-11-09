@@ -901,3 +901,40 @@ h2:focus {
     animation: none !important;
   }
 }
+
+/* AI study: mock exams, summaries, document chat and typed answers. */
+.ai-label {
+  margin: 0.25rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.card-content.inline,
+.card-content.inline p {
+  display: inline;
+  margin: 0;
+}
+
+.exam-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-left: 1.5rem;
+}
+
+.exam-topic {
+  font-size: 0.9rem;
+}
+
+.exam-timer {
+  position: sticky;
+  top: 0;
+  padding: 4px 0;
+  background: var(--bg);
+}
+
+.typed-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
