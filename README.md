@@ -9,9 +9,10 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - AI card generation from PDF, PNG and JPEG files or a lecture transcript, with live progress, retry and cancel, every card reviewed before it is scheduled, and a source reference on each one
 - Basic and Cloze cards with image and audio attachments
 - Card browser with search and filters by state, tag, flag and proficiency, plus bulk move, delete, tag, suspend, bury and flag
-- FSRS-based adaptive scheduling, with deck statistics and proficiency
-- Exam goals with a daily study plan and a readiness forecast
-- Self-evaluated and AI-evaluated study, deck summaries, timed mock exams with a per-topic breakdown, and chat with source documents with page citations
+- FSRS-based adaptive scheduling, with deck statistics and proficiency, a review heatmap, a retention curve and a forecast of upcoming reviews, per deck and overall
+- A daily goal with a streak and a completion signal, counted in the user's own time zone
+- Exam goals with a daily study plan and a readiness forecast; the plan adapts to missed days and new cards and shows what changed and why
+- Self-evaluated and AI-evaluated study with undo of the last answer, deck summaries, timed mock exams with a per-topic breakdown, and chat with source documents with page citations
 - Anki `.apkg` import, full account export and account deletion
 - Invite-only access with administrator-issued invites, email verification, password reset and sign-in lockout
 - Administrator user management (suspend, role changes, deletion) with an append-only audit log
