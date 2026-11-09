@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The admin console (F-ADMIN-1 to F-ADMIN-5): users, invites, AI usage and the
-// audit log. The server checks the admin role on every call; this screen only
+// The admin console (F-ADMIN-1 to F-ADMIN-5): users and their AI quotas,
+// invites, instance quotas, AI usage and the audit log. The server checks the admin role on every call; this screen only
 // hides itself from members and keeps admins from acting on their own account.
 // Loaded on first visit, so members never download it.
 
 import { useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
+import { adminUsage } from "../api/adminUsage";
 import { describeError } from "../api/client";
 import { admin } from "../api/endpoints";
 import type { AdminUser, AuditEvent, CreatedInvite, Invite, Role } from "../api/types";
@@ -233,6 +234,8 @@ function InvitesPanel() {
   const [days, setDays] = useState("7");
   const [created, setCreated] = useState<CreatedInvite | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [resent, setResent] = useState<CreatedInvite | null>(null);
+  const [resendError, setResendError] = useState<string | null>(null);
   const submit = useSubmit();
   const dayCount = Number(days);
   const validDays = Number.isInteger(dayCount) && dayCount >= 1 && dayCount <= 90;
@@ -242,6 +245,7 @@ function InvitesPanel() {
     void submit.run(async () => {
       const invite = await admin.createInvite(email.trim() === "" ? null : email.trim(), role, dayCount);
       setCreated(invite);
+      setResent(null);
       setEmail("");
       invites.reload();
     });
@@ -299,8 +303,18 @@ function InvitesPanel() {
           <CopyField label="Invite link" value={inviteUrl(created.token)} />
         </div>
       )}
+      {resent === null ? null : (
+        <div className="panel" role="status">
+          <p>
+            <strong>Invite emailed again to {resent.email}.</strong> The previous link no longer works. The new link
+            is shown only once and works until {formatTime(resent.expires_at)}.
+          </p>
+          <CopyField label="New invite link" value={inviteUrl(resent.token)} />
+        </div>
+      )}
       <ErrorText message={invites.error} />
       <ErrorText message={revokeError} />
+      <ErrorText message={resendError} />
       {invites.data === undefined ? (
         invites.error === null ? (
           <Loading />
@@ -331,20 +345,40 @@ function InvitesPanel() {
                   <td>{formatDay(invite.expires_at)}</td>
                   <td>
                     {invite.status === "active" ? (
-                      <ConfirmButton
-                        label="Revoke"
-                        confirmLabel="Revoke invite"
-                        prompt="Revoke this invite? Its link stops working at once."
-                        onConfirm={async () => {
-                          setRevokeError(null);
-                          try {
-                            await admin.revokeInvite(invite.id);
-                            invites.reload();
-                          } catch (failure) {
-                            setRevokeError(describeError(failure));
-                          }
-                        }}
-                      />
+                      <div className="row">
+                        {invite.email === null ? null : (
+                          <ConfirmButton
+                            label="Resend"
+                            confirmLabel="Resend invite"
+                            prompt={`Email a new sign-up link to ${invite.email}? The current link stops working; the expiry stays the same.`}
+                            onConfirm={async () => {
+                              setResendError(null);
+                              try {
+                                const rotated = await adminUsage.resendInvite(invite.id);
+                                setCreated(null);
+                                setResent(rotated);
+                                invites.reload();
+                              } catch (failure) {
+                                setResendError(describeError(failure));
+                              }
+                            }}
+                          />
+                        )}
+                        <ConfirmButton
+                          label="Revoke"
+                          confirmLabel="Revoke invite"
+                          prompt="Revoke this invite? Its link stops working at once."
+                          onConfirm={async () => {
+                            setRevokeError(null);
+                            try {
+                              await admin.revokeInvite(invite.id);
+                              invites.reload();
+                            } catch (failure) {
+                              setRevokeError(describeError(failure));
+                            }
+                          }}
+                        />
+                      </div>
                     ) : null}
                   </td>
                 </tr>

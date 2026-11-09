@@ -5,6 +5,7 @@
 // turned into dollars only for display and parsed back from dollars on input.
 
 import { request } from "./client";
+import type { CreatedInvite } from "./types";
 
 /** A billing month, e.g. "2026-11", as the server accepts it. */
 export const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -62,6 +63,12 @@ export const adminUsage = {
   /** null clears the override, so the instance default applies. */
   setUserQuota: (userId: string, monthlyPages: number | null) =>
     request<UserQuota>(`/admin/users/${id(userId)}/quota`, { method: "PUT", json: { monthly_pages: monthlyPages } }),
+  /**
+   * Email an invite again with a new token (F-ADMIN-1): the previous link stops
+   * working and the expiry is unchanged. A link-only invite answers 409.
+   */
+  resendInvite: (inviteId: string) =>
+    request<CreatedInvite>(`/admin/invites/${id(inviteId)}/resend`, { method: "POST" }),
   /** The month's usage; null asks for the current month. */
   usage: (period: string | null) =>
     request<UsageReport>(period === null ? "/admin/usage" : `/admin/usage?${new URLSearchParams({ period }).toString()}`),
