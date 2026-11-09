@@ -53,6 +53,8 @@ export interface AuthState {
   signedIn: (user: User) => void;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
+  /** Forget the user on this device when the server has already ended the session. */
+  signedOut: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -127,8 +129,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply, signedOut]);
 
   const value = useMemo(
-    () => ({ loading, user, signedIn, refresh, signOut }),
-    [loading, user, signedIn, refresh, signOut],
+    () => ({ loading, user, signedIn, refresh, signOut, signedOut }),
+    [loading, user, signedIn, refresh, signOut, signedOut],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
