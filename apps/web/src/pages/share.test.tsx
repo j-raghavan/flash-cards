@@ -164,11 +164,10 @@ describe("shared deck page", () => {
     expect(container.querySelector("[onerror]")).toBeNull();
     expect(screen.getAllByText("Verbs")[0]).toHaveStyle({ marginLeft: "16px" });
     await user.click(screen.getByRole("button", { name: "Copy to my decks" }));
-    expect(await screen.findByRole("heading", { name: "Spanish", level: 1 })).toBeInTheDocument();
+    // The copy opens as a deck of its own.
+    expect(await screen.findByRole("link", { name: "Study now" })).toHaveAttribute("href", "/decks/d9/study");
+    expect(screen.getByRole("heading", { name: "Spanish", level: 1 })).toBeInTheDocument();
     expect(calls.some((c) => c.method === "POST" && c.path === "/shared/abc/clone")).toBe(true);
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Copy to my decks" })).not.toBeInTheDocument();
-    });
   });
 
   it("says when copying is not allowed, and when a deck has one level and no notes", async () => {
