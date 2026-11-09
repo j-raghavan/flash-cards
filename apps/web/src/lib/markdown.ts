@@ -160,7 +160,22 @@ export function renderMarkdown(source: string, options: RenderOptions = {}): str
   const { text, parts } = extractMath(source);
   const fragment = DOMPurify.sanitize(marked.parse(text, { async: false }), {
     USE_PROFILES: { html: true },
-    FORBID_TAGS: ["style", "form", "input", "button", "textarea", "select"],
+    // Media would load from any origin (src, poster), unlike images; a template
+    // would keep its content out of reach of the link rewrite.
+    FORBID_TAGS: [
+      "style",
+      "form",
+      "input",
+      "button",
+      "textarea",
+      "select",
+      "video",
+      "audio",
+      "source",
+      "track",
+      "picture",
+      "template",
+    ],
     FORBID_ATTR: ["style", "id", "srcset"],
     RETURN_DOM_FRAGMENT: true,
   });

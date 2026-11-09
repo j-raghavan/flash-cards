@@ -135,6 +135,16 @@ describe("renderMarkdown", () => {
       expect(root.textContent).toContain("(https://evil.example/area)");
     });
 
+    it("drops media from other origins and templates that could hide links", () => {
+      const root = asText(
+        '<video controls src="https://evil.example/v.mp4" poster="https://evil.example/p.png"></video>' +
+          '<audio src="https://evil.example/a.mp3"></audio><picture><source srcset="https://evil.example/s.png"></picture>' +
+          '<template><a href="https://evil.example/t">t</a></template>',
+      );
+      expect(root.querySelector("video, audio, source, picture, template, [poster], a")).toBeNull();
+      expect(root.innerHTML).not.toContain("evil.example");
+    });
+
     it("keeps math inside link text", () => {
       const root = asText("[$x^2$](https://evil.example)");
       expect(root.querySelector("a")).toBeNull();
