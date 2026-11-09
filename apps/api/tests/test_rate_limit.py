@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.types import Scope
+from starlette.types import Message, Receive, Scope, Send
 
 from flashcards.api.app import create_app
 from flashcards.api.rate_limit import (
     UNKNOWN_CLIENT,
+    RateLimitMiddleware,
     RateRule,
     TokenBuckets,
     client_key,
@@ -146,3 +147,30 @@ def test_the_limit_can_be_turned_off() -> None:
                             rate_limit_shared_per_minute=1))
     )
     assert [client.get("/shared/x").status_code for _ in range(3)] == [401] * 3
+
+
+async def test_a_root_path_is_stripped_before_matching() -> None:
+    reached: list[str] = []
+    sent: list[Message] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        reached.append(scope["path"])
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    async def receive() -> Message:  # pragma: no cover - never read
+        return {"type": "http.request"}
+
+    limiter = RateLimitMiddleware(
+        app, rules=(RateRule("auth", "/auth/", 1, frozenset({"POST"})),)
+    )
+    scope: Scope = {
+        "type": "http", "method": "POST", "path": "/api/auth/login", "root_path": "/api",
+        "client": ("1.2.3.4", 1), "headers": [],
+    }
+    await limiter(scope, receive, send)
+    await limiter(scope, receive, send)
+    assert len(reached) == 1 and sent[0]["status"] == 429
+    await limiter({**scope, "path": "/api", "method": "GET"}, receive, send)
+    assert len(reached) == 2

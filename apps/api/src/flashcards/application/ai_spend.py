@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 import uuid
 
+import anyio
+
 from flashcards.domain.ai import StructuredRequest, StructuredResult
 from flashcards.domain.ports import (
     Clock,
@@ -101,7 +103,10 @@ class AiSpend:
         if hold is None:
             return
         try:
-            await self._holds.release(hold.id)
+            # Shielded: a call cancelled mid-flight (client gone, shutdown) still
+            # gives its hold back instead of leaving it to lapse.
+            with anyio.CancelScope(shield=True):
+                await self._holds.release(hold.id)
         except Exception:
             logger.warning("could not release AI spend hold %s; it lapses", hold.id, exc_info=True)
 

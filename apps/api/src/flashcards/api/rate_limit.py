@@ -111,6 +111,15 @@ def client_key(scope: Scope, trusted_proxies: int) -> str:
     return _normalize(address)
 
 
+def _route_path(scope: Scope) -> str:
+    """The path the routes see: without the root path when the server was given one."""
+    path: str = scope["path"]
+    root: str = scope.get("root_path", "")
+    if root and path.startswith(root):
+        return path[len(root) :] or "/"
+    return path
+
+
 def _forwarded_for(scope: Scope) -> list[str]:
     hops: list[str] = []
     for name, value in scope.get("headers", ()):
@@ -154,7 +163,7 @@ class RateLimitMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
             method: str = scope["method"]
-            path: str = scope["path"]
+            path = _route_path(scope)
             rule = next((r for r in self._rules if r.matches(method, path)), None)
             if rule is not None:
                 wait = self._buckets[rule.name].take(client_key(scope, self._trusted_proxies))
