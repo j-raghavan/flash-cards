@@ -69,6 +69,11 @@ class AuthService:
     async def login(
         self, *, email: str, password: str, device: str = UNKNOWN_DEVICE
     ) -> IssuedSession:
+        user = await self.check_password(email=email, password=password)
+        return await self.start_session(user, device=device)
+
+    async def check_password(self, *, email: str, password: str) -> User:
+        """The user whose password this is, if they may sign in (first factor only)."""
         user = await self._users.get_by_email(normalize_email(email))
         if user is None:
             await self._hasher.verify(await self._dummy(), password)
@@ -79,7 +84,7 @@ class AuthService:
             raise AccountSuspended()
         if self._require_verified and not user.is_verified:
             raise EmailNotVerified()
-        return await self.start_session(user, device=device)
+        return user
 
     async def _dummy(self) -> str:
         if self._dummy_hash is None:

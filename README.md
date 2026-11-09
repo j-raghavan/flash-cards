@@ -17,6 +17,7 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - Full account export and account deletion
 - Invite-only access by default, with emailed invites that can be resent; self-hosters can open public sign-up
 - Email verification, password reset, sign-in lockout, and a device list with sign-out per device or everywhere else
+- Optional two-factor sign-in: an authenticator app (TOTP, secrets encrypted at rest), passkeys (WebAuthn) as a second factor, ten single-use recovery codes, and an audited administrator reset for a lost device
 - Administrator user management (suspend, role changes, deletion) with an append-only audit log
 - Monthly AI page quotas per user, an instance-wide monthly spend cap, and a usage and cost report by user and provider
 - AI data-use disclosure: user content is never used for model training, and the configured provider and its terms are shown

@@ -30,6 +30,14 @@ from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.transcripts import Transcript
+from flashcards.domain.two_factor import (
+    CeremonyOptions,
+    Challenge,
+    NewPasskey,
+    Passkey,
+    RecoveryCode,
+    TotpCredential,
+)
 from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
@@ -733,6 +741,150 @@ class LoginThrottleRepository(Protocol):
         ...
 
     async def delete(self, key: str) -> None: ...
+
+
+class TwoFactorRepository(Protocol):
+    """Second factors, recovery codes and pending challenges (F-AUTH-3)."""
+
+    async def get_totp(self, user_id: str) -> TotpCredential | None: ...
+
+    async def save_totp(self, credential: TotpCredential) -> None:
+        """Insert or replace the user's (unconfirmed) authenticator app."""
+        ...
+
+    async def confirm_totp(self, user_id: str, step: int, now: datetime) -> bool:
+        """Confirm an unconfirmed authenticator at `step`, atomically; False if none."""
+        ...
+
+    async def use_totp_step(self, user_id: str, step: int) -> bool:
+        """Record `step` as used, atomically, only if it is newer than the last one.
+
+        Returns False for a reused or older step, so a code works once.
+        """
+        ...
+
+    async def delete_totp(self, user_id: str) -> bool: ...
+
+    async def list_totp(self) -> list[TotpCredential]:
+        """Every stored authenticator, for re-encrypting with a new key."""
+        ...
+
+    async def set_totp_secret(self, user_id: str, secret_ciphertext: str) -> None:
+        """Replace only the encrypted secret (key rotation)."""
+        ...
+
+    async def replace_recovery_codes(self, user_id: str, codes: Sequence[RecoveryCode]) -> None:
+        """Delete the user's recovery codes and store these instead."""
+        ...
+
+    async def use_recovery_code(self, user_id: str, code_hash: str, now: datetime) -> bool:
+        """Mark an unused code used, atomically; False if unknown or already used."""
+        ...
+
+    async def count_recovery_codes(self, user_id: str) -> int:
+        """How many unused recovery codes the user has."""
+        ...
+
+    async def delete_recovery_codes(self, user_id: str) -> None: ...
+
+    async def add_passkey(self, passkey: Passkey) -> None: ...
+
+    async def list_passkeys(self, user_id: str) -> list[Passkey]:
+        """The user's passkeys, oldest first."""
+        ...
+
+    async def get_passkey_by_credential(self, credential_id: bytes) -> Passkey | None: ...
+
+    async def record_passkey_use(
+        self, passkey_id: str, *, expected_count: int, new_count: int, now: datetime
+    ) -> bool:
+        """Store a new signature count only if the stored one is still `expected_count`."""
+        ...
+
+    async def delete_passkey(self, user_id: str, passkey_id: str) -> bool: ...
+
+    async def add_challenge(self, challenge: Challenge) -> None: ...
+
+    async def get_challenge(self, token_hash: str) -> Challenge | None: ...
+
+    async def set_webauthn_challenge(self, challenge_id: str, value: bytes | None) -> None: ...
+
+    async def use_challenge(self, challenge_id: str, now: datetime) -> bool:
+        """Mark an unused challenge used, atomically; False if it was already used."""
+        ...
+
+    async def delete_stale_challenges(self, user_id: str, now: datetime) -> None:
+        """Delete the user's used or expired challenges."""
+        ...
+
+    async def enabled_user_ids(self, user_ids: Sequence[str]) -> set[str]:
+        """Which of these users have two-factor sign-in on."""
+        ...
+
+    async def delete_for_user(self, user_id: str) -> None:
+        """Delete every second factor, recovery code and challenge of the user."""
+        ...
+
+
+class SecretBox(Protocol):
+    """Symmetric encryption for secrets kept at rest (authenticator secrets)."""
+
+    def seal(self, plaintext: str) -> str: ...
+
+    def open(self, sealed: str) -> str:
+        """Decrypt; raise flashcards.domain.two_factor.SecretUnreadable on failure."""
+        ...
+
+    def reseal(self, sealed: str) -> str:
+        """Re-encrypt with the current key (key rotation)."""
+        ...
+
+
+class OneTimePasswords(Protocol):
+    """Time-based one-time passwords (RFC 6238)."""
+
+    def new_secret(self) -> str:
+        """A new random base32 secret."""
+        ...
+
+    def provisioning_uri(self, secret: str, *, account: str, issuer: str) -> str:
+        """The otpauth:// URI an authenticator app reads from a QR code."""
+        ...
+
+    def matching_step(self, secret: str, code: str, now: datetime) -> int | None:
+        """The time step `code` is valid for, within the allowed drift, or None."""
+        ...
+
+
+class PasskeyCeremonies(Protocol):
+    """WebAuthn registration and assertion for one relying party.
+
+    Every verification method raises flashcards.domain.two_factor.InvalidPasskey
+    when the response fails (wrong origin, RP id, challenge or signature).
+    """
+
+    def registration_options(
+        self, *, user_handle: bytes, user_name: str, exclude: Sequence[bytes]
+    ) -> CeremonyOptions: ...
+
+    def verify_registration(self, response_json: str, challenge: bytes) -> NewPasskey: ...
+
+    def authentication_options(
+        self, allow: Sequence[tuple[bytes, tuple[str, ...]]]
+    ) -> CeremonyOptions: ...
+
+    def credential_id(self, response_json: str) -> bytes:
+        """The credential id an assertion claims to come from (not yet verified)."""
+        ...
+
+    def verify_authentication(
+        self, response_json: str, challenge: bytes, public_key: bytes
+    ) -> int:
+        """Verify an assertion's signature; return the authenticator's new sign count.
+
+        The count is not compared here: the caller checks it against the stored one.
+        """
+        ...
 
 
 class Mailer(Protocol):
