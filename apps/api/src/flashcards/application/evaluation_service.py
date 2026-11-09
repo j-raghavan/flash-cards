@@ -18,7 +18,7 @@ from flashcards.domain.evaluation import (
     AnswerEvaluation,
     parse_evaluation,
 )
-from flashcards.domain.notes import Fields
+from flashcards.domain.notes import Fields, InvalidNote, NoteType
 from flashcards.domain.ports import LLMProvider
 
 
@@ -34,6 +34,9 @@ class EvaluationService:
         # Both calls are owner-scoped and raise CardNotFound / NoteNotFound.
         card = await self._notes.get_card(owner_id=owner_id, card_id=card_id)
         note = await self._notes.get_note(owner_id=owner_id, note_id=card.note_id)
+        if note.note_type is NoteType.IMAGE_OCCLUSION:
+            # The answer is a region of an image the model never sees (ADR 0013).
+            raise InvalidNote("image occlusion cards cannot be graded from a typed answer")
         request = StructuredRequest(
             instructions=evaluation_prompt(),
             documents=(

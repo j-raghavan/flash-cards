@@ -13,7 +13,15 @@ from collections.abc import Iterable, Mapping
 
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
-from flashcards.domain.notes import Card, Note, card_ordinals
+from flashcards.domain.note_types import CustomNoteType
+from flashcards.domain.notes import (
+    Card,
+    InvalidNote,
+    Note,
+    Occlusion,
+    card_ordinals,
+    note_fields,
+)
 from flashcards.domain.ports import (
     CardRepository,
     DeckRepository,
@@ -91,23 +99,42 @@ class LibraryService:
         note_id: str,
         fields: Mapping[str, str] | None = None,
         tags: Iterable[str] | None = None,
+        custom: CustomNoteType | None = None,
+        occlusion: Occlusion | None = None,
     ) -> tuple[Note, list[Card]]:
-        """Edit a note's fields and/or tags (ADR 0011); returns the note and its cards.
+        """Edit a note's fields, tags or masks (ADR 0011, 0013); returns it and its cards.
 
-        New fields re-derive the cards: a card whose ordinal survives keeps its
-        schedule and history, a removed cloze deletion takes its card, schedule and
-        history with it, and a new deletion gets a new card. Everything is checked
-        before anything is written. The note is locked first, so concurrent edits
-        or moves of it apply one after the other.
+        New fields or masks re-derive the cards: a card whose ordinal survives
+        keeps its schedule and history, a removed cloze deletion, template or mask
+        takes its card, schedule and history with it, and a new one gets a new
+        card. Everything is checked before anything is written. The note is locked
+        first, so concurrent edits or moves of it apply one after the other.
+
+        A custom note passes its type (locked by the caller), and new masks come
+        with an image the caller has checked is the owner's.
         """
         note = await self._notes.lock_note(owner_id=owner_id, note_id=note_id)
+        if custom is not None and custom.id != note.note_type_id:
+            raise InvalidNote("the note type given is not this note's type")
         updated = note
         if tags is not None:
             updated = updated.with_tags(normalize_tags(tags))
         if fields is not None:
-            updated = updated.with_fields(tuple(fields.items()))
-        wanted = card_ordinals(updated.note_type, updated.fields)  # raises InvalidNote
-        cards = await self._notes.cards_of(note)
+            updated = updated.with_fields(note_fields(note.note_type, fields, custom))
+        if occlusion is not None:
+            updated = updated.with_occlusion(occlusion)
+        wanted = card_ordinals(  # raises InvalidNote
+            updated.note_type, updated.fields, custom=custom, occlusion=updated.occlusion
+        )
+        return updated, await self.rederive(updated, wanted)
+
+    async def rederive(self, updated: Note, wanted: list[int]) -> list[Card]:
+        """Save a changed note and match its cards to `wanted`; returns its cards.
+
+        The note must be locked and `wanted` validated. Surviving ordinals keep
+        their card, schedule and history; the rest are purged; new ones are added.
+        """
+        cards = await self._notes.cards_of(updated)
         await self._note_repo.update(updated)
         for card in cards:
             if card.ordinal not in wanted:
@@ -115,7 +142,7 @@ class LibraryService:
                 await self._card_repo.delete(card.id)
         have = {card.ordinal for card in cards}
         await self._notes.add_cards(updated, [o for o in wanted if o not in have])
-        return updated, await self._notes.cards_of(updated)
+        return await self._notes.cards_of(updated)
 
     async def delete_note(self, *, owner_id: str, note_id: str) -> None:
         """Delete a note and the cards, schedules and logs it produced."""

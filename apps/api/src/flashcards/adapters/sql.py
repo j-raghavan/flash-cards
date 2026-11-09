@@ -32,6 +32,7 @@ from flashcards.adapters.db import (
     MediaRow,
     MockExamRow,
     NoteRow,
+    NoteTypeRow,
     PassageRow,
     ReviewLogRow,
     SessionRow,
@@ -58,6 +59,8 @@ from flashcards.adapters.db import (
     mock_exam_to_row,
     note_from_row,
     note_to_row,
+    note_type_from_row,
+    note_type_to_row,
     passage_from_row,
     review_log_from_row,
     review_log_to_row,
@@ -89,6 +92,7 @@ from flashcards.domain.login_throttle import (
 )
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
+from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
@@ -323,6 +327,9 @@ class SqlNoteRepository:
                 .where(NoteRow.id.in_(ordered[start : start + _IN_CHUNK]))
                 .order_by(NoteRow.id)
                 .with_for_update()
+                # The rows as committed once the lock is ours, not as an earlier
+                # read in this session cached them (a stale copy would be written back).
+                .execution_options(populate_existing=True)
             )
             notes += [note_from_row(row) for row in rows]
         return notes
@@ -338,6 +345,20 @@ class SqlNoteRepository:
         )
         return int(count or 0)
 
+    async def list_for_note_type(self, note_type_id: str) -> list[Note]:
+        rows = await self._session.scalars(
+            select(NoteRow)
+            .where(NoteRow.note_type_id == note_type_id)
+            .order_by(NoteRow.created_at, NoteRow.id)
+        )
+        return [note_from_row(row) for row in rows]
+
+    async def count_for_note_type(self, note_type_id: str) -> int:
+        count = await self._session.scalar(
+            select(func.count()).select_from(NoteRow).where(NoteRow.note_type_id == note_type_id)
+        )
+        return int(count or 0)
+
     async def delete(self, note_id: str) -> None:
         row = await self._session.get(NoteRow, note_id)
         if row is not None:
@@ -346,6 +367,53 @@ class SqlNoteRepository:
 
     async def delete_for_deck(self, deck_id: str) -> None:
         await self._session.execute(delete(NoteRow).where(NoteRow.deck_id == deck_id))
+
+
+class SqlNoteTypeRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, note_type: CustomNoteType) -> None:
+        self._session.add(note_type_to_row(note_type))
+        await self._session.flush()
+
+    async def get(self, note_type_id: str) -> CustomNoteType | None:
+        row = await self._session.get(NoteTypeRow, note_type_id)
+        return note_type_from_row(row) if row is not None else None
+
+    async def lock(self, note_type_id: str) -> CustomNoteType | None:
+        row = await self._session.scalar(
+            select(NoteTypeRow)
+            .where(NoteTypeRow.id == note_type_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)  # the row as committed, not cached
+        )
+        return note_type_from_row(row) if row is not None else None
+
+    async def list_for_owner(self, owner_id: str) -> list[CustomNoteType]:
+        rows = await self._session.scalars(
+            select(NoteTypeRow)
+            .where(NoteTypeRow.owner_id == owner_id)
+            .order_by(NoteTypeRow.created_at, NoteTypeRow.id)
+        )
+        return [note_type_from_row(row) for row in rows]
+
+    async def count_for_owner(self, owner_id: str) -> int:
+        count = await self._session.scalar(
+            select(func.count()).select_from(NoteTypeRow).where(NoteTypeRow.owner_id == owner_id)
+        )
+        return int(count or 0)
+
+    async def update(self, note_type: CustomNoteType) -> None:
+        if await self._session.get(NoteTypeRow, note_type.id) is not None:
+            await self._session.merge(note_type_to_row(note_type))
+            await self._session.flush()
+
+    async def delete(self, note_type_id: str) -> None:
+        await self._session.execute(delete(NoteTypeRow).where(NoteTypeRow.id == note_type_id))
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        await self._session.execute(delete(NoteTypeRow).where(NoteTypeRow.owner_id == owner_id))
 
 
 class SqlCardRepository:

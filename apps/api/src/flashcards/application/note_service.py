@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Use cases for notes and the cards they produce (F-CARD-1, F-CARD-2, F-CARD-6)."""
+"""Use cases for notes and the cards they produce (F-CARD-1..4, F-CARD-6)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Iterable, Mapping
 
 from flashcards.application.deck_service import DeckService
+from flashcards.domain.note_types import CustomNoteType, NoteTypeNotFound
 from flashcards.domain.notes import (
     Card,
     CardNotFound,
@@ -14,7 +15,9 @@ from flashcards.domain.notes import (
     Note,
     NoteNotFound,
     NoteType,
+    Occlusion,
     card_ordinals,
+    note_fields,
 )
 from flashcards.domain.ports import CardRepository, Clock, NoteRepository
 from flashcards.domain.tags import normalize_tags
@@ -41,13 +44,22 @@ class NoteService:
         note_type: NoteType,
         fields: Mapping[str, str],
         tags: Iterable[str] = (),
+        custom: CustomNoteType | None = None,
+        occlusion: Occlusion | None = None,
     ) -> tuple[Note, list[Card]]:
-        """Create a note and its cards; raises InvalidNote or InvalidTags."""
+        """Create a note and its cards; raises InvalidNote or InvalidTags.
+
+        A custom note passes its type and an image occlusion note its masks. The
+        caller has checked that an occlusion image is the owner's own
+        (NoteTypeService.create_note does).
+        """
         normalized_tags = normalize_tags(tags)
         # Raises DeckNotFound if the deck is missing or not the caller's.
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
-        field_pairs: Fields = tuple(fields.items())
-        ordinals = card_ordinals(note_type, field_pairs)
+        if custom is not None and custom.owner_id != owner_id:
+            raise NoteTypeNotFound(custom.id)
+        field_pairs: Fields = note_fields(note_type, fields, custom)
+        ordinals = card_ordinals(note_type, field_pairs, custom=custom, occlusion=occlusion)
 
         now = self._clock.now()
         note = Note(
@@ -58,6 +70,8 @@ class NoteService:
             fields=field_pairs,
             created_at=now,
             tags=normalized_tags,
+            note_type_id=custom.id if custom is not None else None,
+            occlusion=occlusion,
         )
         await self._notes.add(note)
         return note, await self.add_cards(note, ordinals)
