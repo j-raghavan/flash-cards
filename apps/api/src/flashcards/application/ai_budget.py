@@ -41,6 +41,18 @@ class AiCallBudget:
         self._spend = spend
         self._uow = unit_of_work
 
+    async def count(self, owner_id: str) -> None:
+        """Count a request that is not a model call (a transcript fetch) against the
+        daily allowance, once the spend cap allows new AI work at all.
+
+        Raises SpendCapReached or AiCallLimitReached. Nothing is held: no model is
+        called, so there is no cost to set aside.
+        """
+        await self._spend.ensure_available()
+        period = ai_call_period(self._clock.now())
+        if not await self._calls.try_reserve_pages(owner_id, 1, period):
+            raise AiCallLimitReached(owner_id)
+
     @asynccontextmanager
     async def charge(
         self, owner_id: str, request: StructuredRequest
