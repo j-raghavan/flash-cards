@@ -32,13 +32,22 @@ from flashcards.api.schemas import (
     TokenRequest,
     UserOut,
 )
-from flashcards.application.auth_service import AccountSuspended, InvalidCredentials
+from flashcards.application.auth_service import (
+    AccountSuspended,
+    EmailNotVerified,
+    InvalidCredentials,
+)
 from flashcards.config import Settings
 from flashcards.domain.invites import InviteError
 from flashcards.domain.login_throttle import LoginLocked
 from flashcards.domain.sessions import device_label
 from flashcards.domain.user_tokens import InvalidUserToken
-from flashcards.domain.users import EmailAlreadyRegistered, InvalidEmail, WeakPassword
+from flashcards.domain.users import (
+    EmailAlreadyRegistered,
+    InvalidEmail,
+    UserStatus,
+    WeakPassword,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -109,8 +118,8 @@ async def register(
     """
     if settings.invite_only:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
-    # Behind a reverse proxy this is the proxy's address unless the server trusts
-    # its forwarded headers (uvicorn --proxy-headers --forwarded-allow-ips).
+    # Behind a reverse proxy this is the proxy's address unless uvicorn trusts its
+    # X-Forwarded-For (FORWARDED_ALLOW_IPS must include the proxy's address).
     client: str = getattr(request.client, "host", "unknown")
     try:
         outcome = await container.public_signup.register(
@@ -126,10 +135,13 @@ async def register(
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(exc)}
         )
-    if outcome.created:
-        email = await container.account_email.verification_email(outcome.user)
+    user = outcome.user
+    if outcome.created or not (user.is_verified or user.status() is UserStatus.SUSPENDED):
+        # A new account, or one whose owner never confirmed it: (re)send the
+        # verification link, within its cooldown. Sign-in needs it on this instance.
+        email = await container.account_email.verification_email(user)
     else:
-        email = container.account_email.account_exists_email(outcome.user)
+        email = container.account_email.account_exists_email(user)
     send_later(tasks, container.mailer, email)
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED, content={"detail": _REGISTER_ACCEPTED}
@@ -164,6 +176,10 @@ async def login(
         ) from exc
     except AccountSuspended as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account is suspended.") from exc
+    except EmailNotVerified as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Confirm your email address before signing in."
+        ) from exc
 
     user = await container.user_repo.get(issued.session.user_id)
     if user is None:  # pragma: no cover - login just authenticated this user

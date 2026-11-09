@@ -13,6 +13,7 @@ from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import (
     AccountSuspended,
     AuthService,
+    EmailNotVerified,
     InvalidCredentials,
     IssuedSession,
 )
@@ -61,7 +62,7 @@ class SignInService:
                     AuditAction.LOGIN_LOCKED, target_id=user.id if user is not None else None
                 )
             raise
-        except AccountSuspended:
+        except (AccountSuspended, EmailNotVerified):
             await self._throttle.delete(key)  # the password was right
             raise
         await self._throttle.delete(key)

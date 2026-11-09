@@ -87,6 +87,7 @@ def in_memory_provider(
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
     metering: AiMetering | None = None,
+    require_verified_sign_in: bool = False,
 ) -> tuple[Container, ServicesProvider, InProcessJobQueue]:
     job_queue = InProcessJobQueue()
     container = build_container(
@@ -95,6 +96,7 @@ def in_memory_provider(
         mailer=mailer,
         public_base_url=public_base_url,
         metering=metering,
+        require_verified_sign_in=require_verified_sign_in,
     )
 
     async def provider() -> AsyncIterator[Container]:
@@ -110,6 +112,7 @@ def sql_provider(
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
     metering: AiMetering | None = None,
+    require_verified_sign_in: bool = False,
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
@@ -173,6 +176,7 @@ def sql_provider(
                         quota_settings=SqlQuotaSettingsRepository(session),
                         usage=SqlUsageRepository(session),
                         metering=provider_metering,
+                        require_verified_sign_in=require_verified_sign_in,
                         mailer=provider_mailer,
                         public_base_url=public_base_url,
                         unit_of_work=SqlUnitOfWork(session),

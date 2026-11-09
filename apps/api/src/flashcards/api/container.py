@@ -158,6 +158,8 @@ class Repositories:
     usage: UsageRepository
     mailer: Mailer
     dummy_hash: str | None = None
+    # Sign-in needs a verified email (instances with public sign-up, F-AUTH-7).
+    require_verified_sign_in: bool = False
     # Provider name, token prices and default quotas, from configuration.
     metering: AiMetering = field(default_factory=AiMetering)
     # Where links in emails point (the web client).
@@ -210,7 +212,12 @@ def build_services(repos: Repositories) -> Container:
     invites = InviteService(repos.invites, repos.clock)
     registration = RegistrationService(invites, repos.users, repos.hasher, repos.clock)
     auth = AuthService(
-        repos.users, repos.sessions, repos.hasher, repos.clock, dummy_hash=repos.dummy_hash
+        repos.users,
+        repos.sessions,
+        repos.hasher,
+        repos.clock,
+        dummy_hash=repos.dummy_hash,
+        require_verified=repos.require_verified_sign_in,
     )
     decks = DeckService(repos.decks, repos.clock)
     notes = NoteService(decks, repos.notes, repos.cards, repos.clock)
@@ -414,6 +421,7 @@ def build_container(
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
     metering: AiMetering | None = None,
+    require_verified_sign_in: bool = False,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -459,5 +467,6 @@ def build_container(
             mailer=mailer or LogMailer(show_content=True),
             public_base_url=public_base_url,
             metering=metering or AiMetering(),
+            require_verified_sign_in=require_verified_sign_in,
         )
     )

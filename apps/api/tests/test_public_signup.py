@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -140,16 +140,41 @@ def test_open_registration_answers_the_same_for_new_and_existing_emails(
     assert new.status_code == again.status_code == 202
     assert new.json() == again.json()
     assert "set-cookie" not in new.headers  # no sign-in until the owner signs in
+    # Still unconfirmed: a repeat would resend the link, but not within its cooldown.
+    assert [m.subject for m in mailer.sent] == ["Confirm your email address"]
 
-    assert [m.subject for m in mailer.sent] == [
-        "Confirm your email address",
-        "You already have a Flash-Cards account",
-    ]
-    assert all(m.to == "a@example.com" for m in mailer.sent)
-
-    # The new account signs in with the first password, not the second.
+    # Sign-in needs the confirmed address, and only the first password works.
+    unconfirmed = client.post("/auth/login", json={"email": "a@example.com", "password": PASSWORD})
+    assert unconfirmed.status_code == 403
+    assert unconfirmed.json()["detail"] == "Confirm your email address before signing in."
+    wrong = client.post("/auth/login", json={"email": "a@example.com", "password": "other-pw-123"})
+    assert wrong.status_code == 401
+    token = _token_in(mailer.sent[0])
+    assert client.post("/auth/verify-email", json={"token": token}).status_code == 204
     login = client.post("/auth/login", json={"email": "a@example.com", "password": PASSWORD})
     assert login.status_code == 200 and login.json()["role"] == "member"
+
+    # Confirmed now: a repeat sign-up gets the notice instead.
+    client.post("/auth/register", json={"email": "a@example.com", "password": PASSWORD})
+    assert mailer.sent[-1].subject == "You already have a Flash-Cards account"
+    assert all(m.to == "a@example.com" for m in mailer.sent)
+
+
+def _token_in(email: OutgoingEmail) -> str:
+    link = next(word for word in email.body.split() if word.startswith("http"))
+    return link.split("#token=", 1)[1]
+
+
+def test_an_unconfirmed_account_gets_a_fresh_link_after_the_cooldown(
+    mailer: _CapturingMailer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "flashcards.application.account_email_service.VERIFICATION_COOLDOWN", timedelta(0)
+    )
+    client = _open_app()
+    for _ in range(2):
+        client.post("/auth/register", json={"email": "b@example.com", "password": PASSWORD})
+    assert [m.subject for m in mailer.sent] == ["Confirm your email address"] * 2
 
 
 def test_a_suspended_account_gets_no_notice(mailer: _CapturingMailer) -> None:

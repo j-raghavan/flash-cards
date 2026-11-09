@@ -308,6 +308,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             mailer=mailer,
             public_base_url=settings.public_base_url,
             metering=metering,
+            require_verified_sign_in=not settings.invite_only,
         )
         container = None
     else:
@@ -316,6 +317,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             mailer=mailer,
             public_base_url=settings.public_base_url,
             metering=metering,
+            require_verified_sign_in=not settings.invite_only,
         )
         engine = None
 

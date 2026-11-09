@@ -29,6 +29,10 @@ class AccountSuspended(AuthError):
     pass
 
 
+class EmailNotVerified(AuthError):
+    """The password was right, but this instance requires a verified email first."""
+
+
 @dataclass(frozen=True, slots=True)
 class IssuedSession:
     session: Session
@@ -44,12 +48,17 @@ class AuthService:
         clock: Clock,
         ttl: timedelta = DEFAULT_SESSION_TTL,
         dummy_hash: str | None = None,
+        require_verified: bool = False,
     ) -> None:
         self._users = users
         self._sessions = sessions
         self._hasher = hasher
         self._clock = clock
         self._ttl = ttl
+        # On an instance with public sign-up, an address must be confirmed before
+        # it can sign in, so nobody can use an account made with someone else's
+        # (or a throwaway) email.
+        self._require_verified = require_verified
         # A throwaway hash verified when no user matches, so an absent account and a
         # wrong password cost the same work and cannot be told apart by timing.
         # Callers that build one AuthService per request pass a precomputed value
@@ -69,6 +78,8 @@ class AuthService:
             raise InvalidCredentials()
         if user.status() is UserStatus.SUSPENDED:
             raise AccountSuspended()
+        if self._require_verified and not user.is_verified:
+            raise EmailNotVerified()
         return await self.start_session(user, device=device)
 
     async def start_session(self, user: User, *, device: str = UNKNOWN_DEVICE) -> IssuedSession:
