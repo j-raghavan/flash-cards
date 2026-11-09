@@ -14,6 +14,7 @@ import { cardSides } from "../lib/cardSides";
 import { clozeRevealAll } from "../lib/cloze";
 import { useJobEvents } from "../lib/useJobEvents";
 import { useSubmit } from "../lib/useSubmit";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 const RECONNECT_MS = 3000;
 
@@ -150,6 +151,7 @@ function DraftReview({ jobId, deckId }: { jobId: string; deckId: string | null }
 }
 
 export function JobPage() {
+  useDocumentTitle("Card generation");
   const { jobId = "" } = useParams();
   const [params] = useSearchParams();
   const deckId = params.get("deck");

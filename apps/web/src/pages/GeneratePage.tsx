@@ -10,6 +10,7 @@ import type { JobStatus, Thoroughness } from "../api/types";
 import { ErrorText } from "../components/ui";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 const STATUS_LABELS: Record<JobStatus, string> = {
   queued: "Waiting to start",
@@ -29,6 +30,7 @@ const LEVELS: { value: Thoroughness; label: string; hint: string }[] = [
 ];
 
 export function GeneratePage() {
+  useDocumentTitle("Generate cards");
   const { deckId = "" } = useParams();
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);

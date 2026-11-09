@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 
 import { mockApi } from "../test/helpers";
-import { ai, auth, browserParams, cards, decks, notes } from "./endpoints";
+import { admin, ai, auth, browserParams, cards, decks, goals, media, notes, noteTypes, shares } from "./endpoints";
+import { plans, progress, reviews } from "./studyProgress";
 
 describe("browserParams", () => {
   it("repeats list values and skips empty ones", () => {
@@ -86,5 +87,100 @@ describe("endpoints", () => {
     expect(calls[16]?.body).toEqual({ rating: 3, idempotency_key: "k1" });
     expect(calls[23]?.body).toMatchObject({ deck_id: "d1", thoroughness: "concise" });
     expect(ai.eventsPath("j 1")).toBe("/ai/jobs/j%201/events");
+  });
+
+  it("map goals, sharing, import, admin, note types and media to the API routes", async () => {
+    const calls = mockApi({});
+    const file = new File(["x"], "a.apkg");
+    const occlusion = { image_id: "m1", masks: [{ id: 1, left: 0, top: 0, width: 0.5, height: 0.5 }] };
+    const types = { name: "T", fields: ["A"], templates: [{ name: "C", front: "{{A}}", back: "{{A}}" }] };
+    await Promise.allSettled([
+      notes.create("d1", "image_occlusion", { header: "" }, [], { occlusion }),
+      notes.update("n1", { header: "h" }, [], occlusion),
+      goals.list(),
+      goals.get("g1"),
+      goals.create({ name: "Exam", deck_ids: ["d1"], exam_date: "2026-12-01T00:00:00Z", desired_grade: 0.5 }),
+      goals.update("g1", { name: "Exam 2" }),
+      goals.remove("g1"),
+      goals.plan("g1"),
+      shares.list("d1"),
+      shares.create("d1", true),
+      shares.setAllowClone("s1", false),
+      shares.revoke("s1"),
+      shares.preview("t/1"),
+      shares.clone("t1"),
+      admin.invites(),
+      admin.createInvite(null, "member", 7),
+      admin.revokeInvite("i1"),
+      admin.users(),
+      admin.suspend("u1"),
+      admin.unsuspend("u1"),
+      admin.unlock("u1"),
+      admin.setRole("u1", "admin"),
+      admin.removeUser("u1"),
+      admin.audit(50, null),
+      admin.audit(50, "e9"),
+      noteTypes.list(),
+      noteTypes.get("nt1"),
+      noteTypes.create(types),
+      noteTypes.update("nt1", { ...types, renamed: { B: "A" } }),
+      noteTypes.remove("nt1"),
+      media.upload(file),
+      progress.today(),
+      progress.settings(),
+      progress.updateSettings({ daily_goal: 30 }),
+      progress.stats(null, 90, 30),
+      progress.stats("d1", 7, 14),
+      reviews.undo("r1"),
+      plans.report("g1"),
+      plans.accept("g1"),
+    ]);
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "POST /decks/d1/notes",
+      "PATCH /notes/n1",
+      "GET /goals",
+      "GET /goals/g1",
+      "POST /goals",
+      "PATCH /goals/g1",
+      "DELETE /goals/g1",
+      "GET /goals/g1/plan",
+      "GET /decks/d1/shares",
+      "POST /decks/d1/shares",
+      "PATCH /shares/s1",
+      "POST /shares/s1/revoke",
+      "GET /shared/t%2F1",
+      "POST /shared/t1/clone",
+      "GET /admin/invites",
+      "POST /admin/invites",
+      "POST /admin/invites/i1/revoke",
+      "GET /admin/users",
+      "POST /admin/users/u1/suspend",
+      "POST /admin/users/u1/unsuspend",
+      "POST /admin/users/u1/unlock",
+      "PATCH /admin/users/u1",
+      "DELETE /admin/users/u1",
+      "GET /admin/audit?limit=50",
+      "GET /admin/audit?limit=50&before=e9",
+      "GET /note-types",
+      "GET /note-types/nt1",
+      "POST /note-types",
+      "PATCH /note-types/nt1",
+      "DELETE /note-types/nt1",
+      "POST /media",
+      "GET /progress/today",
+      "GET /progress/settings",
+      "PATCH /progress/settings",
+      "GET /progress/stats?days=90&forecast_days=30",
+      "GET /progress/stats?days=7&forecast_days=14&deck_id=d1",
+      "POST /reviews/r1/undo",
+      "GET /goals/g1/plan",
+      "POST /goals/g1/plan/accept",
+    ]);
+    expect(calls[0]?.body).toEqual({ note_type: "image_occlusion", fields: { header: "" }, tags: [], occlusion });
+    expect(calls[1]?.body).toEqual({ fields: { header: "h" }, tags: [], occlusion });
+    expect(calls[9]?.body).toEqual({ allow_clone: true });
+    expect(calls[15]?.body).toEqual({ email: null, role: "member", ttl_days: 7 });
+    expect(calls[21]?.body).toEqual({ role: "admin" });
+    expect(calls[28]?.body).toEqual({ ...types, renamed: { B: "A" } });
   });
 });

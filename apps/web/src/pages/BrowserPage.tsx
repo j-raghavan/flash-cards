@@ -20,6 +20,7 @@ import { deckOptions } from "../lib/deckTree";
 import { parseTags } from "../lib/text";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 const PAGE_SIZE = 50;
 
@@ -211,6 +212,7 @@ function BulkBar({
 }
 
 export function BrowserPage() {
+  useDocumentTitle("Browse cards");
   const [params, setParams] = useSearchParams();
   const query = queryFromParams(params);
   const queryKey = JSON.stringify(query);

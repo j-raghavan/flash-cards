@@ -22,8 +22,8 @@ describe("submitReview", () => {
   const answer = { idempotency_key: "k1", user_id: "u1", card_id: "c1", deck_id: "d1", rating: 4 as const };
 
   it("sends the answer with its idempotency key when online", async () => {
-    const calls = mockApi({ "POST /cards/c1/review": { body: {} } });
-    await expect(submitReview(answer)).resolves.toBe("sent");
+    const calls = mockApi({ "POST /cards/c1/review": { body: { review_id: "r1" } } });
+    await expect(submitReview(answer)).resolves.toEqual({ outcome: "sent", result: { review_id: "r1" } });
     expect(calls[0]?.body).toEqual({ rating: 4, idempotency_key: "k1" });
     expect(await pending("u1")).toEqual([]);
   });
@@ -31,7 +31,7 @@ describe("submitReview", () => {
   it("queues without trying when the browser is offline", async () => {
     const calls = mockApi({});
     setOnline(false);
-    await expect(submitReview(answer)).resolves.toBe("queued");
+    await expect(submitReview(answer)).resolves.toEqual({ outcome: "queued" });
     expect(calls).toEqual([]);
     expect((await pending("u1")).map((r) => r.idempotency_key)).toEqual(["k1"]);
   });
@@ -41,14 +41,14 @@ describe("submitReview", () => {
       mockApi({ "POST /cards/c1/review": reply });
       await expect(
         submitReview({ ...answer, idempotency_key: `k-${String(reply instanceof Error ? 0 : reply.status)}` }),
-      ).resolves.toBe("queued");
+      ).resolves.toEqual({ outcome: "queued" });
     }
     expect(await pending("u1")).toHaveLength(4);
   });
 
   it("keeps an answer whose session has lapsed, to send after signing in again", async () => {
     mockApi({ "POST /cards/c1/review": { status: 401, body: { detail: "Not authenticated." } } });
-    await expect(submitReview(answer)).resolves.toBe("queued");
+    await expect(submitReview(answer)).resolves.toEqual({ outcome: "queued" });
     expect(await pending("u1")).toHaveLength(1);
   });
 

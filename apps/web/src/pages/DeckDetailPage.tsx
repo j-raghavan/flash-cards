@@ -6,6 +6,7 @@ import { useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { describeError } from "../api/client";
+import { exportDeck, saveFile, type ExportFormat } from "../api/ankiRoundTrip";
 import { decks } from "../api/endpoints";
 import type { Deck, DeckStats } from "../api/types";
 import { ConfirmButton, ErrorText, Loading, ProficiencyRing } from "../components/ui";
@@ -13,6 +14,7 @@ import { buildDeckTree, deckPath, descendantCount, flattenTree } from "../lib/de
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { CreateDeckForm } from "./DeckListPage";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 function StatsPanel({ stats }: { stats: DeckStats }) {
   const rows: [string, number][] = [
@@ -35,6 +37,51 @@ function StatsPanel({ stats }: { stats: DeckStats }) {
           </div>
         ))}
       </dl>
+    </div>
+  );
+}
+
+const EXPORTS: { format: ExportFormat; label: string }[] = [
+  { format: "apkg", label: "Anki package" },
+  { format: "csv", label: "CSV" },
+  { format: "json", label: "JSON" },
+];
+
+/** Download the deck with its sub-decks (F-IMP-4). */
+function ExportDeck({ deckId }: { deckId: string }) {
+  const submit = useSubmit();
+  const [note, setNote] = useState<string | null>(null);
+  return (
+    <div className="stack">
+      <div className="row" role="group" aria-label="Export this deck">
+        <span className="muted">Export with sub-decks:</span>
+        {EXPORTS.map(({ format, label }) => (
+          <button
+            key={format}
+            type="button"
+            className="button"
+            disabled={submit.busy}
+            onClick={() => {
+              setNote(null);
+              void submit.run(async () => {
+                const exported = await exportDeck(deckId, format);
+                saveFile(exported.blob, exported.filename);
+                setNote(
+                  exported.omittedNotes > 0
+                    ? `Downloaded. ${String(exported.omittedNotes)} custom or image occlusion note${exported.omittedNotes === 1 ? " was" : "s were"} left out; JSON keeps them.`
+                    : "Downloaded.",
+                );
+              });
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p role="status" className="muted">
+        {note}
+      </p>
+      <ErrorText message={submit.error} />
     </div>
   );
 }
@@ -104,6 +151,7 @@ export function DeckDetailPage() {
   const all = useResource(() => decks.list(), `decks:${deckId}`);
   const stats = useResource(() => decks.stats(deckId), `stats:${deckId}`);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  useDocumentTitle(all.data?.find((d) => d.id === deckId)?.name ?? "Deck");
 
   if (all.error !== null) {
     return <ErrorText message={all.error} />;
@@ -172,6 +220,9 @@ export function DeckDetailPage() {
         <Link className="button" to={`/cards?deck=${deckId}`}>
           Browse cards
         </Link>
+        <Link className="button" to={`/decks/${deckId}/share`}>
+          Share
+        </Link>
       </div>
 
       {children.length > 0 ? (
@@ -203,6 +254,7 @@ export function DeckDetailPage() {
         />
       </div>
       <ErrorText message={deleteError} />
+      <ExportDeck deckId={deckId} />
     </section>
   );
 }
