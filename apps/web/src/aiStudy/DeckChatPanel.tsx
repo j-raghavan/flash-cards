@@ -39,13 +39,14 @@ function distinctCitations(citations: Citation[]): Citation[] {
 
 /** A citation's label: the file's name when the API knows it, or its number in this conversation. */
 function citationLabel(citation: Citation, files: string[]): string {
-  const name = citation.file_name?.trim() ?? "";
+  // Counted in code points, as the API counts, so no surrogate pair is split.
+  const name = Array.from(citation.file_name?.trim() ?? "");
   const file =
-    name === ""
+    name.length === 0
       ? `Document ${String(files.indexOf(citation.file_id) + 1)}`
       : name.length > MAX_FILE_NAME
-        ? `${name.slice(0, MAX_FILE_NAME - 1)}\u2026`
-        : name;
+        ? `${name.slice(0, MAX_FILE_NAME - 1).join("")}\u2026`
+        : name.join("");
   return `${file}, page ${String(citation.page)}`;
 }
 

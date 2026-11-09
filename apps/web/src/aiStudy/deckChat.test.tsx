@@ -36,6 +36,7 @@ describe("document chat", () => {
           { file_id: "f-c", page: 2, file_name: "Cell biology <b>notes</b>.pdf" },
           { file_id: "f-d", page: 4, file_name: `${"x".repeat(130)}.pdf` },
           { file_id: "f-e", page: 1, file_name: "  " },
+          { file_id: "f-f", page: 9, file_name: "\u{1F9EC}".repeat(120) },
         ],
       },
       { answer: "I could not find that.", citations: [] },
@@ -78,6 +79,8 @@ describe("document chat", () => {
       "Cell biology <b>notes</b>.pdf, page 2",
       `${"x".repeat(119)}\u2026, page 4`,
       "Document 5, page 1",
+      // 120 code points fit, although they take 240 UTF-16 units.
+      `${"\u{1F9EC}".repeat(120)}, page 9`,
     ]);
     expect(second.querySelector("b")).toBeNull();
 

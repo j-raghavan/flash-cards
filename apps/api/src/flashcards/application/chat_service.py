@@ -32,6 +32,7 @@ from flashcards.domain.chat import (
     rank_passages,
     split_passages,
 )
+from flashcards.domain.jobs import AiJob
 from flashcards.domain.ports import (
     AiJobRepository,
     DocumentExtractor,
@@ -76,7 +77,8 @@ class ChatService:
         # A deck's sources include its subdecks'. Raises DeckNotFound if the deck is
         # missing or not the caller's.
         deck_ids = await self._decks.subtree_ids(owner_id=owner_id, deck_id=deck_id)
-        await self._index(owner_id, deck_ids)
+        jobs = await self._jobs.list_for_owner(owner_id)
+        await self._index(owner_id, deck_ids, jobs)
         indexed = [p for d in deck_ids for p in await self._passages.list_for_deck(d)]
         if not any(p.text.strip() for p in indexed):
             raise NoChatSources(deck_id)
@@ -99,14 +101,14 @@ class ChatService:
         await self._budget.record(owner_id, AiFeature.CHAT, result)
         answer = parse_chat_answer(result.data, top)
         return dataclasses.replace(
-            answer, citations=await self._named(owner_id, answer.citations)
+            answer, citations=await self._named(jobs, answer.citations)
         )
 
     async def _named(
-        self, owner_id: str, citations: tuple[Citation, ...]
+        self, jobs: list[AiJob], citations: tuple[Citation, ...]
     ) -> tuple[Citation, ...]:
         """Label each citation with its file's name, read only from the caller's own jobs."""
-        own = {job.source_id for job in await self._jobs.list_for_owner(owner_id)}
+        own = {job.source_id for job in jobs}
         names: dict[str, str | None] = {}
         for file_id in dict.fromkeys(c.file_id for c in citations):
             raw = await self._store.get(source_name_key(file_id)) if file_id in own else None
@@ -115,12 +117,12 @@ class ChatService:
             )
         return tuple(dataclasses.replace(c, file_name=names[c.file_id]) for c in citations)
 
-    async def _index(self, owner_id: str, deck_ids: list[str]) -> None:
+    async def _index(self, owner_id: str, deck_ids: list[str], jobs: list[AiJob]) -> None:
         # Each source is indexed under the deck its job generated into, so deleting
         # that deck later removes exactly its passages.
         wanted = set(deck_ids)
         done = {(d, f) for d in deck_ids for f in await self._passages.indexed_files(d)}
-        for job in await self._jobs.list_for_owner(owner_id):
+        for job in jobs:
             key = (job.draft_deck_id, job.source_id)
             if job.draft_deck_id not in wanted or key in done:
                 continue
