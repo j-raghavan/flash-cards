@@ -4,17 +4,22 @@
 Born-digital PDF pages yield their text (authoritative, with an exact page ref);
 text-less pages and uploaded images are rasterized/passed through for the vision
 model. Content type is sniffed from the bytes, never trusted from the client.
-The synchronous PyMuPDF work runs in a worker thread so SSE progress stays live.
+All synchronous PyMuPDF work (opening, counting, text extraction, rendering)
+runs in a worker thread under the PARSING limiter, so a slow or hostile file
+never stalls the event loop, and a page is rendered at a resolution that keeps
+its pixmap under MAX_RASTER_PIXELS however large the page claims to be.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator
+from functools import partial
 
-import anyio
 import puremagic
 import pymupdf
 
+from flashcards.adapters.offload import PARSING, run_blocking
 from flashcards.domain.sources import (
     ExtractedPage,
     PageKind,
@@ -27,6 +32,10 @@ _ALLOWED = {"application/pdf", "image/png", "image/jpeg"}
 # A page with at least this much extracted text is treated as born-digital text.
 _TEXT_THRESHOLD = 16
 _RASTER_DPI = 150
+_POINTS_PER_INCH = 72
+# Upper bound on a rendered page's pixels (about 48 MB as RGB). A letter page at
+# 150 DPI is about 2.1 million; larger pages are rendered at a lower resolution.
+MAX_RASTER_PIXELS = 16_000_000
 
 
 class PyMuPDFExtractor:
@@ -39,14 +48,10 @@ class PyMuPDFExtractor:
             raise UnsupportedMediaType(media)
         return media
 
-    def count_pages(self, data: bytes) -> int:
+    async def count_pages(self, data: bytes) -> int:
         if self.sniff(data) != "application/pdf":
             return 1
-        doc = pymupdf.open(stream=data, filetype="pdf")
-        try:
-            return int(doc.page_count)
-        finally:
-            doc.close()
+        return await run_blocking(PARSING, lambda: _page_count(data))
 
     async def extract(
         self, data: bytes, *, file_id: str, max_pages: int
@@ -61,25 +66,46 @@ class PyMuPDFExtractor:
             )
             return
 
-        doc = await anyio.to_thread.run_sync(
-            lambda: pymupdf.open(stream=data, filetype="pdf")
-        )
+        doc = await run_blocking(PARSING, lambda: pymupdf.open(stream=data, filetype="pdf"))
         try:
             page_count = int(doc.page_count)
             if page_count > max_pages:
                 raise TooManyPages(f"{page_count} pages (max {max_pages})")
             for index in range(page_count):
-                yield await anyio.to_thread.run_sync(self._render_page, doc, index, file_id)
+                yield await run_blocking(PARSING, partial(_render_page, doc, index, file_id))
         finally:
             doc.close()
 
-    def _render_page(self, doc: object, index: int, file_id: str) -> ExtractedPage:
-        page = doc[index]  # type: ignore[index]
-        text = str(page.get_text()).strip()
-        ref = SourceRef(file_id=file_id, page=index + 1)
-        if len(text) >= _TEXT_THRESHOLD:
-            return ExtractedPage(ref=ref, kind=PageKind.TEXT, text=text)
-        png = bytes(page.get_pixmap(dpi=_RASTER_DPI).tobytes("png"))
-        return ExtractedPage(
-            ref=ref, kind=PageKind.IMAGE, image=png, image_media_type="image/png"
-        )
+
+def _page_count(data: bytes) -> int:
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    try:
+        return int(doc.page_count)
+    finally:
+        doc.close()
+
+
+def raster_zoom(width: float, height: float) -> float:
+    """The scale to render a page of this size (in points) at, within MAX_RASTER_PIXELS.
+
+    The page's dimensions come from the untrusted file and are checked before
+    anything is allocated: a page that would exceed the cap at _RASTER_DPI is
+    rendered at the largest resolution that fits instead.
+    """
+    zoom = _RASTER_DPI / _POINTS_PER_INCH
+    area = width * height
+    if area * zoom * zoom > MAX_RASTER_PIXELS:
+        zoom = math.sqrt(MAX_RASTER_PIXELS / area)
+    return zoom
+
+
+def _render_page(doc: pymupdf.Document, index: int, file_id: str) -> ExtractedPage:
+    page = doc[index]
+    text = str(page.get_text()).strip()
+    ref = SourceRef(file_id=file_id, page=index + 1)
+    if len(text) >= _TEXT_THRESHOLD:
+        return ExtractedPage(ref=ref, kind=PageKind.TEXT, text=text)
+    rect = page.rect
+    zoom = raster_zoom(float(rect.width), float(rect.height))
+    png = bytes(page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png"))
+    return ExtractedPage(ref=ref, kind=PageKind.IMAGE, image=png, image_media_type="image/png")

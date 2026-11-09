@@ -56,7 +56,7 @@ class GenerationRequestService:
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
         # Raises UnsupportedMediaType on a disallowed type.
         media = self._extractor.sniff(data)
-        pages = self._extractor.count_pages(data)
+        pages = await self._extractor.count_pages(data)
         return await self._enqueue(owner_id, deck_id, data, media, pages, thoroughness)
 
     async def start_transcript(

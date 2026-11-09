@@ -49,11 +49,13 @@ class Clock(Protocol):
 
 
 class PasswordHasher(Protocol):
-    def hash(self, password: str) -> str:
+    """Hashing is deliberately slow, so implementations keep it off the event loop."""
+
+    async def hash(self, password: str) -> str:
         """Return a self-describing password hash (algorithm and parameters embedded)."""
         ...
 
-    def verify(self, password_hash: str, password: str) -> bool:
+    async def verify(self, password_hash: str, password: str) -> bool:
         """Return whether the password matches the hash. Never raises on a mismatch."""
         ...
 
@@ -336,8 +338,12 @@ class DocumentExtractor(Protocol):
         """
         ...
 
-    def count_pages(self, data: bytes) -> int:
-        """Return the page count cheaply (images are one page), for quota reservation."""
+    async def count_pages(self, data: bytes) -> int:
+        """Return the page count (images are one page), for quota reservation.
+
+        Parsing untrusted bytes can be slow, so implementations keep it off the
+        event loop.
+        """
         ...
 
     def extract(
@@ -468,11 +474,12 @@ class MediaRepository(Protocol):
 
 
 class PackageReader(Protocol):
-    def read(self, data: bytes) -> AnkiPackage:
+    async def read(self, data: bytes) -> AnkiPackage:
         """Parse an .apkg into an AnkiPackage, or raise flashcards.domain.anki errors.
 
         The archive is untrusted: implementations guard against path traversal and
-        zip bombs and never execute embedded content (NF-SEC-2).
+        zip bombs, never execute embedded content (NF-SEC-2), and keep the parsing
+        off the event loop.
         """
         ...
 

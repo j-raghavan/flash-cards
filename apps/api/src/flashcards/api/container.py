@@ -41,6 +41,7 @@ from flashcards.adapters.memory import (
     NullUnitOfWork,
     SystemClock,
 )
+from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
 from flashcards.application.account_email_service import AccountEmailService
@@ -377,10 +378,12 @@ def build_container(
     llm and job_queue can be supplied so a caller can inject a real LLM or share
     one worker queue; both default to the no-op/in-process implementations.
     """
+    hasher = Argon2PasswordHasher()
     return build_services(
         Repositories(
             clock=SystemClock(),
-            hasher=Argon2PasswordHasher(),
+            hasher=hasher,
+            dummy_hash=hasher.dummy_hash(),
             scheduler=FsrsScheduler(),
             invites=InMemoryInviteRepository(),
             users=InMemoryUserRepository(),
@@ -399,7 +402,7 @@ def build_container(
             job_queue=job_queue or InProcessJobQueue(),
             llm=llm or NullLLMProvider(),
             goals=InMemoryGoalRepository(),
-            package_reader=ApkgReader(),
+            package_reader=BlockingPackageReader(ApkgReader().read),
             media=InMemoryMediaRepository(),
             media_sniffer=PuremagicMediaSniffer(),
             mock_exams=InMemoryMockExamRepository(),

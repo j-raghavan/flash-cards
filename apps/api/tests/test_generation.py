@@ -52,7 +52,7 @@ class FakeExtractor:
     def sniff(self, data: bytes) -> str:
         return "application/pdf"
 
-    def count_pages(self, data: bytes) -> int:
+    async def count_pages(self, data: bytes) -> int:
         return len(self._pages)
 
     async def extract(

@@ -8,7 +8,6 @@ that commits on success and rolls back on any error.
 
 from __future__ import annotations
 
-import secrets
 from collections.abc import AsyncIterator, Callable
 
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -22,6 +21,7 @@ from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.mailers import LogMailer
 from flashcards.adapters.media import PuremagicMediaSniffer
 from flashcards.adapters.memory import SystemClock
+from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.sql import (
     SqlAiJobRepository,
@@ -75,8 +75,6 @@ class _AfterCommitQueue:
             await self._queue.enqueue(job_id)
         self._pending.clear()
 
-TOKEN_BYTES = 32
-
 
 def in_memory_provider(
     llm: LLMProvider | None = None,
@@ -107,11 +105,11 @@ def sql_provider(
     clock = SystemClock()
     hasher = Argon2PasswordHasher()
     scheduler = FsrsScheduler()
-    dummy_hash = hasher.hash(secrets.token_urlsafe(TOKEN_BYTES))
+    dummy_hash = hasher.dummy_hash()
     # Stateless/process-level singletons, shared across requests.
     extractor = TranscriptAwareExtractor(PyMuPDFExtractor())
     transcripts = NullTranscriptProvider()
-    package_reader = ApkgReader()
+    package_reader = BlockingPackageReader(ApkgReader().read)
     media_sniffer = PuremagicMediaSniffer()
     job_queue = InProcessJobQueue()
     provider_llm = llm or NullLLMProvider()

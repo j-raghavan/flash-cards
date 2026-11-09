@@ -27,7 +27,7 @@ class ApkgImportService:
         self._notes = notes
 
     async def import_package(self, *, owner_id: str, data: bytes) -> ImportReport:
-        package = self._reader.read(data)
+        package = await self._reader.read(data)
         deck_by_note = _deck_id_by_note_guid(package)
         our_deck_id = await self._create_decks(owner_id, package, set(deck_by_note.values()))
 
