@@ -99,6 +99,30 @@ async def test_bad_input_is_refused_after_the_attempt_is_counted() -> None:
     assert outcome.created is True
 
 
+class _RacingUsers(InMemoryUserRepository):
+    """A concurrent sign-up stores the same email between the lookup and the insert."""
+
+    async def add(self, user: User) -> None:
+        if await self.get_by_email(user.email) is None and user.id != "winner":
+            await super().add(
+                User(id="winner", email=user.email, password_hash="h", role=Role.MEMBER,
+                     created_at=NOW)
+            )
+        await super().add(user)
+
+
+async def test_losing_a_sign_up_race_answers_as_for_an_existing_account() -> None:
+    users = _RacingUsers()
+    events = InMemoryAuditRepository()
+    service = PublicSignupService(
+        users, _Hasher(), InMemoryLoginThrottleRepository(), AuditService(events, _Clock()),
+        _Clock(),
+    )
+    outcome = await service.register(email="race@example.com", password=PASSWORD, client="c")
+    assert outcome.created is False and outcome.user.id == "winner"
+    assert await events.list_recent(limit=5) == []
+
+
 class _CapturingMailer:
     def __init__(self) -> None:
         self.sent: list[OutgoingEmail] = []

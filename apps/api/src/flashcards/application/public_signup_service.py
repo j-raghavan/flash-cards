@@ -24,7 +24,12 @@ from flashcards.domain.audit import AuditAction
 from flashcards.domain.invites import Role, hash_token
 from flashcards.domain.login_throttle import LOCKOUT, LoginLocked, admitted
 from flashcards.domain.ports import Clock, LoginThrottleRepository, PasswordHasher, UserRepository
-from flashcards.domain.users import User, validate_email, validate_password
+from flashcards.domain.users import (
+    EmailAlreadyRegistered,
+    User,
+    validate_email,
+    validate_password,
+)
 
 
 def signup_throttle_key(client: str) -> str:
@@ -81,7 +86,15 @@ class PublicSignupService:
             role=Role.MEMBER,
             created_at=now,
         )
-        await self._users.add(user)
+        try:
+            await self._users.add(user)
+        except EmailAlreadyRegistered:
+            # A concurrent sign-up with the same email committed first. Answer as
+            # for any existing account, so the race neither fails nor tells.
+            winner = await self._users.get_by_email(normalized)
+            if winner is None:  # pragma: no cover - the winner was deleted meanwhile
+                raise
+            return SignupOutcome(user=winner, created=False)
         await self._audit.record(
             AuditAction.USER_REGISTERED,
             actor_id=user.id,

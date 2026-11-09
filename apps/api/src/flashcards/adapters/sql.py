@@ -232,9 +232,12 @@ class SqlUserRepository:
         self._session = session
 
     async def add(self, user: User) -> None:
-        self._session.add(user_to_row(user))
+        # A savepoint: when a concurrent sign-up took the email first, only this
+        # insert is undone, and the request's transaction stays usable. The caller
+        # can then answer as it does for any existing account (ADR 0019).
         try:
-            await self._session.flush()
+            async with self._session.begin_nested():
+                self._session.add(user_to_row(user))
         except IntegrityError as exc:
             raise EmailAlreadyRegistered(user.email) from exc
 
