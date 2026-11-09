@@ -132,7 +132,8 @@ function UsageFigure({
             {sorted.map((row) => (
               <tr key={row.key}>
                 <th scope="row">{row.label}</th>
-                {withPages ? <td>{count(row.pages ?? 0)}</td> : null}
+                {/* Rows in one table all count pages, or none do. */}
+                {row.pages === undefined ? null : <td>{count(row.pages)}</td>}
                 <td>{count(row.calls)}</td>
                 <td>{count(row.input_tokens)}</td>
                 <td>{count(row.output_tokens)}</td>
