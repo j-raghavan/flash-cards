@@ -2,7 +2,7 @@
 // Small shared pieces: error text, loading text, an inline confirm and the
 // proficiency ring.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { renderMarkdown } from "../lib/markdown";
 
@@ -96,6 +96,71 @@ export function ConfirmButton({ label, prompt, confirmLabel, onConfirm }: Confir
         >
           Cancel
         </button>
+      </div>
+    </div>
+  );
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * A modal dialog: focus moves into it when it opens, Tab and Shift+Tab stay
+ * inside it, Escape closes it, and focus returns to where it was on close.
+ */
+export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    ref.current?.focus();
+    return () => {
+      previous?.focus();
+    };
+  }, []);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab" || ref.current === null) {
+      return;
+    }
+    // The Close button is always there, so the list is never empty.
+    const focusable = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === ref.current)) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  };
+
+  return (
+    <div className="dialog-backdrop">
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        ref={ref}
+        onKeyDown={onKeyDown}
+      >
+        <div className="dialog-header">
+          <h2 id={titleId}>{title}</h2>
+          <button type="button" className="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        {children}
       </div>
     </div>
   );

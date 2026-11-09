@@ -590,6 +590,59 @@ progress {
   border: 2px solid var(--accent);
 }
 
+.editor.single {
+  grid-template-columns: 1fr;
+}
+
+.study-meta {
+  justify-content: space-between;
+}
+
+.study-meta p {
+  margin: 0;
+}
+
+.celebration {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5vh 16px;
+  overflow-y: auto;
+  background: rgb(0 0 0 / 40%);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 680px;
+  padding: 16px 20px 20px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog-header h2 {
+  margin: 0;
+}
+
 @media (max-width: 520px) {
   .ratings {
     grid-template-columns: repeat(2, 1fr);

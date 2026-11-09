@@ -10,9 +10,11 @@ import { DeckListPage } from "./pages/DeckListPage";
 import { GeneratePage } from "./pages/GeneratePage";
 import { JobPage } from "./pages/JobPage";
 import { EditNotePage, NewNotePage } from "./pages/NoteEditorPage";
+import { useDocumentTitle } from "./lib/useDocumentTitle";
 import { StudyPage } from "./pages/StudyPage";
 
 function NotFound() {
+  useDocumentTitle("Page not found");
   return (
     <section>
       <h1>Page not found</h1>

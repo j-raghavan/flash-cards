@@ -9,11 +9,13 @@ import { auth } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorText, Loading } from "../components/ui";
 import { safeNextPath, tokenFromLocation } from "../lib/text";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useSubmit } from "../lib/useSubmit";
 
 const MIN_PASSWORD_LENGTH = 12;
 
 function AuthFrame({ title, children }: { title: string; children: ReactNode }) {
+  useDocumentTitle(title);
   return (
     <main id="main" className="auth">
       <p className="brand">Flash-Cards</p>

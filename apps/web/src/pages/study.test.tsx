@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -293,5 +293,221 @@ describe("study session", () => {
     mockApi({ ...me, "GET /decks/d1/review": new TypeError("offline") });
     renderApp("/decks/d1/study");
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server");
+  });
+
+  it("titles the page", async () => {
+    mockApi({ ...me, "GET /decks/d1/review": { body: [] } });
+    renderApp("/decks/d1/study");
+    await screen.findByText("Nothing is due in this deck right now.");
+    expect(document.title).toBe("Study · Flash-Cards");
+  });
+});
+
+const goal = (reviews: number, justCompleted = false) => ({
+  date: "2026-11-08",
+  time_zone: "UTC",
+  reviews,
+  daily_goal: 2,
+  goal_met: reviews >= 2,
+  just_completed: justCompleted,
+});
+
+describe("undo, daily goal and editing in a session", () => {
+  it("counts toward the daily goal, celebrates it, and undoes the last answer", async () => {
+    const calls = mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1"), card("c2")] },
+      "GET /cards/c1": { body: basic("c1", "Q1", "A1") },
+      "GET /cards/c2": { body: basic("c2", "Q2", "A2") },
+      "POST /cards/c1/review": { body: { review_id: "r1", daily_goal: goal(1) } },
+      "POST /cards/c2/review": { body: { review_id: "r2", daily_goal: goal(2, true) } },
+      "POST /reviews/r1/undo": { body: { review_id: "r1", card_id: "c1", schedule: null, daily_goal: goal(0) } },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("Q1");
+    expect(screen.queryByRole("button", { name: /Undo last answer/ })).not.toBeInTheDocument();
+    await user.keyboard(" 3");
+    expect(await screen.findByText("Today: 1 of 2")).toBeInTheDocument();
+    await screen.findByText("Q2");
+    await user.keyboard("u");
+    expect(await screen.findByText("Today: 0 of 2")).toBeInTheDocument();
+    expect(await screen.findByText("Card 1 of 2")).toBeInTheDocument();
+    expect(await screen.findByText("Q1")).toBeInTheDocument();
+    expect(screen.queryByText("A1")).not.toBeInTheDocument();
+    expect(calls.filter((c) => c.path === "/reviews/r1/undo")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Undo last answer/ })).not.toBeInTheDocument();
+
+    await user.keyboard(" 3");
+    await screen.findByText("Q2");
+    await user.keyboard(" 4");
+    expect(await screen.findByText("Daily goal reached: 2 cards today. Well done.")).toBeInTheDocument();
+  });
+
+  it("undoes the answer that ended a round from the summary, with Ctrl+Z", async () => {
+    let round = 0;
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": () => {
+        round += 1;
+        return { body: round === 1 ? [card("c1")] : [] };
+      },
+      "GET /cards/c1": { body: basic("c1", "Only", "A") },
+      "POST /cards/c1/review": { body: { review_id: "r1", daily_goal: goal(1) } },
+      "POST /reviews/r1/undo": { body: { review_id: "r1", card_id: "c1", schedule: null, daily_goal: goal(0) } },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("Only");
+    await user.keyboard(" 2");
+    expect(await screen.findByText("You reviewed 1 card.")).toBeInTheDocument();
+    await screen.findByRole("button", { name: /Undo last answer/ });
+    await user.keyboard("{Control>}z{/Control}");
+    expect(await screen.findByText("Only")).toBeInTheDocument();
+    expect(screen.getByText("Card 1 of 1")).toBeInTheDocument();
+    await user.keyboard("{Control>}z{/Control}"); // nothing left to undo
+    expect(screen.getByText("Only")).toBeInTheDocument();
+  });
+
+  it("reports an undo the server refuses and offers no second try", async () => {
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1"), card("c2")] },
+      "GET /cards/c1": { body: basic("c1", "Q1", "A1") },
+      "GET /cards/c2": { body: basic("c2", "Q2", "A2") },
+      "POST /cards/c1/review": { body: { review_id: "r1" } },
+      "POST /reviews/r1/undo": { status: 409, body: { detail: "That answer can no longer be undone." } },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("Q1");
+    await user.keyboard(" 3");
+    await user.click(await screen.findByRole("button", { name: /Undo last answer/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That answer can no longer be undone.");
+    expect(screen.getByText("Q2")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Undo last answer/ })).not.toBeInTheDocument();
+  });
+
+  it("offers no undo for an answer queued offline or from a server without undo", async () => {
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1"), card("c2"), card("c3")] },
+      "GET /cards/c1": { body: basic("c1", "Q1", "A1") },
+      "GET /cards/c2": { body: basic("c2", "Q2", "A2") },
+      "GET /cards/c3": { body: basic("c3", "Q3", "A3") },
+      "POST /cards/c1/review": { body: {} },
+      "POST /cards/c2/review": new TypeError("offline"),
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("Q1");
+    await user.keyboard(" 3");
+    await screen.findByText("Q2");
+    await user.keyboard(" 3");
+    await screen.findByText("Q3");
+    await user.keyboard("u{Meta>}z{/Meta}");
+    expect(screen.queryByRole("button", { name: /Undo last answer/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Q3")).toBeInTheDocument();
+  });
+
+  it("edits the card in a dialog and carries on with the edited card", async () => {
+    let front = "Old question";
+    const calls = mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1")] },
+      "GET /cards/c1": () => ({ body: basic("c1", front, "Answer") }),
+      "GET /notes/n-c1": {
+        body: {
+          id: "n-c1",
+          deck_id: "d1",
+          note_type: "basic",
+          fields: { front: "Old question", back: "Answer" },
+          tags: [],
+          created_at: "2026-01-01T00:00:00Z",
+          cards: [card("c1")],
+        },
+      },
+      "PATCH /notes/n-c1": () => {
+        front = "New question";
+        return { body: {} };
+      },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("Old question");
+    await user.keyboard("e");
+    const dialog = await screen.findByRole("dialog", { name: "Edit card" });
+    expect(dialog).toHaveFocus();
+    const field = await within(dialog).findByLabelText("Front");
+    await user.keyboard(" "); // keys in the dialog do not drive the session
+    expect(screen.queryByRole("button", { name: /Again/ })).not.toBeInTheDocument();
+    await user.clear(field);
+    await user.type(field, "New question");
+    await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("New question")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Card 1 of 1" })).toHaveFocus(); // where focus was before
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
+      fields: { front: "New question", back: "Answer" },
+      tags: [],
+    });
+  });
+
+  it("closes the editor with Escape and shows a card the edit removed as one to skip", async () => {
+    let gone = false;
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1", 2)] },
+      "GET /cards/c1": () =>
+        gone
+          ? { status: 404, body: { detail: "Card not found." } }
+          : { body: { ...card("c1", 2), note_type: "cloze", fields: { text: "{{c1::a}} {{c2::b}}" }, tags: [] } },
+      "GET /notes/n-c1": {
+        body: {
+          id: "n-c1",
+          deck_id: "d1",
+          note_type: "cloze",
+          fields: { text: "{{c1::a}} {{c2::b}}" },
+          tags: [],
+          created_at: "2026-01-01T00:00:00Z",
+          cards: [card("c1", 2)],
+        },
+      },
+      "PATCH /notes/n-c1": () => {
+        gone = true;
+        return { body: {} };
+      },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("[…]");
+    await user.click(screen.getByRole("button", { name: /Edit card/ }));
+    await screen.findByRole("dialog");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Edit card/ }));
+    const dialog = await screen.findByRole("dialog");
+    const text = await within(dialog).findByLabelText("Text");
+    await user.clear(text);
+    await user.type(text, "{{{{c1::a}}");
+    await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Card not found.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip this card" })).toBeInTheDocument();
+  });
+
+  it("shows a note that cannot load in the editor", async () => {
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1")] },
+      "GET /cards/c1": { body: basic("c1", "Q", "A") },
+      "GET /notes/n-c1": { status: 500 },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("Q");
+    await user.click(screen.getByRole("button", { name: /Edit card/ }));
+    expect(await within(await screen.findByRole("dialog")).findByRole("alert")).toHaveTextContent(
+      "Something went wrong on the server",
+    );
   });
 });

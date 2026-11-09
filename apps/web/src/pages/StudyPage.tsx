@@ -1,21 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A study session (F-STUDY-1, F-STUDY-3): show the question, reveal the answer,
-// rate it. Space reveals, 1 to 4 rate. Every answer carries its own
-// idempotency key and is queued on the device when the server is unreachable
-// (F-STUDY-5), so the session never waits on the network.
+// rate it. Space reveals, 1 to 4 rate, U undoes the last answer and E edits the
+// card. Every answer carries its own idempotency key and is queued on the
+// device when the server is unreachable (F-STUDY-5), so the session never waits
+// on the network.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { describeError } from "../api/client";
-import { cards, decks } from "../api/endpoints";
+import { cards, decks, notes } from "../api/endpoints";
+import { reviews, type DailyGoal } from "../api/studyProgress";
 import type { Card, CardDetail, Rating } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { OcclusionImage } from "../components/OcclusionImage";
-import { CardContent, ErrorText, Loading } from "../components/ui";
+import { CardContent, Dialog, ErrorText, Loading } from "../components/ui";
 import { cardSides } from "../lib/cardSides";
 import { newIdempotencyKey } from "../lib/text";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { useResource } from "../lib/useResource";
 import { pending, submitReview } from "../offline/reviewQueue";
+import { NoteEditor } from "./NoteEditorPage";
 
 const RATINGS: { rating: Rating; label: string }[] = [
   { rating: 1, label: "Again" },
@@ -31,10 +36,66 @@ function isTyping(target: EventTarget | null): boolean {
   );
 }
 
+/** The latest answer, kept so it can be taken back (ADR 0014). */
+interface LastAnswer {
+  key: string;
+  card: Card;
+  round: number;
+  index: number;
+  /** Set once the server has recorded the answer; a queued answer cannot be undone. */
+  reviewId: string | null;
+}
+
+/** Today's count against the daily goal, and a quiet word when it is reached. */
+function GoalProgress({ goal }: { goal: DailyGoal }) {
+  return goal.just_completed ? (
+    <p className="celebration" role="status">
+      Daily goal reached: {goal.reviews} cards today. Well done.
+    </p>
+  ) : (
+    <p className="muted">
+      Today: {goal.reviews} of {goal.daily_goal}
+      {goal.goal_met ? " (goal met)" : ""}
+    </p>
+  );
+}
+
+function EditCardDialog({
+  noteId,
+  onSaved,
+  onClose,
+}: {
+  noteId: string;
+  onSaved: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const note = useResource(() => notes.get(noteId), noteId);
+  return (
+    <Dialog title="Edit card" onClose={onClose}>
+      <ErrorText message={note.error} />
+      {note.data === undefined ? (
+        note.error === null ? (
+          <Loading />
+        ) : null
+      ) : (
+        <NoteEditor
+          deckId={note.data.deck_id}
+          initial={note.data}
+          withPreview={false}
+          onSaved={() => {
+            void onSaved();
+          }}
+        />
+      )}
+    </Dialog>
+  );
+}
+
 export function StudyPage() {
   const { deckId = "" } = useParams();
   const { user } = useAuth();
   const userId = user?.id ?? "";
+  useDocumentTitle("Study");
 
   const [queue, setQueue] = useState<Card[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -50,6 +111,10 @@ export function StudyPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  const [lastAnswer, setLastAnswer] = useState<LastAnswer | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const [goal, setGoal] = useState<DailyGoal | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const details = useRef(new Map<string, Promise<CardDetail>>());
   const inFlight = useRef(new Set<Promise<unknown>>());
@@ -146,16 +211,26 @@ export function StudyPage() {
       }
       setSubmitError(null);
       answered.current.add(card.id);
+      const key = newIdempotencyKey();
+      setLastAnswer({ key, card, round, index, reviewId: null });
       const sending = submitReview({
-        idempotency_key: newIdempotencyKey(),
+        idempotency_key: key,
         user_id: userId,
         card_id: card.id,
         deck_id: deckId,
         rating,
       }).then(
-        (outcome) => {
-          if (outcome === "queued") {
+        (sent) => {
+          if (sent.outcome === "queued") {
             setQueuedCount((n) => n + 1);
+            return;
+          }
+          const { review_id: reviewId, daily_goal: dailyGoal } = sent.result;
+          if (reviewId !== undefined) {
+            setLastAnswer((last) => (last?.key === key ? { ...last, reviewId } : last));
+          }
+          if (dailyGoal !== undefined) {
+            setGoal(dailyGoal);
           }
         },
         (failure: unknown) => {
@@ -167,12 +242,92 @@ export function StudyPage() {
       setReviewed((n) => n + 1);
       advance();
     },
-    [card, userId, deckId, advance],
+    [card, userId, deckId, advance, round, index],
+  );
+
+  // The answer an undo would take back: one the server recorded, while the
+  // session is showing cards and no other undo is on its way.
+  const undoTarget = useMemo(
+    () =>
+      lastAnswer !== null && lastAnswer.reviewId !== null && queue !== null && !undoing
+        ? { last: lastAnswer, reviewId: lastAnswer.reviewId, queue }
+        : null,
+    [lastAnswer, queue, undoing],
+  );
+
+  // Take the last answer back and show its card again, as a question.
+  const undo = useCallback(
+    (target: { last: LastAnswer; reviewId: string; queue: Card[] }) => {
+      const { last, reviewId } = target;
+      setUndoing(true);
+      setSubmitError(null);
+      reviews
+        .undo(reviewId)
+        .then(
+          (result) => {
+            setGoal(result.daily_goal);
+            answered.current.delete(last.card.id);
+            setReviewed((n) => n - 1);
+            setRevealedAt(null);
+            if (last.round === round) {
+              setIndex(last.index);
+            } else {
+              // A new round began after the answer: put the card first in it.
+              setQueue([last.card, ...target.queue.slice(index).filter((c) => c.id !== last.card.id)]);
+              setIndex(0);
+            }
+          },
+          (failure: unknown) => {
+            setSubmitError(describeError(failure));
+          },
+        )
+        .finally(() => {
+          setLastAnswer((current) => (current === last ? null : current));
+          setUndoing(false);
+        });
+    },
+    [round, index],
+  );
+
+  // After an edit, show the card as it is now; an edit can remove it (a cloze
+  // deletion taken out), which then shows as a card that will not load.
+  const refreshCard = useCallback(
+    async (cardId: string) => {
+      details.current.delete(cardId);
+      try {
+        const fresh = await fetchDetail(cardId);
+        setShown({ position, detail: fresh, error: null });
+      } catch (failure) {
+        setShown({ position, detail: null, error: describeError(failure) });
+      }
+      setEditing(false);
+    },
+    [position, fetchDetail],
   );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
+      if (editing || isTyping(event.target) || event.altKey) {
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        if (undoTarget !== null) {
+          event.preventDefault();
+          undo(undoTarget);
+        }
+        return;
+      }
+      if (event.metaKey || event.ctrlKey) {
+        return;
+      }
+      if (event.key.toLowerCase() === "u" && undoTarget !== null) {
+        event.preventDefault();
+        undo(undoTarget);
+        return;
+      }
+      if (event.key.toLowerCase() === "e" && detail !== null) {
+        event.preventDefault();
+        setEditing(true);
         return;
       }
       // Space and Enter on a link or button keep their own meaning.
@@ -192,7 +347,7 @@ export function StudyPage() {
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [revealed, detail, rate, position]);
+  }, [revealed, detail, rate, position, editing, undoTarget, undo]);
 
   // Keep keyboard and screen-reader focus with the session: the card when it
   // appears, the rating buttons once the answer shows.
@@ -210,6 +365,20 @@ export function StudyPage() {
       <Link to={`/decks/${deckId}`}>Back to deck</Link>
     </nav>
   );
+
+  const undoButton =
+    undoTarget === null ? null : (
+      <button
+        type="button"
+        className="button"
+        aria-keyshortcuts="U Control+Z Meta+Z"
+        onClick={() => {
+          undo(undoTarget);
+        }}
+      >
+        Undo last answer <kbd>U</kbd>
+      </button>
+    );
 
   if (loadError !== null) {
     return (
@@ -232,6 +401,7 @@ export function StudyPage() {
       <section className="study-done">
         {header}
         <h1>All caught up</h1>
+        {goal === null ? null : <GoalProgress goal={goal} />}
         <p role="status">
           {reviewed === 0
             ? "Nothing is due in this deck right now."
@@ -239,11 +409,12 @@ export function StudyPage() {
           {queuedCount > 0 ? ` ${queuedCount} will sync when you are back online.` : ""}
         </p>
         <ErrorText message={submitError} />
-        <p>
+        <div className="row">
           <Link className="button primary" to={`/decks/${deckId}`}>
             Back to deck
           </Link>
-        </p>
+          {undoButton}
+        </div>
       </section>
     );
   }
@@ -254,9 +425,12 @@ export function StudyPage() {
   return (
     <section className="study">
       {header}
-      <p className="muted">
-        Card {index + 1} of {queue.length}
-      </p>
+      <div className="row study-meta">
+        <p className="muted">
+          Card {index + 1} of {queue.length}
+        </p>
+        {goal === null ? null : <GoalProgress goal={goal} />}
+      </div>
       <ErrorText message={submitError} />
       {cardError !== null ? (
         <div>
@@ -317,6 +491,30 @@ export function StudyPage() {
           Show answer <kbd>Space</kbd>
         </button>
       )}
+      <div className="row actions">
+        {undoButton}
+        {detail === null ? null : (
+          <button
+            type="button"
+            className="button"
+            aria-keyshortcuts="E"
+            onClick={() => {
+              setEditing(true);
+            }}
+          >
+            Edit card <kbd>E</kbd>
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <EditCardDialog
+          noteId={card.note_id}
+          onSaved={() => refreshCard(card.id)}
+          onClose={() => {
+            setEditing(false);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

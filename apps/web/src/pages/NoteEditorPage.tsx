@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Create or edit a note (F-CARD-1, F-CARD-2, F-CARD-6): Basic or Cloze, with
-// tags and a live preview. Ctrl or Cmd + Enter saves.
+// tags and a live preview; the fields of custom and image occlusion notes are
+// edited as plain fields. Ctrl or Cmd + Enter saves.
 
 import { useId, useRef, useState, type SubmitEvent, type KeyboardEvent, type RefObject } from "react";
 import { Link, useNavigate, useParams } from "react-router";
@@ -14,11 +15,20 @@ import { clozeNumbers, nextClozeNumber } from "../lib/cloze";
 import { parseTags } from "../lib/text";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 interface EditorProps {
   deckId: string;
   initial?: Note;
   onSaved: (message: string) => void;
+  /** Show the live preview beside the fields (off in the study session's dialog). */
+  withPreview?: boolean;
+}
+
+const FIELD_LABELS: Record<string, string> = { header: "Header", back_extra: "Back extra" };
+
+function fieldLabel(name: string): string {
+  return FIELD_LABELS[name] ?? name;
 }
 
 function TextArea({
@@ -59,22 +69,29 @@ function TextArea({
   );
 }
 
-function NoteEditor({ deckId, initial, onSaved }: EditorProps) {
+export function NoteEditor({ deckId, initial, onSaved, withPreview = true }: EditorProps) {
   const editing = initial !== undefined;
   const [noteType, setNoteType] = useState<NoteType>(initial?.note_type ?? "basic");
   const [front, setFront] = useState(initial?.fields.front ?? "");
   const [back, setBack] = useState(initial?.fields.back ?? "");
   const [text, setText] = useState(initial?.fields.text ?? "");
   const [extra, setExtra] = useState(initial?.fields.extra ?? "");
+  const [others, setOthers] = useState<Fields>(initial?.fields ?? {});
   const [tags, setTags] = useState(initial?.tags.join(" ") ?? "");
   const clozeRef = useRef<HTMLTextAreaElement>(null);
   const submit = useSubmit();
 
-  const own: Fields = noteType === "basic" ? { front, back } : { text, extra };
+  const generic = noteType === "custom" || noteType === "image_occlusion";
+  const own: Fields = noteType === "basic" ? { front, back } : noteType === "cloze" ? { text, extra } : others;
   // Fields this editor does not show (from an import, say) are kept as they are.
   const fields: Fields = { ...initial?.fields, ...own };
   const numbers = noteType === "cloze" ? clozeNumbers(text) : [];
-  const ready = noteType === "basic" ? front.trim() !== "" && back.trim() !== "" : numbers.length > 0;
+  const ready =
+    noteType === "basic"
+      ? front.trim() !== "" && back.trim() !== ""
+      : noteType === "cloze"
+        ? numbers.length > 0
+        : noteType === "image_occlusion" || Object.values(others).some((value) => value.trim() !== "");
   const preview = cardSides(noteType, fields, numbers[0] ?? 1);
 
   const addDeletion = (): void => {
@@ -120,26 +137,39 @@ function NoteEditor({ deckId, initial, onSaved }: EditorProps) {
   };
 
   return (
-    <form onSubmit={onSubmit} onKeyDown={onKeyDown} className="editor">
+    <form onSubmit={onSubmit} onKeyDown={onKeyDown} className={withPreview ? "editor" : "editor single"}>
       <div className="stack">
-        <fieldset className="segmented" disabled={editing}>
-          <legend>Card type</legend>
-          {(["basic", "cloze"] as const).map((type) => (
-            <label key={type}>
-              <input
-                type="radio"
-                name="note-type"
-                value={type}
-                checked={noteType === type}
-                onChange={() => {
-                  setNoteType(type);
-                }}
-              />
-              {type === "basic" ? "Basic" : "Cloze"}
-            </label>
-          ))}
-        </fieldset>
-        {noteType === "basic" ? (
+        {generic ? (
+          Object.keys(others).map((name) => (
+            <TextArea
+              key={name}
+              label={fieldLabel(name)}
+              value={others[name] ?? ""}
+              onChange={(value) => {
+                setOthers({ ...others, [name]: value });
+              }}
+            />
+          ))
+        ) : (
+          <fieldset className="segmented" disabled={editing}>
+            <legend>Card type</legend>
+            {(["basic", "cloze"] as const).map((type) => (
+              <label key={type}>
+                <input
+                  type="radio"
+                  name="note-type"
+                  value={type}
+                  checked={noteType === type}
+                  onChange={() => {
+                    setNoteType(type);
+                  }}
+                />
+                {type === "basic" ? "Basic" : "Cloze"}
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {generic ? null : noteType === "basic" ? (
           <>
             <TextArea label="Front" value={front} onChange={setFront} hint="Markdown and $math$ are supported." />
             <TextArea label="Back" value={back} onChange={setBack} />
@@ -191,12 +221,14 @@ function NoteEditor({ deckId, initial, onSaved }: EditorProps) {
           </span>
         </div>
       </div>
-      <aside className="preview" aria-label="Preview">
-        <h2>Preview</h2>
-        <CardContent markdown={preview.front} />
-        <hr />
-        <CardContent markdown={preview.back} />
-      </aside>
+      {withPreview && noteType !== "custom" ? (
+        <aside className="preview" aria-label="Preview">
+          <h2>Preview</h2>
+          <CardContent markdown={preview.front} />
+          <hr />
+          <CardContent markdown={preview.back} />
+        </aside>
+      ) : null}
     </form>
   );
 }
@@ -204,6 +236,7 @@ function NoteEditor({ deckId, initial, onSaved }: EditorProps) {
 export function NewNotePage() {
   const { deckId = "" } = useParams();
   const [message, setMessage] = useState<string | null>(null);
+  useDocumentTitle("Add a card");
   return (
     <section>
       <nav aria-label="Breadcrumb" className="breadcrumb">
@@ -224,6 +257,7 @@ export function EditNotePage() {
   const note = useResource(() => notes.get(noteId), noteId);
   const [message, setMessage] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  useDocumentTitle("Edit card");
 
   if (note.error !== null) {
     return <ErrorText message={note.error} />;
@@ -242,14 +276,7 @@ export function EditNotePage() {
       <p role="status" className="muted">
         {message}
       </p>
-      {loaded.note_type === "basic" || loaded.note_type === "cloze" ? (
-        <NoteEditor deckId={loaded.deck_id} initial={loaded} onSaved={setMessage} />
-      ) : (
-        <p>
-          {loaded.note_type === "custom" ? "Custom" : "Image occlusion"} notes can be studied here; they are edited
-          through the API for now.
-        </p>
-      )}
+      <NoteEditor deckId={loaded.deck_id} initial={loaded} onSaved={setMessage} />
       <div className="row actions">
         <ConfirmButton
           label="Delete note"

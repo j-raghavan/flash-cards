@@ -132,14 +132,35 @@ describe("edit card", () => {
     expect(await screen.findByRole("heading", { name: "Deck not found" })).toBeInTheDocument();
   });
 
-  it("explains that custom and image occlusion notes are not edited here yet", async () => {
-    mockApi({ ...me, "GET /notes/n1": { body: note({ note_type: "custom", fields: { Word: "x" } }) } });
+  it("edits the fields of custom and image occlusion notes as plain fields", async () => {
+    const calls = mockApi({
+      ...me,
+      "GET /notes/n1": { body: note({ note_type: "custom", fields: { Word: "chat", Meaning: "" } }) },
+      "PATCH /notes/n1": { body: note() },
+    });
     const { unmount } = renderApp("/notes/n1/edit");
-    expect(await screen.findByText(/Custom notes can be studied here/)).toBeInTheDocument();
+    const user = userEvent.setup();
+    const meaning = await screen.findByLabelText("Meaning");
+    expect(screen.queryByRole("radio", { name: "Basic" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Preview" })).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Word"));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await user.type(meaning, "cat");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
+      fields: { Word: "", Meaning: "cat" },
+      tags: ["bio", "ch::1"],
+    });
     unmount();
-    mockApi({ ...me, "GET /notes/n1": { body: note({ note_type: "image_occlusion", fields: {} }) } });
+    mockApi({
+      ...me,
+      "GET /notes/n1": { body: note({ note_type: "image_occlusion", fields: { header: "Heart", back_extra: "" } }) },
+    });
     renderApp("/notes/n1/edit");
-    expect(await screen.findByText(/Image occlusion notes can be studied here/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Header")).toHaveValue("Heart");
+    expect(screen.getByLabelText("Back extra")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
     expect(screen.queryByLabelText("Front")).not.toBeInTheDocument();
   });
 

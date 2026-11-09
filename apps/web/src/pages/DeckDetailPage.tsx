@@ -13,6 +13,7 @@ import { buildDeckTree, deckPath, descendantCount, flattenTree } from "../lib/de
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { CreateDeckForm } from "./DeckListPage";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 function StatsPanel({ stats }: { stats: DeckStats }) {
   const rows: [string, number][] = [
@@ -104,6 +105,7 @@ export function DeckDetailPage() {
   const all = useResource(() => decks.list(), `decks:${deckId}`);
   const stats = useResource(() => decks.stats(deckId), `stats:${deckId}`);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  useDocumentTitle(all.data?.find((d) => d.id === deckId)?.name ?? "Deck");
 
   if (all.error !== null) {
     return <ErrorText message={all.error} />;
