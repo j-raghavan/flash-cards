@@ -19,6 +19,7 @@ from flashcards.adapters.memory import (
     InMemoryObjectStore,
     InMemoryQuotaRepository,
     InMemoryQuotaSettingsRepository,
+    InMemorySpendHoldRepository,
     InMemoryUsageRepository,
     InMemoryUserRepository,
 )
@@ -91,6 +92,7 @@ def _service(
             usage,
             InMemoryQuotaSettingsRepository(),
             clock,
+            InMemorySpendHoldRepository(usage),
             provider="test",
             prices=TokenPrices(),
             defaults=InstanceQuotas(),

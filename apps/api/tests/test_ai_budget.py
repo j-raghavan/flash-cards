@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from flashcards.adapters.memory import (
     InMemoryQuotaRepository,
     InMemoryQuotaSettingsRepository,
+    InMemorySpendHoldRepository,
     InMemoryUsageRepository,
     NullUnitOfWork,
 )
@@ -30,12 +31,14 @@ from flashcards.domain.usage import AiFeature, TokenPrices
 
 PASSWORD = "correct-horse-battery"
 NOW = datetime(2026, 11, 8, 23, 59, tzinfo=UTC)
+REQUEST = StructuredRequest(instructions="i", documents=(), schema={}, max_output_tokens=10)
 
 def _spend(clock: Clock) -> AiSpend:
     return AiSpend(
         InMemoryUsageRepository(),
         InMemoryQuotaSettingsRepository(),
         clock,
+        InMemorySpendHoldRepository(InMemoryUsageRepository()),
         provider="test",
         prices=TokenPrices(),
         defaults=InstanceQuotas(),
@@ -59,11 +62,15 @@ async def test_the_budget_allows_up_to_the_limit_then_refuses() -> None:
         _spend(_Clock()),
         NullUnitOfWork(),
     )
-    await budget.charge("alice")
-    await budget.charge("alice")
+    async with budget.charge("alice", REQUEST):
+        pass
+    async with budget.charge("alice", REQUEST):
+        pass
     with pytest.raises(AiCallLimitReached):
-        await budget.charge("alice")
-    await budget.charge("bob")  # per owner
+        async with budget.charge("alice", REQUEST):
+            pass  # pragma: no cover - refused before the block runs
+    async with budget.charge("bob", REQUEST):  # per owner
+        pass
 
 
 class _CountingUnitOfWork:
@@ -82,12 +89,14 @@ async def test_recording_a_call_commits_it_with_the_charge() -> None:
     # request that later fails (for example on unusable model output).
     uow = _CountingUnitOfWork()
     budget = AiCallBudget(InMemoryQuotaRepository(limit=2), _Clock(), _spend(_Clock()), uow)
-    await budget.charge("alice")
+    async with budget.charge("alice", REQUEST) as hold:
+        assert hold is None  # no spend cap: nothing to hold
     assert uow.commits == 0
     await budget.record(
         "alice",
         AiFeature.GRADING,
         StructuredResult(data={}, usage=TokenUsage(1, 1), model="m"),
+        hold,
     )
     assert uow.commits == 1
 

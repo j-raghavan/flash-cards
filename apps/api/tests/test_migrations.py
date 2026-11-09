@@ -43,6 +43,7 @@ APP_TABLES = {
     "ai_usage",
     "instance_quotas",
     "user_quotas",
+    "ai_spend_holds",
     "study_settings",
     "review_last_answers",
     "plan_baselines",

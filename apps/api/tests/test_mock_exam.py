@@ -15,6 +15,7 @@ from flashcards.adapters.memory import (
     InMemoryNoteRepository,
     InMemoryQuotaRepository,
     InMemoryQuotaSettingsRepository,
+    InMemorySpendHoldRepository,
     InMemoryUsageRepository,
     NullUnitOfWork,
 )
@@ -55,6 +56,7 @@ def _spend(clock: Clock) -> AiSpend:
         InMemoryUsageRepository(),
         InMemoryQuotaSettingsRepository(),
         clock,
+        InMemorySpendHoldRepository(InMemoryUsageRepository()),
         provider="test",
         prices=TokenPrices(),
         defaults=InstanceQuotas(),

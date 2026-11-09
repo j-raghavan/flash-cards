@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -13,6 +14,8 @@ from flashcards.adapters.db import Base, create_engine, create_sessionmaker
 from flashcards.adapters.sql import (
     SqlAuditRepository,
     SqlLoginThrottleRepository,
+    SqlSpendHoldRepository,
+    SqlUsageRepository,
     SqlUserRepository,
 )
 from flashcards.application.audit_service import AuditService
@@ -21,6 +24,7 @@ from flashcards.application.public_signup_service import (
     signup_throttle_key,
 )
 from flashcards.domain.invites import Role
+from flashcards.domain.usage import AiFeature, AiUsage, SpendHold
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
@@ -107,3 +111,56 @@ async def test_concurrent_public_sign_ups_answer_as_for_an_existing_account(
         state = await SqlLoginThrottleRepository(s).get(signup_throttle_key("1.2.3.4"))
         assert state is not None and state.failures == 1
         assert await SqlAuditRepository(s).list_recent(limit=5) == []
+
+
+def _hold(hold_id: str, amount: int, expires_at: datetime = NOW + timedelta(hours=1)) -> SpendHold:
+    return SpendHold(id=hold_id, period="2026-11", amount_micro_usd=amount, expires_at=expires_at)
+
+
+async def test_concurrent_holds_never_jointly_pass_the_cap(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlUsageRepository(s).add(
+            AiUsage(id="u", owner_id="o", provider="p", model="m", feature=AiFeature.CHAT,
+                    input_tokens=1, output_tokens=1, cost_micro_usd=100, period="2026-11",
+                    created_at=NOW)
+        )
+
+    async def attempt(index: int) -> bool:
+        async with sm() as s:
+            repo = SqlSpendHoldRepository(s, sm)
+            return await repo.try_hold(_hold(f"h{index}", 100), cap_micro_usd=1000, now=NOW)
+
+    # Twenty calls race for room: 100 spent, then holds of 100 while under 1000.
+    results = await asyncio.gather(*(attempt(i) for i in range(20)))
+    assert results.count(True) == 9
+    async with sm() as s:
+        repo = SqlSpendHoldRepository(s, sm)
+        assert await repo.held("2026-11", NOW) == 900
+
+
+async def test_a_hold_settles_with_the_usage_and_releases_or_lapses(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    async with sm() as s:
+        repo = SqlSpendHoldRepository(s, sm)
+        assert await repo.try_hold(_hold("a", 300), cap_micro_usd=500, now=NOW)
+        assert await repo.try_hold(_hold("b", 300, NOW + timedelta(minutes=1)),
+                                   cap_micro_usd=500, now=NOW)
+        assert not await repo.try_hold(_hold("c", 1), cap_micro_usd=500, now=NOW)
+        await repo.release("a")
+    async with sm() as s, s.begin():
+        # Settling happens inside the caller's transaction, with the usage record.
+        repo = SqlSpendHoldRepository(s, sm)
+        assert await repo.held("2026-11", NOW) == 300
+        await repo.settle("b")
+        assert await repo.held("2026-11", NOW) == 0
+    async with sm() as s:
+        repo = SqlSpendHoldRepository(s, sm)
+        assert await repo.held("2026-11", NOW) == 0
+        # An expired hold no longer counts, and the next hold purges it.
+        assert await repo.try_hold(_hold("d", 400, NOW + timedelta(minutes=1)),
+                                   cap_micro_usd=500, now=NOW)
+        later = NOW + timedelta(minutes=2)
+        assert await repo.held("2026-11", later) == 0
+        assert await repo.try_hold(_hold("e", 1), cap_micro_usd=500, now=later)
+        assert await repo.held("2026-11", NOW) == 1  # "d" is gone, not just expired

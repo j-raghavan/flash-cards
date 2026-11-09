@@ -19,6 +19,7 @@ from flashcards.adapters.memory import (
     InMemoryObjectStore,
     InMemoryQuotaRepository,
     InMemoryQuotaSettingsRepository,
+    InMemorySpendHoldRepository,
     InMemoryUsageRepository,
     InMemoryUserRepository,
     NullUnitOfWork,
@@ -56,6 +57,10 @@ class _Clock:
         return NOW
 
 
+def _request() -> StructuredRequest:
+    return StructuredRequest(instructions="i", documents=(), schema={}, max_output_tokens=10)
+
+
 def _result(inp: int = 1000, out: int = 200, model: str = "m1") -> StructuredResult:
     return StructuredResult(data={}, usage=TokenUsage(inp, out), model=model)
 
@@ -84,6 +89,7 @@ class _Quotas:
         self.settings = InMemoryQuotaSettingsRepository()
         self.pages = InMemoryQuotaRepository()
         self.usage = InMemoryUsageRepository()
+        self.holds = InMemorySpendHoldRepository(self.usage)
         self.users = InMemoryUserRepository()
         self.events = InMemoryAuditRepository()
         self.service = QuotaService(
@@ -99,6 +105,7 @@ class _Quotas:
             self.usage,
             self.settings,
             self.clock,
+            self.holds,
             provider="anthropic",
             prices=TokenPrices(3.0, 15.0),
             defaults=defaults,
@@ -163,7 +170,8 @@ async def test_the_spend_cap_stops_new_ai_work_once_reached() -> None:
 
     budget = AiCallBudget(InMemoryQuotaRepository(limit=100), q.clock, q.spend, NullUnitOfWork())
     with pytest.raises(SpendCapReached):
-        await budget.charge("u2")
+        async with budget.charge("u2", _request()):
+            pass  # pragma: no cover - refused before the block runs
     assert await budget._calls.used("u2", "calls:2026-11-08") == 0  # not counted
 
 

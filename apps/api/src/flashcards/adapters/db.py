@@ -949,6 +949,17 @@ class AiUsageRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class AiSpendHoldRow(Base):
+    """An estimated cost set aside against the spend cap while a call runs (ADR 0019)."""
+
+    __tablename__ = "ai_spend_holds"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    period: Mapped[str] = mapped_column(String, index=True)
+    amount_micro_usd: Mapped[int] = mapped_column(BigInteger)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 def usage_to_row(usage: AiUsage) -> AiUsageRow:
     return AiUsageRow(
         id=usage.id,

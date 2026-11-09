@@ -93,9 +93,10 @@ class MockExamService:
             schema=EXAM_SCHEMA,
             max_output_tokens=EXAM_MAX_OUTPUT_TOKENS,
         )
-        await self._budget.charge(owner_id)  # raises AiCallLimitReached
-        result = await self._llm.generate_structured(request)
-        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
+        # Raises SpendCapReached or AiCallLimitReached; releases the hold on failure.
+        async with self._budget.charge(owner_id, request) as hold:
+            result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result, hold)
         questions = tuple(
             ExamQuestion(id=str(uuid.uuid4()), prompt=prompt, reference=answer, topic=topic)
             for prompt, answer, topic in parse_exam_questions(result.data, limit=limit)
@@ -147,17 +148,18 @@ class MockExamService:
             schema=GRADE_SCHEMA,
             max_output_tokens=GRADE_MAX_OUTPUT_TOKENS,
         )
-        await self._budget.charge(owner_id)  # raises AiCallLimitReached
-        result = await self._llm.generate_structured(request)
+        # Raises SpendCapReached or AiCallLimitReached; releases the hold on failure.
+        async with self._budget.charge(owner_id, request) as hold:
+            result = await self._llm.generate_structured(request)
         try:
             grades = parse_grades(result.data)
         except InvalidModelOutput:
             # Recording commits, so reopen first: the user can submit again, while
             # the call they were billed for still counts.
             await self._exams.reopen(exam.id)
-            await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
+            await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result, hold)
             raise
-        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
+        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result, hold)
         return grade_exam(exam, scores_for_answered(exam, answered, grades))
 
 

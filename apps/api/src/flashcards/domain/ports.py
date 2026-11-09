@@ -30,7 +30,7 @@ from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.transcripts import Transcript
-from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
+from flashcards.domain.usage import AiUsage, ProviderUsage, SpendHold, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
@@ -574,6 +574,32 @@ class UsageRepository(Protocol):
 
     async def by_provider(self, period: str) -> list[ProviderUsage]:
         """The period's usage per provider and model, highest cost first."""
+        ...
+
+
+class SpendHoldRepository(Protocol):
+    """Holds on the monthly spend cap while AI calls run (ADR 0019)."""
+
+    async def try_hold(self, hold: SpendHold, *, cap_micro_usd: int, now: datetime) -> bool:
+        """Store `hold` if the period's recorded cost plus its live holds is under the cap.
+
+        Atomic across processes, and committed on its own at once (independent of
+        the caller's unit of work), so concurrent calls see each other's holds and
+        no lock is held while the model runs. Returns False, storing nothing, when
+        the cap is reached.
+        """
+        ...
+
+    async def held(self, period: str, now: datetime) -> int:
+        """The period's live (unexpired) holds, in micro-USD."""
+        ...
+
+    async def settle(self, hold_id: str) -> None:
+        """Remove the hold within the caller's unit of work, with the usage it records."""
+        ...
+
+    async def release(self, hold_id: str) -> None:
+        """Remove the hold at once, on its own (the call failed or was refused)."""
         ...
 
 

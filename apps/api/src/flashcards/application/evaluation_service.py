@@ -49,9 +49,10 @@ class EvaluationService:
             schema=EVALUATION_SCHEMA,
             max_output_tokens=EVALUATION_MAX_OUTPUT_TOKENS,
         )
-        await self._budget.charge(owner_id)  # raises AiCallLimitReached
-        result = await self._llm.generate_structured(request)
-        await self._budget.record(owner_id, AiFeature.GRADING, result)
+        # Raises SpendCapReached or AiCallLimitReached; releases the hold on failure.
+        async with self._budget.charge(owner_id, request) as hold:
+            result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.GRADING, result, hold)
         return parse_evaluation(result.data)
 
 
