@@ -22,8 +22,8 @@ const job = (over: Partial<Job> = {}): Job => ({
 });
 
 const DRAFTS: Draft[] = [
-  { id: "x1", note_type: "basic", fields: { front: "What is $E$?", back: "Energy" }, source_page: 1 },
-  { id: "x2", note_type: "cloze", fields: { text: "{{c1::Paris}} is a city" }, source_page: 2 },
+  { id: "x1", note_type: "basic", fields: { front: "What is $E$?", back: "Energy, see [notes](https://evil.example/b)" }, source_page: 1 },
+  { id: "x2", note_type: "cloze", fields: { text: "{{c1::Paris}} is a city <https://evil.example/c>" }, source_page: 2 },
 ];
 
 function lastSource(): FakeEventSource {
@@ -159,6 +159,11 @@ describe("job page", () => {
     expect(source.readyState).toBe(FakeEventSource.CLOSED);
     expect(await screen.findByRole("heading", { name: "Review the drafts" })).toBeInTheDocument();
     expect(screen.getByText("AI draft, source page 2, cloze")).toBeInTheDocument();
+    // Draft text is model output: its links show their address and cannot be clicked.
+    const draftList = document.querySelector("ul.drafts") as HTMLElement;
+    expect(draftList.querySelector("a")).toBeNull();
+    expect(draftList).toHaveTextContent("Energy, see notes (https://evil.example/b)");
+    expect(draftList).toHaveTextContent("is a city https://evil.example/c");
     expect(screen.getByText("Paris")).toBeInTheDocument();
 
     const user = userEvent.setup();

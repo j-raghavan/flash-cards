@@ -21,19 +21,20 @@ const account = (id: string, email: string): AdminUser => ({
 });
 const USERS = [account("a1", "root@example.com"), account("u2", "bob@example.com")];
 
-const usage = (userId: string, cost: number, tokens = 1000) => ({
+const usage = (userId: string, cost: number, tokens = 1000, pages = 0) => ({
   user_id: userId,
   calls: 2,
   input_tokens: tokens,
   output_tokens: tokens / 2,
   cost_micro_usd: cost,
+  pages,
 });
 
 const REPORT: UsageReport = {
   period: "2026-11",
   cost_micro_usd: 12_504_200,
   spend_cap_micro_usd: 50_000_000,
-  by_user: [usage("u2", 2_500_000), usage("a1", 10_004_200), usage("gone", 0)],
+  by_user: [usage("u2", 2_500_000, 1000, 12), usage("a1", 10_004_200, 1000, 1234), usage("gone", 0)],
   by_provider: [
     { provider: "anthropic", model: "claude-sonnet", calls: 5, input_tokens: 3000, output_tokens: 1500, cost_micro_usd: 12_504_200 },
   ],
@@ -85,6 +86,8 @@ describe("usage report", () => {
     expect(within(totals).getByText("$12.50")).toBeInTheDocument();
     expect(within(totals).getByText("$50.00")).toBeInTheDocument();
     expect(within(totals).getByText("1,500")).toBeInTheDocument();
+    // AI pages this month, summed over users.
+    expect(within(within(totals).getByText("AI pages").parentElement as HTMLElement).getByText("1,246")).toBeInTheDocument();
     expect(screen.queryByText("Prices are not configured.")).not.toBeInTheDocument();
 
     const byUser = screen.getByRole("table", { name: "Usage by user" });
@@ -96,13 +99,22 @@ describe("usage report", () => {
       ]);
     });
     expect(within(byUser).getByText("$2.50")).toBeInTheDocument();
+    // Each user's AI pages sit in their own column.
+    expect(within(byUser).getByRole("columnheader", { name: "AI pages" })).toBeInTheDocument();
+    expect(
+      within(byUser)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]?.textContent),
+    ).toEqual(["1,234", "12", "0"]);
     const byModel = screen.getByRole("table", { name: "Usage by provider and model" });
     expect(within(byModel).getByText("anthropic claude-sonnet")).toBeInTheDocument();
     expect(within(byModel).getByText("3,000")).toBeInTheDocument();
+    expect(within(byModel).queryByRole("columnheader", { name: "AI pages" })).not.toBeInTheDocument();
     // The screen reader summary and the tooltips carry the same numbers.
     expect(screen.getByText(/3 entries by cost; the largest is root@example.com with \$10.00/)).toBeInTheDocument();
     expect(document.querySelector("svg.bar-chart rect title")?.textContent).toBe(
-      "root@example.com: 2 calls, 1,000 input and 500 output tokens, $10.00",
+      "root@example.com: 1,234 AI pages, 2 calls, 1,000 input and 500 output tokens, $10.00",
     );
   });
 

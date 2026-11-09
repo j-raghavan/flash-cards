@@ -8,7 +8,7 @@ an admin sets them, the defaults come from configuration.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from flashcards.application.audit_service import AuditService
 from flashcards.domain.audit import AuditAction
@@ -129,10 +129,25 @@ class QuotaService:
         return await self.user_quota(user_id)
 
     async def usage_report(self, period: str) -> UsageReport:
+        """The month's AI calls, tokens, cost and generation pages, by user and by model.
+
+        Pages are the ones reserved against the monthly quota, the same count the
+        quota is enforced on. A user who reserved pages but has no recorded calls
+        yet (a queued job) still gets a row.
+        """
+        pages = await self._pages.used_by_owner(period)
+        by_user = [
+            replace(usage, pages=pages.pop(usage.owner_id, 0))
+            for usage in await self._usage.by_user(period)
+        ]
+        by_user += [
+            UserUsage(owner_id, 0, 0, 0, 0, pages=used)
+            for owner_id, used in sorted(pages.items(), key=lambda item: (-item[1], item[0]))
+        ]
         return UsageReport(
             period=period,
             cost_micro_usd=await self._usage.total_cost(period),
             spend_cap_micro_usd=(await self.instance()).monthly_spend_cap_micro_usd,
-            by_user=await self._usage.by_user(period),
+            by_user=by_user,
             by_provider=await self._usage.by_provider(period),
         )

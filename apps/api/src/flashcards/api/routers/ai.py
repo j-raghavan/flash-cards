@@ -55,7 +55,11 @@ async def start_generation(
 ) -> JobOut:
     data = await read_capped(file, MAX_UPLOAD_BYTES)
     job = await container.generation.start(
-        owner_id=caller.user.id, deck_id=deck_id, data=data, thoroughness=thoroughness
+        owner_id=caller.user.id,
+        deck_id=deck_id,
+        data=data,
+        thoroughness=thoroughness,
+        source_name=file.filename,
     )
     return JobOut.from_job(job)
 

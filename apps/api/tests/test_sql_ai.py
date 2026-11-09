@@ -197,6 +197,10 @@ async def test_quota_reserves_atomically_up_to_the_limit(engine: AsyncEngine) ->
     assert await reserve("bob", 11) is False
     # A different period is counted separately.
     assert await reserve("alice", 10, period="2026-12") is True
+    async with sm() as s:
+        assert await SqlQuotaRepository(s).used_by_owner("2026-11") == {"alice": 10}
+        assert await SqlQuotaRepository(s).used_by_owner("2026-12") == {"alice": 10}
+        assert await SqlQuotaRepository(s).used_by_owner("2027-01") == {}
 
 
 def test_sync_sessionmaker_type(engine: AsyncEngine) -> None:

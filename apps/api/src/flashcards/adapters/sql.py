@@ -914,6 +914,14 @@ class SqlQuotaRepository:
         )
         return used or 0
 
+    async def used_by_owner(self, period: str) -> dict[str, int]:
+        rows = await self._session.execute(
+            select(AiQuotaRow.owner_id, AiQuotaRow.used_pages).where(
+                AiQuotaRow.period == period, AiQuotaRow.used_pages > 0
+            )
+        )
+        return dict(rows.tuples().all())
+
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(delete(AiQuotaRow).where(AiQuotaRow.owner_id == owner_id))
 

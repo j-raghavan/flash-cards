@@ -162,7 +162,7 @@ export function TypedAnswer({ cardId, revealed, onEvaluated, onReveal }: TypedAn
             <strong>{VERDICT_LABELS[phase.evaluation.verdict]}</strong>{" "}
             <span className="muted">({percent(phase.evaluation.score)})</span>
           </p>
-          <CardContent markdown={phase.evaluation.explanation} />
+          <CardContent aiOutput markdown={phase.evaluation.explanation} />
           <p className="muted">
             Suggested rating: {RATING_NAMES[suggestedRating(phase.evaluation)]}. Press Enter to accept it, or 1 to 4
             to choose another.

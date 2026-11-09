@@ -81,6 +81,8 @@ class UserUsageOut(BaseModel):
     input_tokens: int
     output_tokens: int
     cost_micro_usd: int
+    # AI generation pages used against the monthly quota in the period.
+    pages: int
 
     @classmethod
     def from_usage(cls, usage: UserUsage) -> UserUsageOut:
@@ -90,6 +92,7 @@ class UserUsageOut(BaseModel):
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             cost_micro_usd=usage.cost_micro_usd,
+            pages=usage.pages,
         )
 
 

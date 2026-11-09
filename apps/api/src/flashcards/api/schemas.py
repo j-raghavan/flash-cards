@@ -382,6 +382,8 @@ class ChatRequest(BaseModel):
 class CitationOut(BaseModel):
     file_id: str
     page: int
+    # The uploaded file's name (at most 120 characters), or null when not known.
+    file_name: str | None = None
 
 
 class ChatAnswerOut(BaseModel):
@@ -392,7 +394,10 @@ class ChatAnswerOut(BaseModel):
     def from_answer(cls, answer: ChatAnswer) -> ChatAnswerOut:
         return cls(
             answer=answer.answer,
-            citations=[CitationOut(file_id=c.file_id, page=c.page) for c in answer.citations],
+            citations=[
+                CitationOut(file_id=c.file_id, page=c.page, file_name=c.file_name)
+                for c in answer.citations
+            ],
         )
 
 
