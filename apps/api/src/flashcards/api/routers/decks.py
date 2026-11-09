@@ -122,7 +122,7 @@ async def export_deck(
         headers={
             "Content-Disposition": f'attachment; filename="{exported.filename}"',
             "Cache-Control": "no-store",
-            # Custom and image occlusion notes travel in JSON only (ADR 0014).
+            # Custom and image occlusion notes travel in JSON only (ADR 0015).
             "X-Omitted-Notes": str(exported.omitted_notes),
         },
     )

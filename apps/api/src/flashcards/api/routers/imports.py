@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Import routes: upload an Anki .apkg (F-IMP-1..3, ADR 0014)."""
+"""Import routes: upload an Anki .apkg (F-IMP-1..3, ADR 0015)."""
 
 from __future__ import annotations
 

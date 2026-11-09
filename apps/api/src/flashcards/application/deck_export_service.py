@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Exporting a deck and its subdecks as .apkg, CSV or JSON (F-IMP-4, ADR 0014).
+"""Exporting a deck and its subdecks as .apkg, CSV or JSON (F-IMP-4, ADR 0015).
 
 Only the caller's own deck tree is read: ownership of the root is checked, the
 tree is built from the caller's decks alone, and every note, card and review log

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Writing a gathered deck tree as .apkg, CSV or JSON (F-IMP-4, ADR 0014).
+"""Writing a gathered deck tree as .apkg, CSV or JSON (F-IMP-4, ADR 0015).
 
 The .apkg is a zip holding an Anki 2.1 legacy collection (`collection.anki2`,
 schema 11) and an empty media manifest, the format Anki and genanki exchange.
