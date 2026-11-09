@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The account page: email confirmation, signed-in devices (F-AUTH-2), the AI
+// The account page: email confirmation, signed-in devices (F-AUTH-2), two-step
+// sign-in (F-AUTH-3), the AI
 // page quota, the AI data-use disclosure (F-LEGAL-2), data export and account
 // deletion (F-IMP-5, NF-PRIV-1). Loaded on first visit.
 
@@ -16,6 +17,7 @@ import { discard } from "../offline/reviewQueue";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { TwoFactorPanel } from "./TwoFactorPanel";
 
 /** How long the server waits before it sends another confirmation link. */
 const RESEND_COOLDOWN_MS = 60_000;
@@ -471,6 +473,7 @@ export function AccountPage() {
       <h1>Account</h1>
       <EmailPanel user={user} />
       <SessionsPanel />
+      <TwoFactorPanel email={user.email} />
       <QuotaPanel />
       <DisclosurePanel />
       <ExportPanel />

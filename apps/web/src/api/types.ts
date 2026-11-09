@@ -279,6 +279,8 @@ export interface AdminUser {
   email_verified: boolean;
   suspended: boolean;
   created_at: string;
+  /** Whether two-factor sign-in is on; null when the answer did not look it up. */
+  two_factor?: boolean | null;
 }
 
 export interface AuditEvent {
