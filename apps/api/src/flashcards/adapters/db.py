@@ -815,6 +815,7 @@ class ShareLinkRow(Base):
     allow_clone: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 def share_link_to_row(link: ShareLink) -> ShareLinkRow:
@@ -826,6 +827,7 @@ def share_link_to_row(link: ShareLink) -> ShareLinkRow:
         allow_clone=link.allow_clone,
         created_at=link.created_at,
         revoked_at=link.revoked_at,
+        expires_at=link.expires_at,
     )
 
 
@@ -838,6 +840,7 @@ def share_link_from_row(row: ShareLinkRow) -> ShareLink:
         allow_clone=row.allow_clone,
         created_at=row.created_at,
         revoked_at=row.revoked_at,
+        expires_at=row.expires_at,
     )
 
 

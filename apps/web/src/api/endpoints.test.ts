@@ -104,7 +104,7 @@ describe("endpoints", () => {
       goals.remove("g1"),
       goals.plan("g1"),
       shares.list("d1"),
-      shares.create("d1", true),
+      shares.create("d1", true, 7),
       shares.setAllowClone("s1", false),
       shares.revoke("s1"),
       shares.preview("t/1"),
@@ -178,7 +178,7 @@ describe("endpoints", () => {
     ]);
     expect(calls[0]?.body).toEqual({ note_type: "image_occlusion", fields: { header: "" }, tags: [], occlusion });
     expect(calls[1]?.body).toEqual({ fields: { header: "h" }, tags: [], occlusion });
-    expect(calls[9]?.body).toEqual({ allow_clone: true });
+    expect(calls[9]?.body).toEqual({ allow_clone: true, expires_in_days: 7 });
     expect(calls[15]?.body).toEqual({ email: null, role: "member", ttl_days: 7 });
     expect(calls[21]?.body).toEqual({ role: "admin" });
     expect(calls[28]?.body).toEqual({ ...types, renamed: { B: "A" } });

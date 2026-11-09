@@ -221,7 +221,12 @@ export interface ShareLink {
   allow_clone: boolean;
   created_at: string;
   revoked_at: string | null;
+  /** When the link stops working; null when it never expires. */
+  expires_at: string | null;
 }
+
+/** How long a new link works, in days; null for a link that never expires. */
+export type ShareExpiryDays = 1 | 7 | 30 | 90 | null;
 
 /** A new link; its token is shown once, since only a hash of it is stored. */
 export interface CreatedShareLink extends ShareLink {

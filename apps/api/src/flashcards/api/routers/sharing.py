@@ -31,7 +31,10 @@ async def create_share_link(
     container: Container = Depends(get_container, scope="function"),
 ) -> CreatedShareLinkOut:
     created = await container.sharing.create(
-        owner_id=caller.user.id, deck_id=deck_id, allow_clone=body.allow_clone
+        owner_id=caller.user.id,
+        deck_id=deck_id,
+        allow_clone=body.allow_clone,
+        expires_in_days=body.expires_in_days,
     )
     link = ShareLinkOut.from_link(created.link)
     return CreatedShareLinkOut(**link.model_dump(), token=created.raw_token)
@@ -54,8 +57,12 @@ async def update_share_link(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> ShareLinkOut:
-    link = await container.sharing.set_allow_clone(
-        owner_id=caller.user.id, link_id=share_id, allow=body.allow_clone
+    link = await container.sharing.update(
+        owner_id=caller.user.id,
+        link_id=share_id,
+        allow_clone=body.allow_clone,
+        change_expiry=body.changes_expiry,
+        expires_in_days=body.expires_in_days,
     )
     return ShareLinkOut.from_link(link)
 

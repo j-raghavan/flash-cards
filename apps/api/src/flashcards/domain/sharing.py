@@ -9,7 +9,8 @@ deck; a clone copies content, never review history.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Final
 
 from flashcards.domain.notes import Fields, NoteType
 
@@ -26,10 +27,28 @@ MAX_CLONE_CARDS = 20_000
 MAX_CLONE_MEDIA_BYTES = 100 * 1024 * 1024
 # Each started MiB of copied images costs one card's worth of the daily clone allowance.
 CLONE_UNIT_BYTES = 1024 * 1024
+# How long a new link works, chosen at creation (ADR 0019). None means it never expires.
+SHARE_EXPIRY_DAYS = (1, 7, 30, 90)
+DEFAULT_SHARE_EXPIRY_DAYS: Final = 30
+
+
+def validate_expiry_days(days: int | None) -> None:
+    """Raise InvalidShareExpiry unless `days` is one of SHARE_EXPIRY_DAYS or None."""
+    if days is not None and days not in SHARE_EXPIRY_DAYS:
+        raise InvalidShareExpiry(days)
+
+
+def expiry_after(now: datetime, days: int | None) -> datetime | None:
+    """When a link made (or extended) at `now` for `days` stops working; None for never."""
+    return None if days is None else now + timedelta(days=days)
 
 
 class ShareNotFound(Exception):
-    """A share link that does not exist, was revoked, or is not the caller's."""
+    """A share link that does not exist, was revoked, has expired, or is not the caller's."""
+
+
+class InvalidShareExpiry(ValueError):
+    """A link lifetime other than the offered choices."""
 
 
 class CloneNotAllowed(Exception):
@@ -53,10 +72,18 @@ class ShareLink:
     allow_clone: bool
     created_at: datetime
     revoked_at: datetime | None = None
+    expires_at: datetime | None = None  # None: never expires (links made before ADR 0019)
 
     @property
     def is_active(self) -> bool:
         return self.revoked_at is None
+
+    def is_live(self, now: datetime) -> bool:
+        """Not revoked and not expired: the link serves preview and clone."""
+        return self.is_active and (self.expires_at is None or now < self.expires_at)
+
+    def with_expiry(self, expires_at: datetime | None) -> ShareLink:
+        return replace(self, expires_at=expires_at)
 
     def revoked(self, now: datetime) -> ShareLink:
         # Revoking twice keeps the first revocation time.
