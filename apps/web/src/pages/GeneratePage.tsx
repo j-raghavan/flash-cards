@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Start AI generation from a PDF or image (F-AI-1, F-AI-3). Generation runs in
-// the background; the job page shows progress and the drafts to review.
+// Start AI generation from a PDF or image (F-AI-1, F-AI-3), a YouTube link or a
+// pasted transcript (F-AI-2). Generation runs in the background; the job page
+// shows progress and the drafts to review.
 
-import { useState, type SubmitEvent } from "react";
+import { useRef, useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { AiNotice } from "../account/AiNotice";
 import { ai } from "../api/endpoints";
 import type { JobStatus, Thoroughness } from "../api/types";
+import { ApiError } from "../api/client";
 import { ErrorText } from "../components/ui";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
@@ -29,6 +31,95 @@ const LEVELS: { value: Thoroughness; label: string; hint: string }[] = [
   { value: "standard", label: "Standard", hint: "A balanced set." },
   { value: "thorough", label: "Thorough", hint: "Detailed coverage." },
 ];
+
+/** Most characters of a pasted transcript; the server enforces the same limit. */
+const MAX_TRANSCRIPT_CHARS = 120_000;
+
+function VideoSource({ deckId, level }: { deckId: string; level: Thoroughness }) {
+  const navigate = useNavigate();
+  const [url, setUrl] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const link = useSubmit();
+  const paste = useSubmit();
+  const pasteRef = useRef<HTMLTextAreaElement>(null);
+  // Never cut a paste short silently: say it is too long and refuse to send it.
+  const tooLong = transcript.length > MAX_TRANSCRIPT_CHARS;
+  const open = (jobId: string): void => {
+    void navigate(`/jobs/${encodeURIComponent(jobId)}?deck=${encodeURIComponent(deckId)}`);
+  };
+
+  const fromLink = (event: SubmitEvent): void => {
+    event.preventDefault();
+    void link.run(async () => {
+      try {
+        open((await ai.generateFromYoutube(deckId, url.trim(), level)).id);
+      } catch (failure) {
+        if (failure instanceof ApiError && failure.status === 422 && /^No transcript/.test(failure.message)) {
+          // No transcript to fetch: the paste box is next. Other 422s (not a video
+          // link, a transcript too long to use) are not fixed by pasting.
+          pasteRef.current?.focus();
+        }
+        throw failure;
+      }
+    });
+  };
+  const fromText = (event: SubmitEvent): void => {
+    event.preventDefault();
+    void paste.run(async () => {
+      open((await ai.generateFromTranscript(deckId, transcript, level)).id);
+    });
+  };
+
+  return (
+    <>
+      <h2>From a video or a transcript</h2>
+      <form onSubmit={fromLink} className="inline-form" aria-label="Generate from a YouTube link">
+        <label className="field grow">
+          <span>YouTube link</span>
+          <input
+            type="url"
+            inputMode="url"
+            maxLength={2000}
+            value={url}
+            placeholder="https://www.youtube.com/watch?v=…"
+            onChange={(event) => {
+              setUrl(event.target.value);
+            }}
+          />
+        </label>
+        <button type="submit" className="button" disabled={url.trim() === "" || link.busy}>
+          {link.busy ? "Fetching…" : "Use the video's transcript"}
+        </button>
+      </form>
+      <ErrorText message={link.error} />
+      <form onSubmit={fromText} className="stack" aria-label="Generate from a pasted transcript">
+        <label className="field">
+          <span>Or paste a transcript or lecture notes</span>
+          <textarea
+            ref={pasteRef}
+            rows={6}
+            value={transcript}
+            aria-describedby="transcript-length"
+            onChange={(event) => {
+              setTranscript(event.target.value);
+            }}
+          />
+        </label>
+        <small id="transcript-length" className={tooLong ? "error" : "muted"}>
+          {tooLong
+            ? `This is ${transcript.length.toLocaleString()} characters; the limit is ${MAX_TRANSCRIPT_CHARS.toLocaleString()}. Split it and generate from each part.`
+            : `Up to ${MAX_TRANSCRIPT_CHARS.toLocaleString()} characters.`}
+        </small>
+        <ErrorText message={paste.error} />
+        <div>
+          <button type="submit" className="button" disabled={transcript.trim() === "" || tooLong || paste.busy}>
+            {paste.busy ? "Sending…" : "Generate from this text"}
+          </button>
+        </div>
+      </form>
+    </>
+  );
+}
 
 export function GeneratePage() {
   useDocumentTitle("Generate cards");
@@ -107,6 +198,7 @@ export function GeneratePage() {
           </button>
         </div>
       </form>
+      <VideoSource deckId={deckId} level={level} />
       {recent.length > 0 ? (
         <>
           <h2>Recent generations</h2>

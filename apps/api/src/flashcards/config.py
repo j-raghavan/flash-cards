@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, MAX_MONTHLY_PAGES
 from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
+from flashcards.domain.transcripts import parse_language_preference
 
 
 class Settings(BaseSettings):
@@ -62,6 +63,16 @@ class Settings(BaseSettings):
     # link. Known providers have defaults; a self-hosted endpoint should set both.
     ai_provider_name: str | None = None
     ai_provider_terms_url: str | None = None
+    # Automatic YouTube transcript retrieval (F-AI-2, ADR 0020). Off by default: when
+    # on, this server contacts youtube.com for every YouTube link a user submits.
+    # Off, a YouTube link answers 422 and the user pastes the transcript instead.
+    youtube_transcripts_enabled: bool = False
+    # Comma-separated language tags, most preferred first ("de,en"). A video with
+    # none of them falls back to whatever transcript it has.
+    youtube_transcript_languages: str = "en"
+    # Connect and read timeout for each request to YouTube; one fetch as a whole is
+    # cut off after three times this.
+    youtube_transcript_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     # Where the web client lives; links in emails point here.
     public_base_url: str = "http://localhost:5173"
     # Outgoing mail. Without smtp_host, mail is not sent: in development it is
@@ -73,3 +84,9 @@ class Settings(BaseSettings):
     smtp_sender: str = "Flash-Cards <no-reply@localhost>"
     # "starttls" (port 587), "ssl" (port 465) or "none" (a local relay only; no login).
     smtp_security: Literal["starttls", "ssl", "none"] = "starttls"
+
+    @field_validator("youtube_transcript_languages")
+    @classmethod
+    def _languages(cls, value: str) -> str:
+        parse_language_preference(value)  # raises ValueError with the reason
+        return value

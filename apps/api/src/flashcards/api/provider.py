@@ -59,7 +59,7 @@ from flashcards.api.container import (
     build_container,
     build_services,
 )
-from flashcards.domain.ports import LLMProvider, Mailer
+from flashcards.domain.ports import LLMProvider, Mailer, TranscriptProvider
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 from flashcards.domain.usage import AiMetering
@@ -91,11 +91,13 @@ def in_memory_provider(
     metering: AiMetering | None = None,
     require_verified_sign_in: bool = False,
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
+    transcripts: TranscriptProvider | None = None,
 ) -> tuple[Container, ServicesProvider, InProcessJobQueue]:
     job_queue = InProcessJobQueue()
     container = build_container(
         llm=llm,
         job_queue=job_queue,
+        transcripts=transcripts,
         mailer=mailer,
         public_base_url=public_base_url,
         metering=metering,
@@ -118,6 +120,7 @@ def sql_provider(
     metering: AiMetering | None = None,
     require_verified_sign_in: bool = False,
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
+    transcripts: TranscriptProvider | None = None,
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
@@ -127,7 +130,7 @@ def sql_provider(
     dummy_hash = hasher.dummy_hash()
     # Stateless/process-level singletons, shared across requests.
     extractor = TranscriptAwareExtractor(PyMuPDFExtractor())
-    transcripts = NullTranscriptProvider()
+    transcript_provider = transcripts or NullTranscriptProvider()
     package_reader = BlockingPackageReader(ApkgReader().read)
     media_sniffer = PuremagicMediaSniffer()
     job_queue = InProcessJobQueue()
@@ -169,7 +172,7 @@ def sql_provider(
                         media=SqlMediaRepository(session),
                         media_sniffer=media_sniffer,
                         mock_exams=SqlMockExamRepository(session),
-                        transcripts=transcripts,
+                        transcripts=transcript_provider,
                         passages=SqlPassageRepository(session),
                         # Same counter table as page quota, separate daily period keys.
                         ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),

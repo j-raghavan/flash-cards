@@ -26,8 +26,10 @@ from flashcards.domain.transcripts import (
     chunk_transcript,
     decode_transcript,
     encode_transcript,
+    parse_language_preference,
     parse_youtube_video_id,
     pasted_transcript,
+    validate_video_id,
 )
 
 VID = "dQw4w9WgXcQ"
@@ -64,6 +66,9 @@ def test_parse_youtube_video_id_accepts_known_forms(url: str) -> None:
         "https://www.youtube.com/channel/abc",  # not a video path
         "https://youtu.be/",  # empty id
         "not a url",
+        f"https://www.youtube.com/watch?v={VID}%0A",  # a trailing newline on the id
+        f"https://youtu.be/{VID}%0A",
+        f"https://www.youtube.com/watch?v={VID}x",  # twelve characters
     ],
 )
 def test_parse_youtube_video_id_rejects_others(url: str) -> None:
@@ -228,3 +233,27 @@ async def test_extractor_decorator_enforces_the_page_cap() -> None:
 def test_extractor_decorator_rejects_a_malformed_envelope() -> None:
     with pytest.raises(InvalidTranscript):
         TranscriptAwareExtractor(_Inner()).sniff(ENVELOPE_PREFIX + b"junk")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("en", ("en",)), (" de , en ", ("de", "en")), ("pt-BR,zh-Hant-TW", ("pt-BR", "zh-Hant-TW"))],
+)
+def test_language_preference_parses_tags_in_order(value: str, expected: tuple[str, ...]) -> None:
+    assert parse_language_preference(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", " , ", "english", "en;de", "e", "e n", ",".join(["en"] * 11), "en-"],
+)
+def test_language_preference_rejects_bad_tags(value: str) -> None:
+    with pytest.raises(ValueError):
+        parse_language_preference(value)
+
+
+def test_validate_video_id_is_exact() -> None:
+    assert validate_video_id(VID) == VID
+    for bad in (f"{VID}\n", f" {VID}", "a/b/c/d/e/f", ""):
+        with pytest.raises(InvalidVideoUrl):
+            validate_video_id(bad)

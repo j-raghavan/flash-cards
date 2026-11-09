@@ -91,6 +91,12 @@ curl -si https://flashcards.example.org/api/auth/signup \
 
 The response is `201` with a session cookie. From then on the admin endpoints (`/api/admin/invites`, `/api/admin/users`, `/api/admin/audit`) mint invites and manage accounts. The token is printed to the terminal, so treat the terminal scrollback and any captured output as sensitive until the invite has been redeemed.
 
+### YouTube transcripts
+
+Generating a deck from a YouTube link is off by default: the link answers that no transcript is available, and the user pastes the transcript instead. With `FLASHCARDS_YOUTUBE_TRANSCRIPTS_ENABLED=true` the API fetches the video's captions from youtube.com itself (the `api` container reaches the internet through the `frontend` network). Only YouTube's own hosts are contacted, each request is time-limited and size-capped, and at most two fetches run at once (ADR 0020). `FLASHCARDS_YOUTUBE_TRANSCRIPT_LANGUAGES` (default `en`, for example `de,en`) sets the preferred caption languages.
+
+YouTube refuses many data-centre IP ranges and changes its pages from time to time, so retrieval is best-effort; refused fetches are logged as `no YouTube transcript for <id>: <reason>` and the user is offered the paste box. Keep the image current so the transcript library keeps up with YouTube.
+
 ## The web app and routing
 
 The site is one origin, because the API sends no CORS headers and its session cookie is `SameSite=Lax`. The `web` service (`apps/web/Caddyfile`) routes requests as follows:

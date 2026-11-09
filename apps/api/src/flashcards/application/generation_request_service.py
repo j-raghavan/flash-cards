@@ -94,6 +94,18 @@ class GenerationRequestService:
             owner_id, deck_id, data, TRANSCRIPT_MEDIA_TYPE, pages, thoroughness
         )
 
+    async def ensure_pages_left(self, owner_id: str) -> None:
+        """Raise SpendCapReached or QuotaExceeded when no generation could start now.
+
+        A cheap check before slow work (a transcript fetch) that would otherwise be
+        wasted; the reservation itself still happens atomically in _enqueue.
+        """
+        await self._spend.ensure_available()
+        period = billing_period(self._clock.now())
+        limit = await self._limits.page_limit(owner_id)
+        if await self._quotas.used(owner_id, period) >= limit:
+            raise QuotaExceeded(f"no pages left for {period}")
+
     async def _enqueue(
         self,
         owner_id: str,

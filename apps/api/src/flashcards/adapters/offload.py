@@ -26,10 +26,13 @@ PARSING_SLOTS = 2
 # PyMuPDF does not support concurrent use from several threads, so every PDF
 # operation (open, count, extract, render, close) takes this single slot.
 PYMUPDF_SLOTS = 1
+# Concurrent YouTube transcript fetches (network I/O through a blocking client).
+TRANSCRIPT_FETCH_SLOTS = 2
 
 PASSWORD_HASHING = anyio.CapacityLimiter(PASSWORD_HASHING_SLOTS)
 PARSING = anyio.CapacityLimiter(PARSING_SLOTS)
 PYMUPDF = anyio.CapacityLimiter(PYMUPDF_SLOTS)
+TRANSCRIPT_FETCH = anyio.CapacityLimiter(TRANSCRIPT_FETCH_SLOTS)
 
 
 async def run_blocking[T](limiter: anyio.CapacityLimiter, func: Callable[[], T]) -> T:

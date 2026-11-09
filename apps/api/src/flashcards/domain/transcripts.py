@@ -28,7 +28,7 @@ MAX_ENVELOPE_BYTES = 2_000_000
 MAX_SEGMENTS = 50_000
 MAX_START_SECONDS = 7 * 24 * 3600
 
-_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 _YOUTUBE_HOSTS = {
     "youtube.com",
     "www.youtube.com",
@@ -38,6 +38,9 @@ _YOUTUBE_HOSTS = {
     "www.youtube-nocookie.com",
 }
 _PATH_PREFIXES = ("/shorts/", "/embed/", "/live/", "/v/")
+# A BCP 47 style language tag such as "en", "de" or "pt-BR", as YouTube names tracks.
+_LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8}){0,2}")
+MAX_PREFERRED_LANGUAGES = 10
 
 
 class InvalidVideoUrl(Exception):
@@ -89,9 +92,33 @@ def parse_youtube_video_id(url: str) -> str:
                 if parsed.path.startswith(prefix):
                     candidate = parsed.path[len(prefix) :].split("/")[0]
                     break
-    if candidate is None or not _VIDEO_ID.match(candidate):
+    if candidate is None:
         raise InvalidVideoUrl("not a recognised YouTube video link")
-    return candidate
+    return validate_video_id(candidate)
+
+
+def validate_video_id(video_id: str) -> str:
+    """Return the id if it is exactly 11 URL-safe characters, or raise InvalidVideoUrl.
+
+    fullmatch, not match: "$" also matches before a trailing newline, so a link whose
+    v= value ends in %0A would otherwise pass with the newline still attached.
+    """
+    if not _VIDEO_ID.fullmatch(video_id):
+        raise InvalidVideoUrl("not a recognised YouTube video link")
+    return video_id
+
+
+def parse_language_preference(value: str) -> tuple[str, ...]:
+    """Comma-separated language tags, most preferred first, e.g. "de,en"."""
+    tags = tuple(tag.strip() for tag in value.split(",") if tag.strip())
+    if not tags:
+        raise ValueError("name at least one transcript language, e.g. en")
+    if len(tags) > MAX_PREFERRED_LANGUAGES:
+        raise ValueError(f"name at most {MAX_PREFERRED_LANGUAGES} transcript languages")
+    for tag in tags:
+        if not _LANGUAGE_TAG.fullmatch(tag):
+            raise ValueError(f"not a language tag: {tag!r}")
+    return tags
 
 
 def pasted_transcript(text: str) -> Transcript:

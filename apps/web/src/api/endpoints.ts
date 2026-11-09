@@ -130,6 +130,14 @@ export const ai = {
     form.append("thoroughness", thoroughness);
     return request<Job>("/ai/generate", { method: "POST", form });
   },
+  /** From a YouTube link's transcript (F-AI-2); 422 when the video has none to fetch. */
+  generateFromYoutube: (deckId: string, url: string, thoroughness: Thoroughness) =>
+    request<Job>("/ai/generate/youtube", { method: "POST", json: { deck_id: deckId, url, thoroughness } }),
+  generateFromTranscript: (deckId: string, transcript: string, thoroughness: Thoroughness) =>
+    request<Job>("/ai/generate/transcript", {
+      method: "POST",
+      json: { deck_id: deckId, transcript, thoroughness },
+    }),
   /** The caller's generation jobs for a deck, newest first (the API caps limit at 50). */
   jobs: (deckId: string, limit = 5) =>
     request<Job[]>(`/ai/jobs?${new URLSearchParams({ deck_id: deckId, limit: String(limit) }).toString()}`),
