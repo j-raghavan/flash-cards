@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { mockApi } from "../test/helpers";
 import { STUDY_DATA_CACHE, clearStudyDataCache } from "./apiCache";
-import { enqueue, flush, pending, submitReview, subscribe, type QueuedReview } from "./reviewQueue";
+import { discard, enqueue, flush, pending, submitReview, subscribe, type QueuedReview } from "./reviewQueue";
 
 const review = (key: string, user = "u1", at = 1): QueuedReview => ({
   idempotency_key: key,
@@ -56,6 +56,21 @@ describe("submitReview", () => {
     mockApi({ "POST /cards/c1/review": { status: 404, body: { detail: "Not found." } } });
     await expect(submitReview(answer)).rejects.toThrow("Not found.");
     expect(await pending("u1")).toEqual([]);
+  });
+});
+
+describe("discard", () => {
+  it("drops only that user's queued answers and tells listeners", async () => {
+    await enqueue(review("a", "u1"));
+    await enqueue(review("b", "u1"));
+    await enqueue(review("c", "u2"));
+    const listener = vi.fn();
+    const unsubscribe = subscribe(listener);
+    await discard("u1");
+    unsubscribe();
+    expect(await pending("u1")).toEqual([]);
+    expect((await pending("u2")).map((r) => r.idempotency_key)).toEqual(["c"]);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 

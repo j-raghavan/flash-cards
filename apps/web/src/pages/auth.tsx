@@ -100,6 +100,7 @@ export function LoginPage() {
   const submit = useSubmit();
   const location = useLocation();
   const next = safeNextPath(params.get("next") ?? new URLSearchParams(location.hash.replace(/^#/, "")).get("next"));
+  const accountDeleted = (location.state as { accountDeleted?: unknown } | null)?.accountDeleted === true;
 
   if (user !== null) {
     return <Navigate to={next} replace />;
@@ -115,6 +116,7 @@ export function LoginPage() {
 
   return (
     <AuthFrame title="Sign in">
+      {accountDeleted ? <p role="status">Your account has been deleted.</p> : null}
       <form onSubmit={onSubmit} className="stack">
         <EmailField value={email} onChange={setEmail} />
         <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" />

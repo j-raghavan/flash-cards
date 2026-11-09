@@ -80,6 +80,15 @@ async function remove(key: string): Promise<void> {
   await (await db()).delete("reviews", key);
 }
 
+/** Drop every answer queued for a user, as when the account is deleted. */
+export async function discard(userId: string): Promise<void> {
+  const database = await db();
+  const keys = await database.getAllKeysFromIndex("reviews", "by_user", userId);
+  const tx = database.transaction("reviews", "readwrite");
+  await Promise.all([...keys.map((key) => tx.store.delete(key)), tx.done]);
+  notify();
+}
+
 function isTransient(error: unknown): boolean {
   return (
     error instanceof NetworkError ||
