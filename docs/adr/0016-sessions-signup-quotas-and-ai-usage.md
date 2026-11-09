@@ -26,7 +26,8 @@ Providers already returned token counts with every response, but nothing recorde
   - a request never waits for another request of the same session to finish
   - revoking a session never waits for a long request of that session, such as an AI call, because the session row is never locked by activity
 - `GET /auth/sessions` lists only live sessions: created, last seen, device and whether it is the current one. Session tokens and hashes are never returned.
-- `DELETE /auth/sessions/{id}` revokes one of the caller's live sessions. `POST /auth/sessions/revoke-others` revokes all but the current one. Both are audited.
+- `DELETE /auth/sessions/{id}` revokes one of the caller's live sessions. `POST /auth/sessions/revoke-others` revokes all but the current one, counting only live sessions. Both are audited.
+- Deleting sessions (account deletion) removes their activity rows too, so it can wait for a request that is recording activity at that moment.
 
 ### Public sign-up (F-AUTH-7)
 
@@ -35,9 +36,9 @@ Providers already returned token counts with every response, but nothing recorde
 - Protections:
   - Every attempt is counted per client address before anything else, using the sign-in throttle's window and limit (five attempts per 15 minutes, ADR 0010). Refusals are returned rather than raised, so the count is committed.
   - The answer is always 202, whether or not the email has an account. A new account gets a verification email. An existing account gets a notice that someone tried to sign up, with a link to reset the password. The password is hashed in both cases, so the work matches.
-  - The route never signs the caller in; the owner follows the email, then signs in.
+  - The route never signs the caller in. While sign-up is public, sign-in requires a confirmed email address, so nobody can use an account made with someone else's or a throwaway address. Signing up again with an unconfirmed address sends a fresh confirmation link (within the one-minute cooldown) instead of the notice, which is how an owner who lost the first link gets another.
   - Email and password validation are the same as for invites. Every new account is audited (`user.registered`).
-- The client address is the connection's peer. Behind a reverse proxy it is the proxy's address unless the server trusts forwarded headers (`uvicorn --proxy-headers --forwarded-allow-ips`). Without that, the limit applies to the whole instance.
+- The client address is the connection's peer as uvicorn reports it. uvicorn reads `X-Forwarded-For` only from the addresses in `FORWARDED_ALLOW_IPS` (default `127.0.0.1,::1`). An operator whose reverse proxy runs elsewhere, such as in another container, must set it to the proxy's address; otherwise every client shares the proxy's address and the limit applies to the whole instance.
 
 ### Invite resend (F-ADMIN-1)
 
@@ -59,9 +60,10 @@ Providers already returned token counts with every response, but nothing recorde
 - Every model call is recorded in `ai_usage`: user, provider, model, feature, input and output tokens, and cost in integer micro-USD.
 - Cost uses the operator's prices, `FLASHCARDS_AI_INPUT_USD_PER_MTOK` and `FLASHCARDS_AI_OUTPUT_USD_PER_MTOK`. They default to zero, which records tokens but no cost; a spend cap needs prices to have any effect.
 - The generation worker records and commits each page's usage as soon as the model answers, so a page whose output is unusable is still counted.
-- A synchronous call records its usage in the request's transaction. If the request then fails, for example because the model's output fails validation, the record is rolled back with everything else.
+- A synchronous call's usage is recorded and committed together with its daily-call charge as soon as the model answers, before its output is parsed. Output that fails validation still counts, so a user cannot steer the model into unusable answers to get calls that never count. Mock exam grading records the submission before the call, so it reopens the exam before committing, and the user can submit again.
+- A call that the provider itself refuses or fails (`LlmError`), including the provider's own output validation, is not recorded, even if the provider billed it.
 - `GET /admin/usage?period=YYYY-MM` returns the month's total, the cap, and totals by user and by provider and model. The default is the current month.
-- Usage rows hold ids and counts, never content, and are kept when an account is deleted, for cost accounting. Per-user overrides are deleted with the account.
+- Usage rows hold a random user id and counts, never content or contact details, and are kept when an account is deleted, for cost accounting, as the audit log keeps ids (ADR 0010). Once the account is gone the id identifies nobody. Per-user overrides are deleted with the account.
 
 ### AI data-use disclosure (F-LEGAL-2)
 
