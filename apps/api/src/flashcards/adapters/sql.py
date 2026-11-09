@@ -172,6 +172,19 @@ class SqlInviteRepository:
         )
         return _changed_one(result)
 
+    async def try_rotate_token(self, invite_id: str, token_hash: str, now: datetime) -> bool:
+        result = await self._session.execute(
+            update(InviteRow)
+            .where(
+                InviteRow.id == invite_id,
+                InviteRow.redeemed_at.is_(None),
+                InviteRow.revoked_at.is_(None),
+                InviteRow.expires_at > now,
+            )
+            .values(token_hash=token_hash)
+        )
+        return _changed_one(result)
+
     async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
         revoked = await self._session.scalars(
             update(InviteRow)

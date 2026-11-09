@@ -318,6 +318,7 @@ def build_services(repos: Repositories) -> Container:
         repos.login_throttle,
         repos.user_tokens,
         repos.clock,
+        base_url=repos.public_base_url,
     )
     sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
     account_email = AccountEmailService(

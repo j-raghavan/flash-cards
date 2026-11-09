@@ -164,6 +164,14 @@ class InviteRepository(Protocol):
         """Revoke every unredeemed, unrevoked invite the user created; return their ids."""
         ...
 
+    async def try_rotate_token(self, invite_id: str, token_hash: str, now: datetime) -> bool:
+        """Replace the token hash of an active invite; return whether it changed.
+
+        Only an invite that is unredeemed, unrevoked and unexpired at `now` changes,
+        in one conditional UPDATE, so a resend never revives a spent invite.
+        """
+        ...
+
 
 class DeckRepository(Protocol):
     async def add(self, deck: Deck) -> None: ...

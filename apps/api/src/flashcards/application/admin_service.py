@@ -18,10 +18,16 @@ from datetime import timedelta
 
 from flashcards.application.account_service import AccountService
 from flashcards.application.audit_service import AuditService
-from flashcards.application.invite_service import DEFAULT_TTL, CreatedInvite, InviteService
+from flashcards.application.invite_service import (
+    DEFAULT_TTL,
+    CreatedInvite,
+    InviteService,
+    invite_email,
+)
 from flashcards.application.sign_in_service import throttle_key
 from flashcards.domain.audit import AuditAction
 from flashcards.domain.invites import Role
+from flashcards.domain.mail import OutgoingEmail
 from flashcards.domain.ports import (
     Clock,
     LoginThrottleRepository,
@@ -36,6 +42,7 @@ from flashcards.domain.users import (
     User,
     UserNotFound,
     UserStatus,
+    validate_email,
 )
 
 
@@ -50,6 +57,8 @@ class AdminService:
         throttle: LoginThrottleRepository,
         tokens: UserTokenRepository,
         clock: Clock,
+        *,
+        base_url: str,
     ) -> None:
         self._invites = invites
         self._audit = audit
@@ -59,6 +68,7 @@ class AdminService:
         self._throttle = throttle
         self._tokens = tokens
         self._clock = clock
+        self._base_url = base_url
 
     async def create_invite(
         self,
@@ -68,7 +78,12 @@ class AdminService:
         email: str | None = None,
         ttl: timedelta = DEFAULT_TTL,
     ) -> CreatedInvite:
-        created = await self._invites.create(created_by=admin_id, role=role, email=email, ttl=ttl)
+        # The address may receive the invite email, so it must be a plain, valid one
+        # (raises InvalidEmail): no extra recipients or headers can ride along.
+        address = validate_email(email) if email else None
+        created = await self._invites.create(
+            created_by=admin_id, role=role, email=address, ttl=ttl
+        )
         await self._audit.record(
             AuditAction.INVITE_CREATED,
             actor_id=admin_id,
@@ -76,6 +91,23 @@ class AdminService:
             detail={"role": role.value},
         )
         return created
+
+    def invite_email(self, created: CreatedInvite) -> OutgoingEmail | None:
+        """The email for a new or resent invite; None for a link-only invite."""
+        return invite_email(created, base_url=self._base_url)
+
+    async def resend_invite(self, *, admin_id: str, invite_id: str) -> CreatedInvite | None:
+        """Rotate an active emailed invite's token so its email can be sent again.
+
+        Returns None when the invite is missing or no longer active; raises
+        InviteHasNoEmail for a link-only invite.
+        """
+        rotated = await self._invites.rotate(invite_id)
+        if rotated is not None:
+            await self._audit.record(
+                AuditAction.INVITE_RESENT, actor_id=admin_id, target_id=invite_id
+            )
+        return rotated
 
     async def revoke_invite(self, *, admin_id: str, invite_id: str) -> bool:
         revoked = await self._invites.revoke(invite_id)

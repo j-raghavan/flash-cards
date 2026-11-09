@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, get_container, require_admin
+from flashcards.api.mail import send_later
 from flashcards.api.schemas import (
     AdminUserOut,
     AuditEventOut,
@@ -20,6 +21,8 @@ from flashcards.api.schemas import (
     InviteOut,
     RoleUpdateRequest,
 )
+from flashcards.application.invite_service import CreatedInvite, InviteHasNoEmail
+from flashcards.domain.users import InvalidEmail
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -27,15 +30,25 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.post("/invites", status_code=status.HTTP_201_CREATED, response_model=CreatedInviteOut)
 async def create_invite(
     body: InviteCreateRequest,
+    tasks: BackgroundTasks,
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container, scope="function"),
 ) -> CreatedInviteOut:
-    created = await container.admin.create_invite(
-        admin_id=admin.user.id,
-        role=body.role,
-        email=body.email,
-        ttl=timedelta(days=body.ttl_days),
-    )
+    """Create an invite; one addressed to an email is also sent there."""
+    try:
+        created = await container.admin.create_invite(
+            admin_id=admin.user.id,
+            role=body.role,
+            email=body.email,
+            ttl=timedelta(days=body.ttl_days),
+        )
+    except InvalidEmail as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    send_later(tasks, container.mailer, container.admin.invite_email(created))
+    return _created_out(created)
+
+
+def _created_out(created: CreatedInvite) -> CreatedInviteOut:
     return CreatedInviteOut(
         id=created.invite.id,
         token=created.raw_token,
@@ -52,6 +65,30 @@ async def list_invites(
 ) -> list[InviteOut]:
     now = container.clock.now()
     return [InviteOut.from_invite(inv, now) for inv in await container.invite_repo.list_all()]
+
+
+@router.post("/invites/{invite_id}/resend", response_model=CreatedInviteOut)
+async def resend_invite(
+    invite_id: str,
+    tasks: BackgroundTasks,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> CreatedInviteOut:
+    """Send an emailed invite again with a new token; the previous link stops working.
+
+    Only the token's hash is stored, so the old link cannot be repeated. The new
+    token is returned once, like at creation, and the expiry is unchanged.
+    """
+    try:
+        rotated = await container.admin.resend_invite(admin_id=admin.user.id, invite_id=invite_id)
+    except InviteHasNoEmail as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This invite has no email address; share its link instead."
+        ) from exc
+    if rotated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No active invite with that id.")
+    send_later(tasks, container.mailer, container.admin.invite_email(rotated))
+    return _created_out(rotated)
 
 
 @router.post("/invites/{invite_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)

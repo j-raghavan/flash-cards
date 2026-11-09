@@ -17,7 +17,7 @@ from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
-from flashcards.domain.invites import Invite
+from flashcards.domain.invites import Invite, InviteStatus
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.login_throttle import ThrottleState, after_attempt
 from flashcards.domain.media import MediaAsset
@@ -73,6 +73,13 @@ class InMemoryInviteRepository:
     async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
         ids = sorted(i.id for i in self._by_id.values() if i.created_by == user_id)
         return [invite_id for invite_id in ids if await self.try_revoke(invite_id, now)]
+
+    async def try_rotate_token(self, invite_id: str, token_hash: str, now: datetime) -> bool:
+        invite = self._by_id.get(invite_id)
+        if invite is None or invite.status(now) is not InviteStatus.ACTIVE:
+            return False
+        self._by_id[invite_id] = invite.with_token_hash(token_hash)
+        return True
 
 
 class InMemoryUserRepository:

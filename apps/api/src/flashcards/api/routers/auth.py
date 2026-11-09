@@ -5,7 +5,6 @@ F-AUTH-7)."""
 
 from __future__ import annotations
 
-import logging
 import math
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
@@ -20,6 +19,7 @@ from flashcards.api.deps import (
     get_settings,
     set_session_cookie,
 )
+from flashcards.api.mail import send_later
 from flashcards.api.schemas import (
     InstanceInfoOut,
     LoginRequest,
@@ -36,13 +36,9 @@ from flashcards.application.auth_service import AccountSuspended, InvalidCredent
 from flashcards.config import Settings
 from flashcards.domain.invites import InviteError
 from flashcards.domain.login_throttle import LoginLocked
-from flashcards.domain.mail import OutgoingEmail
-from flashcards.domain.ports import Mailer
 from flashcards.domain.sessions import device_label
 from flashcards.domain.user_tokens import InvalidUserToken
 from flashcards.domain.users import EmailAlreadyRegistered, InvalidEmail, WeakPassword
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -60,23 +56,6 @@ def _device(request: Request) -> str:
 def _retry_after(exc: LoginLocked) -> str:
     # Rounded up, so a client that waits exactly this long is never early.
     return str(max(1, math.ceil(exc.retry_after.total_seconds())))
-
-
-def _send_later(tasks: BackgroundTasks, mailer: Mailer, email: OutgoingEmail | None) -> None:
-    """Send after the response (and after the commit), never failing the request.
-
-    Sending later also keeps a request's timing the same whether or not an email
-    goes out, so it says nothing about whether an account exists.
-    """
-    if email is not None:
-        tasks.add_task(_send_quietly, mailer, email)
-
-
-async def _send_quietly(mailer: Mailer, email: OutgoingEmail) -> None:
-    try:
-        await mailer.send(email)
-    except Exception:  # a mail outage must not surface as a server error
-        logger.exception("could not send email: %s", email.subject)
 
 
 @router.get("/options", response_model=InstanceInfoOut)
@@ -109,7 +88,7 @@ async def signup(
 
     issued = await container.auth.start_session(user, device=_device(request))
     set_session_cookie(response, issued.raw_token, settings)
-    _send_later(tasks, container.mailer, await container.account_email.verification_email(user))
+    send_later(tasks, container.mailer, await container.account_email.verification_email(user))
     return UserOut.from_user(user)
 
 
@@ -151,7 +130,7 @@ async def register(
         email = await container.account_email.verification_email(outcome.user)
     else:
         email = container.account_email.account_exists_email(outcome.user)
-    _send_later(tasks, container.mailer, email)
+    send_later(tasks, container.mailer, email)
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED, content={"detail": _REGISTER_ACCEPTED}
     )
@@ -266,7 +245,7 @@ async def resend_verification(
     container: Container = Depends(get_container, scope="function"),
 ) -> Response:
     email = await container.account_email.verification_email(caller.user)
-    _send_later(tasks, container.mailer, email)
+    send_later(tasks, container.mailer, email)
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -278,7 +257,7 @@ async def request_password_reset(
 ) -> Response:
     # Always 202, whether or not the email has an account.
     email = await container.account_email.password_reset_email(body.email)
-    _send_later(tasks, container.mailer, email)
+    send_later(tasks, container.mailer, email)
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Postgres tests for session activity (needs Docker)."""
+"""Postgres tests for session activity and invite rotation (needs Docker)."""
 
 from __future__ import annotations
 
@@ -17,8 +17,10 @@ from flashcards.adapters.db import (
     create_sessionmaker,
 )
 from flashcards.adapters.sql import (
+    SqlInviteRepository,
     SqlSessionRepository,
 )
+from flashcards.domain.invites import Invite, Role
 from flashcards.domain.sessions import Session
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
@@ -109,3 +111,33 @@ async def test_touch_skips_a_row_another_transaction_is_writing(engine: AsyncEng
     async with sm() as s:
         found = await SqlSessionRepository(s).get_by_token_hash("hash-s1")
         assert found is not None and found.last_seen_at == NOW + timedelta(minutes=10)
+
+
+async def test_only_an_active_invite_gets_a_new_token(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+
+    def invite(iid: str, **extra: datetime) -> Invite:
+        return Invite(id=iid, token_hash=f"old-{iid}", role=Role.MEMBER, created_by="admin",
+                      created_at=NOW, expires_at=NOW + timedelta(days=7),
+                      email=f"{iid}@example.com", **extra)
+
+    async with sm() as s, s.begin():
+        repo = SqlInviteRepository(s)
+        await repo.add(invite("active"))
+        await repo.add(invite("revoked", revoked_at=NOW))
+        await repo.add(invite("redeemed", redeemed_at=NOW))
+
+    async with sm() as s, s.begin():
+        repo = SqlInviteRepository(s)
+        assert await repo.try_rotate_token("active", "new-active", NOW) is True
+        assert await repo.try_rotate_token("revoked", "new-revoked", NOW) is False
+        assert await repo.try_rotate_token("redeemed", "new-redeemed", NOW) is False
+        assert await repo.try_rotate_token("missing", "new-missing", NOW) is False
+        # At or past the expiry the invite is no longer active.
+        assert await repo.try_rotate_token("active", "late", NOW + timedelta(days=7)) is False
+
+    async with sm() as s:
+        repo = SqlInviteRepository(s)
+        assert await repo.get_by_token_hash("old-active") is None
+        rotated = await repo.get_by_token_hash("new-active")
+        assert rotated is not None and rotated.id == "active"
