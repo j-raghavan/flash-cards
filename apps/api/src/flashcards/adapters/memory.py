@@ -23,6 +23,7 @@ from flashcards.domain.login_throttle import ThrottleState, after_attempt
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.planner import PlanBaseline
 from flashcards.domain.progress import (
     ActivityBucket,
     DueBucket,
@@ -637,6 +638,20 @@ class InMemoryStudySettingsRepository:
 
     async def delete_for_owner(self, owner_id: str) -> None:
         self._by_owner.pop(owner_id, None)
+
+
+class InMemoryPlanBaselineRepository:
+    def __init__(self) -> None:
+        self._by_goal: dict[str, PlanBaseline] = {}
+
+    async def get(self, goal_id: str) -> PlanBaseline | None:
+        return self._by_goal.get(goal_id)
+
+    async def add_if_absent(self, baseline: PlanBaseline) -> PlanBaseline:
+        return self._by_goal.setdefault(baseline.goal_id, baseline)
+
+    async def save(self, baseline: PlanBaseline) -> None:
+        self._by_goal[baseline.goal_id] = baseline
 
 
 class InMemoryStudyStatsRepository:

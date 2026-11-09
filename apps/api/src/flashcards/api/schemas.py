@@ -15,6 +15,7 @@ from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_v
 
 from flashcards.application.account_service import AccountExport
 from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
+from flashcards.application.planner_service import PlanReport
 from flashcards.application.review_service import ReviewOutcome, UndoOutcome
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
@@ -28,7 +29,7 @@ from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.mock_exam import ExamResult, MockExam
 from flashcards.domain.notes import MAX_FLAG, Card, Note, NoteType
-from flashcards.domain.planner import StudyPlan
+from flashcards.domain.planner import ChangeReason, PlanChange, StudyPlan
 from flashcards.domain.progress import (
     MAX_TIME_ZONE_LENGTH,
     DailyProgress,
@@ -1004,4 +1005,42 @@ class ProgressStatsOut(BaseModel):
                 for p in stats.retention
             ],
             forecast=[ForecastDayOut(date=d.day, due=d.due) for d in stats.forecast],
+        )
+
+
+class PlanChangeReasonOut(BaseModel):
+    reason: ChangeReason
+    count: int
+
+
+class PlanChangeOut(BaseModel):
+    since: datetime
+    changed: bool
+    daily_load_before: int
+    daily_load_after: int
+    before: StudyPlanOut
+    reasons: list[PlanChangeReasonOut]
+
+    @classmethod
+    def from_change(cls, change: PlanChange) -> PlanChangeOut:
+        return cls(
+            since=change.since,
+            changed=change.changed,
+            daily_load_before=change.daily_load_before,
+            daily_load_after=change.daily_load_after,
+            before=StudyPlanOut.from_plan(change.before),
+            reasons=[PlanChangeReasonOut(reason=r, count=n) for r, n in change.reasons],
+        )
+
+
+class PlanReportOut(StudyPlanOut):
+    # What changed since the plan was last accepted; None for a goal's first plan.
+    changes: PlanChangeOut | None
+
+    @classmethod
+    def from_report(cls, report: PlanReport) -> PlanReportOut:
+        change = report.change
+        return cls(
+            **StudyPlanOut.from_plan(report.plan).model_dump(),
+            changes=PlanChangeOut.from_change(change) if change is not None else None,
         )

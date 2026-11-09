@@ -30,6 +30,7 @@ from flashcards.adapters.memory import (
     InMemoryNoteRepository,
     InMemoryObjectStore,
     InMemoryPassageRepository,
+    InMemoryPlanBaselineRepository,
     InMemoryQuotaRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
@@ -96,6 +97,7 @@ from flashcards.domain.ports import (
     PackageReader,
     PassageRepository,
     PasswordHasher,
+    PlanBaselineRepository,
     QuotaRepository,
     ReviewLogRepository,
     Scheduler,
@@ -148,6 +150,7 @@ class Repositories:
     user_tokens: UserTokenRepository
     mailer: Mailer
     study_settings: StudySettingsRepository
+    plan_baselines: PlanBaselineRepository
     study_stats: StudyStatsRepository
     dummy_hash: str | None = None
     # Where links in emails point (the web client).
@@ -235,7 +238,14 @@ def build_services(repos: Repositories) -> Container:
     )
     goal_service = GoalService(decks, repos.goals, repos.clock)
     progress = ProgressService(decks, repos.study_settings, repos.study_stats, repos.clock)
-    planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)
+    planner = PlannerService(
+        goal_service,
+        repos.cards,
+        repos.schedules,
+        repos.plan_baselines,
+        progress,
+        repos.clock,
+    )
     apkg_import = ApkgImportService(repos.package_reader, decks, notes)
     account = AccountService(
         library,
@@ -414,6 +424,7 @@ def build_container(
             user_tokens=InMemoryUserTokenRepository(),
             mailer=mailer or LogMailer(show_content=True),
             study_settings=InMemoryStudySettingsRepository(),
+            plan_baselines=InMemoryPlanBaselineRepository(),
             study_stats=InMemoryStudyStatsRepository(cards, schedules, review_logs),
             public_base_url=public_base_url,
         )

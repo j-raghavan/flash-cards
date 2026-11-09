@@ -43,6 +43,7 @@ from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.planner import PlanBaseline, StudyPlan
 from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import (
     CardSchedule,
@@ -820,6 +821,65 @@ def study_settings_to_row(settings: StudySettings) -> StudySettingsRow:
 def study_settings_from_row(row: StudySettingsRow) -> StudySettings:
     return StudySettings(
         owner_id=row.owner_id, daily_goal=row.daily_goal, time_zone=row.time_zone
+    )
+
+
+class PlanBaselineRow(Base):
+    __tablename__ = "plan_baselines"
+
+    goal_id: Mapped[str] = mapped_column(
+        String, ForeignKey("goals.id", ondelete="CASCADE"), primary_key=True
+    )
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    exam_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    target_retention: Mapped[float] = mapped_column(Float)
+    days_until_exam: Mapped[int] = mapped_column(Integer)
+    total_cards: Mapped[int] = mapped_column(Integer)
+    new_cards: Mapped[int] = mapped_column(Integer)
+    scheduled_cards: Mapped[int] = mapped_column(Integer)
+    new_per_day: Mapped[int] = mapped_column(Integer)
+    reviews_per_day: Mapped[int] = mapped_column(Integer)
+    readiness: Mapped[float] = mapped_column(Float)
+    on_track: Mapped[bool] = mapped_column(Boolean)
+
+
+def plan_baseline_to_row(baseline: PlanBaseline) -> PlanBaselineRow:
+    plan = baseline.plan
+    return PlanBaselineRow(
+        goal_id=baseline.goal_id,
+        owner_id=baseline.owner_id,
+        taken_at=baseline.taken_at,
+        exam_date=baseline.exam_date,
+        target_retention=baseline.target_retention,
+        days_until_exam=plan.days_until_exam,
+        total_cards=plan.total_cards,
+        new_cards=plan.new_cards,
+        scheduled_cards=plan.scheduled_cards,
+        new_per_day=plan.new_per_day,
+        reviews_per_day=plan.reviews_per_day,
+        readiness=plan.readiness,
+        on_track=plan.on_track,
+    )
+
+
+def plan_baseline_from_row(row: PlanBaselineRow) -> PlanBaseline:
+    return PlanBaseline(
+        goal_id=row.goal_id,
+        owner_id=row.owner_id,
+        taken_at=row.taken_at,
+        exam_date=row.exam_date,
+        target_retention=row.target_retention,
+        plan=StudyPlan(
+            days_until_exam=row.days_until_exam,
+            total_cards=row.total_cards,
+            new_cards=row.new_cards,
+            scheduled_cards=row.scheduled_cards,
+            new_per_day=row.new_per_day,
+            reviews_per_day=row.reviews_per_day,
+            readiness=row.readiness,
+            on_track=row.on_track,
+        ),
     )
 
 

@@ -115,3 +115,38 @@ def test_plan_reflects_the_decks_cards(member: TestClient) -> None:
     assert body["days_until_exam"] > 0
     assert 0.0 <= body["readiness"] <= 1.0
     assert member.get("/goals/missing/plan").status_code == 404
+
+
+def _add_cards(client: TestClient, deck_id: str, count: int, prefix: str) -> None:
+    for n in range(count):
+        client.post(
+            f"/decks/{deck_id}/notes",
+            json={"note_type": "basic", "fields": {"front": f"{prefix}{n}", "back": "A"}},
+        )
+
+
+def test_plan_shows_what_changed_and_can_be_accepted(member: TestClient) -> None:
+    deck = _deck(member)
+    _add_cards(member, deck, 2, "Q")
+    goal = {"name": "Final", "deck_ids": [deck], "exam_date": FUTURE, "desired_grade": 0.5}
+    goal_id = member.post("/goals", json=goal).json()["id"]
+
+    first = member.get(f"/goals/{goal_id}/plan").json()
+    assert first["changes"] is None and first["new_cards"] == 2
+    _add_cards(member, deck, 3, "Extra")
+
+    report = member.get(f"/goals/{goal_id}/plan").json()
+    changes = report["changes"]
+    assert report["new_cards"] == 5
+    assert changes["changed"] is True and changes["before"]["new_cards"] == 2
+    assert {"reason": "cards_added", "count": 3} in changes["reasons"]
+    assert changes["daily_load_after"] >= changes["daily_load_before"]
+
+    accepted = member.post(f"/goals/{goal_id}/plan/accept")
+    assert accepted.status_code == 200 and accepted.json()["new_cards"] == 5
+    assert member.get(f"/goals/{goal_id}/plan").json()["changes"]["reasons"] == []
+    assert member.post("/goals/missing/plan/accept").status_code == 404
+
+
+def test_accept_requires_auth(client: TestClient) -> None:
+    assert client.post("/goals/x/plan/accept").status_code == 401
