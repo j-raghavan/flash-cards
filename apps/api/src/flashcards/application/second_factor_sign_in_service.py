@@ -91,10 +91,12 @@ class SecondFactorSignInService:
 
     async def _passkey_answers(self, challenge: Challenge, user: User, response_json: str) -> bool:
         expected = challenge.webauthn_challenge
-        if expected is None:
+        # A WebAuthn challenge answers once, right or wrong; of concurrent answers
+        # only the one that clears it is checked.
+        if expected is None or not await self._repo.take_webauthn_challenge(
+            challenge.id, expected
+        ):
             return False
-        # A WebAuthn challenge answers once, whether the answer is right or not.
-        await self._repo.set_webauthn_challenge(challenge.id, None)
         try:
             passkey = await self._repo.get_passkey_by_credential(
                 self._ceremonies.credential_id(response_json)

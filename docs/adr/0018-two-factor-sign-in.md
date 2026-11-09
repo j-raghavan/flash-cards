@@ -35,12 +35,14 @@ The token travels in the response body and comes back in the request body, not i
 
 **Lockout.** Every second-step answer, right or wrong, is counted against the same per-email lockout as the password, before it is checked. A right password with a second factor pending does **not** clear the count; only a completed sign-in does. So the password and the codes share 5 attempts per 15 minutes, a stolen password opens at most four code guesses per lock period, and the failure that starts a lock is audited (`login.locked`). Wrong codes are returned (401), not raised, so the count is committed.
 
+Second-factor attempts are also counted under a per-account key (`second-factor:<user id>`, hashed) with the same limits. A password reset clears the per-email count, as before, but not this one; only a completed sign-in or an admin unlock clears it. Otherwise whoever controls the mailbox could reset the password every minute (the reset cooldown) to get four fresh code guesses each time.
+
 ### TOTP
 
 - `pyotp`, RFC 6238 defaults that authenticator apps expect: 6 digits, 30-second steps, SHA-1, a 160-bit random secret.
 - Codes from one step either side of now are accepted (clock drift). All three candidates are compared with `hmac.compare_digest`, whichever matches.
 - **Replay.** The credential stores the last accepted time step. A code is accepted only for a later step, recorded with one conditional `UPDATE ... WHERE last_used_step < :step`. A code therefore works once, and an older code cannot be used after a newer one.
-- **Enrolment.** `POST /auth/two-factor/totp` (with the password) stores a new, unconfirmed secret and returns it once with its `otpauth://` URI; the web client draws the QR code itself, so the secret never leaves the browser for a third-party service. `POST /auth/two-factor/totp/confirm` turns it on with the first valid code, within 15 minutes. Starting again replaces an unconfirmed secret.
+- **Enrolment.** `POST /auth/two-factor/totp` (with the password) stores a new, unconfirmed secret and returns it once with its `otpauth://` URI; the web client draws the QR code itself, so the secret never leaves the browser for a third-party service. `POST /auth/two-factor/totp/confirm` turns it on with the first valid code, within 15 minutes. Confirmation codes count against the lockout too, so a stolen session cannot guess the code of a setup the owner left pending (and receive the new recovery codes). Starting again replaces an unconfirmed secret.
 
 ### Encryption at rest for TOTP secrets
 
@@ -63,7 +65,8 @@ Passkeys store only public keys, so they need no encryption.
 - `py_webauthn` on the server, `@simplewebauthn/browser` on the client.
 - The relying party id is the host of `FLASHCARDS_PUBLIC_BASE_URL` and the only accepted origin is its origin (scheme, host, non-default port). A response signed for any other origin or RP id is refused, so a phishing page on another domain cannot use a passkey. A misconfigured URL does not stop the API: passkeys then use an unusable RP id and simply fail.
 - Registration (`POST /auth/two-factor/passkeys/options`, with the password, then `POST /auth/two-factor/passkeys`) keeps the WebAuthn challenge server-side in a `passkey_registration` challenge bound to the user, used once. Attestation is not requested (`none`); the same credential cannot be registered twice; at most 10 passkeys per account.
-- Sign-in: the options call stores a fresh WebAuthn challenge on the pending sign-in; the challenge is cleared on the first answer, right or wrong. The passkey must belong to the pending user.
+- Sign-in: the options call stores a fresh WebAuthn challenge on the pending sign-in; the first answer, right or wrong, clears it with a compare-and-set, so of concurrent answers to one challenge only one is checked.
+- A registration whose response fails verification is answered 422 without rolling back, so its token stays used. The passkey must belong to the pending user.
 - **Counters.** After the signature verifies, the authenticator's counter must be greater than the stored one, unless both are zero (authenticators that do not count). A counter that does not move forward is refused and audited as `two_factor.passkey_counter_regressed` (a possible clone). The new count is stored with a compare-and-set on the old one.
 
 ### Changing second factors needs re-authentication
@@ -81,3 +84,5 @@ Starting an authenticator or passkey enrolment, removing either, and issuing new
 - Accepting one step of drift means a code is valid for up to 90 seconds; replay protection limits each to one use.
 - Losing `FLASHCARDS_TOTP_ENCRYPTION_KEYS` disables every authenticator app on the instance until users fall back to recovery codes or passkeys, or an admin resets them. The key must be backed up separately from the database.
 - An admin can remove any user's second factor, so a compromised admin account can still take over member accounts (threat model 5.7). Requiring two-factor sign-in for admins, and passwordless passkey sign-in, are follow-ups.
+- The password alone is accepted as proof for adding or removing a factor, also when two-factor sign-in is on, so a stolen session plus a stolen password can replace the owner's factors. Requiring a current second factor for those changes once one exists, and emailing the owner about every factor change and admin reset, are follow-ups.
+- When the attempt that starts a lock is a right password for an account with a second factor, the answer is still 202, and the second step is then refused with 429 until the lock ends.

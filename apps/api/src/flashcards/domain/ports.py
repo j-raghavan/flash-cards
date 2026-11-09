@@ -769,8 +769,8 @@ class TwoFactorRepository(Protocol):
         """Every stored authenticator, for re-encrypting with a new key."""
         ...
 
-    async def set_totp_secret(self, user_id: str, secret_ciphertext: str) -> None:
-        """Replace only the encrypted secret (key rotation)."""
+    async def set_totp_secret(self, user_id: str, *, old: str, new: str) -> bool:
+        """Replace the encrypted secret only if it is still `old` (key rotation)."""
         ...
 
     async def replace_recovery_codes(self, user_id: str, codes: Sequence[RecoveryCode]) -> None:
@@ -808,6 +808,13 @@ class TwoFactorRepository(Protocol):
     async def get_challenge(self, token_hash: str) -> Challenge | None: ...
 
     async def set_webauthn_challenge(self, challenge_id: str, value: bytes | None) -> None: ...
+
+    async def take_webauthn_challenge(self, challenge_id: str, expected: bytes) -> bool:
+        """Clear the WebAuthn challenge only if it is still `expected`, atomically.
+
+        Of two answers to one challenge, exactly one gets True.
+        """
+        ...
 
     async def use_challenge(self, challenge_id: str, now: datetime) -> bool:
         """Mark an unused challenge used, atomically; False if it was already used."""

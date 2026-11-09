@@ -227,9 +227,14 @@ class TwoFactorService:
         secret = self._open(credential)
         if secret is None:
             raise TotpNotPending()
+        # Counted, so a stolen session cannot guess the code of a pending setup
+        # (and receive the new recovery codes). The caller commits a failure.
+        state = await self._attempts.admit(user)
         step = self._otp.matching_step(secret, compact_code(code), now)
         if step is None:
+            await self._attempts.failed(user, state)
             raise InvalidSecondFactor()
+        await self._attempts.succeeded(user)
         was_enabled = await self._enabled(user.id)
         if not await self._repo.confirm_totp(user.id, step, now):
             raise TotpNotPending()  # confirmed meanwhile by a concurrent request

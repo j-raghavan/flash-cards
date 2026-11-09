@@ -842,10 +842,12 @@ class InMemoryTwoFactorRepository:
     async def list_totp(self) -> list[TotpCredential]:
         return list(self._totp.values())
 
-    async def set_totp_secret(self, user_id: str, secret_ciphertext: str) -> None:
+    async def set_totp_secret(self, user_id: str, *, old: str, new: str) -> bool:
         credential = self._totp.get(user_id)
-        if credential is not None:
-            self._totp[user_id] = replace(credential, secret_ciphertext=secret_ciphertext)
+        if credential is None or credential.secret_ciphertext != old:
+            return False
+        self._totp[user_id] = replace(credential, secret_ciphertext=new)
+        return True
 
     async def replace_recovery_codes(self, user_id: str, codes: Sequence[RecoveryCode]) -> None:
         await self.delete_recovery_codes(user_id)
@@ -903,6 +905,13 @@ class InMemoryTwoFactorRepository:
         challenge = self._challenges.get(challenge_id)
         if challenge is not None:
             self._challenges[challenge_id] = challenge.with_webauthn(value)
+
+    async def take_webauthn_challenge(self, challenge_id: str, expected: bytes) -> bool:
+        challenge = self._challenges.get(challenge_id)
+        if challenge is None or challenge.webauthn_challenge != expected:
+            return False
+        self._challenges[challenge_id] = challenge.with_webauthn(None)
+        return True
 
     async def use_challenge(self, challenge_id: str, now: datetime) -> bool:
         challenge = self._challenges.get(challenge_id)

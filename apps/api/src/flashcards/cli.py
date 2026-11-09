@@ -64,12 +64,15 @@ async def rotate_totp_key(settings: Settings) -> int:
         sessionmaker = create_sessionmaker(engine)
         async with sessionmaker() as session, session.begin():
             repo = SqlTwoFactorRepository(session)
-            credentials = await repo.list_totp()
-            for credential in credentials:
-                await repo.set_totp_secret(
-                    credential.user_id, box.reseal(credential.secret_ciphertext)
+            count = 0
+            for credential in await repo.list_totp():
+                # Only if unchanged: a setup started meanwhile keeps its new secret.
+                count += await repo.set_totp_secret(
+                    credential.user_id,
+                    old=credential.secret_ciphertext,
+                    new=box.reseal(credential.secret_ciphertext),
                 )
-        return len(credentials)
+        return count
     finally:
         await engine.dispose()
 

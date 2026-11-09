@@ -87,12 +87,16 @@ class SqlTwoFactorRepository:
         rows = await self._session.scalars(select(TotpCredentialRow))
         return [totp_from_row(row) for row in rows]
 
-    async def set_totp_secret(self, user_id: str, secret_ciphertext: str) -> None:
-        await self._session.execute(
+    async def set_totp_secret(self, user_id: str, *, old: str, new: str) -> bool:
+        updated = await self._session.scalar(
             update(TotpCredentialRow)
-            .where(TotpCredentialRow.user_id == user_id)
-            .values(secret_ciphertext=secret_ciphertext)
+            .where(
+                TotpCredentialRow.user_id == user_id, TotpCredentialRow.secret_ciphertext == old
+            )
+            .values(secret_ciphertext=new)
+            .returning(TotpCredentialRow.user_id)
         )
+        return updated is not None
 
     async def replace_recovery_codes(self, user_id: str, codes: Sequence[RecoveryCode]) -> None:
         await self.delete_recovery_codes(user_id)
@@ -194,6 +198,18 @@ class SqlTwoFactorRepository:
             .where(TwoFactorChallengeRow.id == challenge_id)
             .values(webauthn_challenge=value)
         )
+
+    async def take_webauthn_challenge(self, challenge_id: str, expected: bytes) -> bool:
+        taken = await self._session.scalar(
+            update(TwoFactorChallengeRow)
+            .where(
+                TwoFactorChallengeRow.id == challenge_id,
+                TwoFactorChallengeRow.webauthn_challenge == expected,
+            )
+            .values(webauthn_challenge=None)
+            .returning(TwoFactorChallengeRow.id)
+        )
+        return taken is not None
 
     async def use_challenge(self, challenge_id: str, now: datetime) -> bool:
         used = await self._session.scalar(

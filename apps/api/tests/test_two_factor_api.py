@@ -202,6 +202,48 @@ def test_passkey_registration_errors(app: FastAPI, seed_invite: Callable[..., st
     assert full.status_code == 409
 
 
+def test_a_failed_registration_is_used_up(app: FastAPI, seed_invite: Callable[..., str]) -> None:
+    member, _ = _member(app, seed_invite)
+    device = SoftAuthenticator()
+    started = member.post("/auth/two-factor/passkeys/options", json={"password": PASSWORD}).json()
+    phished = device.register(started["options"], origin="https://evil.example")
+    bad = member.post(
+        "/auth/two-factor/passkeys", json={"token": started["token"], "credential": phished}
+    )
+    assert bad.status_code == 422
+    retry = member.post(
+        "/auth/two-factor/passkeys",
+        json={"token": started["token"], "credential": device.register(started["options"])},
+    )
+    assert retry.status_code == 409
+
+
+def test_wrong_confirmation_codes_lock(app: FastAPI, seed_invite: Callable[..., str]) -> None:
+    member, _ = _member(app, seed_invite)
+    setup = member.post("/auth/two-factor/totp", json={"password": PASSWORD}).json()
+    wrong = "000000" if _code(setup["secret"]) != "000000" else "111111"
+    for _ in range(5):
+        member.post("/auth/two-factor/totp/confirm", json={"code": wrong})
+    locked = member.post("/auth/two-factor/totp/confirm", json={"code": _code(setup["secret"])})
+    assert locked.status_code == 429
+
+
+def test_an_admin_unlock_clears_second_factor_attempts(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    member, member_id = _member(app, seed_invite)
+    secret, _ = _enable_totp(member)
+    fresh, token = _first_step(app)
+    for _ in range(5):
+        fresh.post("/auth/login/second-factor", json={"token": token, "code": "000000"})
+    assert admin_client.post(f"/admin/users/{member_id}/unlock").status_code == 200
+    fresh, token = _first_step(app)
+    signed = fresh.post(
+        "/auth/login/second-factor", json={"token": token, "code": _code(secret, 1)}
+    )
+    assert signed.status_code == 200
+
+
 def test_second_step_errors(app: FastAPI, seed_invite: Callable[..., str]) -> None:
     member, _ = _member(app, seed_invite)
     _enable_totp(member)

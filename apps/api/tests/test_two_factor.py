@@ -33,7 +33,7 @@ from flashcards.application.second_factor_sign_in_service import SecondFactorSig
 from flashcards.application.sign_in_service import SignInService, throttle_key
 from flashcards.application.two_factor_service import Proof, TwoFactorService
 from flashcards.domain.audit import AuditAction
-from flashcards.domain.invites import Role
+from flashcards.domain.invites import Role, hash_token
 from flashcards.domain.login_throttle import MAX_FAILED_LOGINS, LoginLocked
 from flashcards.domain.two_factor import (
     CHALLENGE_TTL,
@@ -370,6 +370,49 @@ async def test_failed_codes_count_towards_the_lockout(world: World) -> None:
         await world.sign_in.login(email=EMAIL, password=PASSWORD)
 
 
+async def test_clearing_the_email_lock_gives_no_fresh_code_guesses(world: World) -> None:
+    # A password reset clears the per-email count; the per-account second-factor
+    # count stays, so resetting again and again does not reopen code guessing.
+    await world.enable_totp()
+    token = await world.pending_token()
+    for _ in range(MAX_FAILED_LOGINS - 1):
+        with pytest.raises(InvalidSecondFactor):
+            await world.second.complete_with_code(token=token, code="000000")
+    await world.throttle.delete(throttle_key(EMAIL))  # what a password reset does
+    token = await world.pending_token()
+    with pytest.raises(InvalidSecondFactor):  # the fifth code attempt starts the lock
+        await world.second.complete_with_code(token=token, code="000000")
+    with pytest.raises(LoginLocked):
+        await world.second.complete_with_code(token=token, code=world.code(1))
+
+
+async def test_confirming_an_app_is_counted(world: World) -> None:
+    setup = await world.two_factor.begin_totp(world.user, Proof(password=PASSWORD))
+    world.secret = setup.secret
+    wrong = "000000" if world.code() != "000000" else "111111"
+    for _ in range(MAX_FAILED_LOGINS):
+        with pytest.raises(InvalidSecondFactor):
+            await world.two_factor.confirm_totp(world.user, wrong)
+    with pytest.raises(LoginLocked):
+        await world.two_factor.confirm_totp(world.user, world.code())
+
+
+async def test_racing_passkey_answers_check_one(world: World) -> None:
+    device = SoftAuthenticator()
+    await world.add_passkey(device)
+    token = await world.pending_token()
+    options = json.loads(await world.second.passkey_options(token))
+    challenge = await world.repo.get_challenge(hash_token(token))
+    assert challenge is not None and challenge.webauthn_challenge is not None
+    # Another answer took the challenge first.
+    assert await world.repo.take_webauthn_challenge(challenge.id, challenge.webauthn_challenge)
+    await world.repo.set_webauthn_challenge(challenge.id, b"someone else's")
+    with pytest.raises(InvalidSecondFactor):
+        await world.second.complete_with_passkey(
+            token=token, response_json=json.dumps(device.assert_(options))
+        )
+
+
 async def test_a_pending_sign_in_expires(world: World) -> None:
     await world.enable_totp()
     token = await world.pending_token()
@@ -623,7 +666,9 @@ async def test_a_confirmation_raced_by_another_request(world: World) -> None:
 async def test_an_unreadable_secret_is_never_accepted(world: World) -> None:
     setup = await world.two_factor.begin_totp(world.user, Proof(password=PASSWORD))
     world.secret = setup.secret
-    await world.repo.set_totp_secret(world.user.id, "garbage")
+    stored = await world.repo.get_totp(world.user.id)
+    assert stored is not None
+    await world.repo.set_totp_secret(world.user.id, old=stored.secret_ciphertext, new="garbage")
     with pytest.raises(TotpNotPending):
         await world.two_factor.confirm_totp(world.user, world.code())
     await world.repo.confirm_totp(world.user.id, 0, START)

@@ -200,12 +200,14 @@ async def confirm_totp(
     body: CodeIn,
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
-) -> RecoveryCodesOut:
+) -> RecoveryCodesOut | JSONResponse:
     """Turn the authenticator app on with its first code."""
     try:
         codes = await container.two_factor.confirm_totp(caller.user, body.code)
-    except InvalidSecondFactor as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, _WRONG_CODE) from exc
+    except InvalidSecondFactor:
+        return _detail(status.HTTP_422_UNPROCESSABLE_CONTENT, _WRONG_CODE)
+    except LoginLocked as exc:
+        raise _locked(exc) from exc
     except TotpNotPending as exc:
         raise _conflict("Start setting up the authenticator app again.") from exc
     return RecoveryCodesOut(recovery_codes=list(codes) if codes is not None else None)
@@ -275,7 +277,7 @@ async def finish_passkey(
     body: PasskeyRegisterIn,
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
-) -> PasskeyAddedOut:
+) -> PasskeyAddedOut | JSONResponse:
     try:
         added = await container.two_factor.finish_passkey(
             caller.user,
@@ -285,8 +287,9 @@ async def finish_passkey(
         )
     except ChallengeExpired as exc:
         raise _conflict("This passkey registration has expired. Try again.") from exc
-    except InvalidPasskey as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, _WRONG_PASSKEY) from exc
+    except InvalidPasskey:
+        # Returned, so the registration stays used up.
+        return _detail(status.HTTP_422_UNPROCESSABLE_CONTENT, _WRONG_PASSKEY)
     codes = added.recovery_codes
     return PasskeyAddedOut(
         passkey=PasskeyOut.from_passkey(added.passkey),

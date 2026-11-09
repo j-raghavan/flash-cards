@@ -59,8 +59,9 @@ async def check_totp(repo: TwoFactorRepository, user: str) -> None:
     assert not await repo.use_totp_step(user, 9)  # and older ones
     assert await repo.use_totp_step(user, 11)
     assert await repo.enabled_user_ids([user, "nobody"]) == {user}
-    await repo.set_totp_secret(user, "c")
-    await repo.set_totp_secret("nobody", "x")  # no row: nothing happens
+    assert not await repo.set_totp_secret(user, old="stale", new="x")  # changed meanwhile
+    assert await repo.set_totp_secret(user, old="b", new="c")
+    assert not await repo.set_totp_secret("nobody", old="b", new="x")
     assert [c.secret_ciphertext for c in await repo.list_totp()] == ["c"]
     assert await repo.delete_totp(user)
     assert not await repo.delete_totp(user)
@@ -118,9 +119,13 @@ async def check_challenges(repo: TwoFactorRepository, user: str) -> None:
     live = await repo.get_challenge("hash-live")
     assert live is not None and live.webauthn_challenge == b"\x01\x02"
     assert live.is_live(NOW, ChallengePurpose.SIGN_IN)
-    await repo.set_webauthn_challenge("live", None)
+    assert not await repo.take_webauthn_challenge("live", b"\x09")  # not the one issued
+    assert not await repo.take_webauthn_challenge("ghost", b"\x01")
+    assert await repo.take_webauthn_challenge("live", b"\x01\x02")
+    assert not await repo.take_webauthn_challenge("live", b"\x01\x02")  # once
     cleared = await repo.get_challenge("hash-live")
     assert cleared is not None and cleared.webauthn_challenge is None
+    await repo.set_webauthn_challenge("live", None)
     await repo.delete_stale_challenges(user, NOW)
     assert await repo.get_challenge("hash-old") is None
     assert await repo.get_challenge("hash-used") is None
