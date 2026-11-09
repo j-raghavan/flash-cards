@@ -73,7 +73,7 @@ describe("admin console", () => {
     const own = (await screen.findByText("root@example.com")).closest("tr") as HTMLElement;
     expect(within(own).getByText("(you)")).toBeInTheDocument();
     expect(within(own).getByRole("combobox")).toBeDisabled();
-    expect(within(own).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(own).getAllByRole("button").map((b) => b.textContent)).toEqual(["AI quota"]);
     expect(screen.getByText("Active, email not confirmed")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Role of bob@example.com"), "admin");
@@ -190,6 +190,76 @@ describe("admin console", () => {
     await user.click(screen.getByRole("button", { name: "Revoke invite" }));
     expect(await screen.findByText("revoked")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
+  });
+
+  it("resends an emailed invite with a new link shown once, and reports a refusal", async () => {
+    const calls = mockApi({
+      ...asAdmin,
+      "GET /admin/users": { body: USERS },
+      "GET /admin/invites": { body: [invite("i1", { email: "new@example.com" }), invite("i2"), invite("i3", { email: "x@example.com", status: "expired" })] },
+      "POST /admin/invites/i1/resend": {
+        body: { id: "i1", token: "fresh", role: "member", email: "new@example.com", expires_at: "2026-11-08T00:00:00Z" },
+      },
+      "POST /admin/invites": { status: 201, body: { id: "i4", token: "tok", role: "member", email: null, expires_at: "2026-11-15T00:00:00Z" } },
+      "POST /admin/invites/i1/revoke": { status: 204 },
+      "POST /admin/invites/i2/revoke": { status: 204 },
+    });
+    renderApp("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Invites" }));
+    // Only an active invite with an address can be emailed again.
+    const resend = await screen.findByRole("button", { name: "Resend" });
+    expect(screen.getAllByRole("button", { name: "Resend" })).toHaveLength(1);
+    expect(resend.closest("tr")).toHaveTextContent("new@example.com");
+    await user.click(resend);
+    expect(screen.getByRole("alertdialog", { name: "Resend" })).toHaveTextContent(
+      "Email a new sign-up link to new@example.com? The current link stops working",
+    );
+    await user.click(screen.getByRole("button", { name: "Resend invite" }));
+    expect(await screen.findByRole("textbox", { name: "New invite link" })).toHaveValue(inviteUrl("fresh"));
+    expect(screen.getByText(/Invite emailed again to new@example.com\./)).toBeInTheDocument();
+    expect(calls.filter((c) => c.path === "/admin/invites/i1/resend")).toHaveLength(1);
+    // Revoking another invite keeps the link; revoking this one removes it.
+    const revokeIn = async (email: string): Promise<void> => {
+      const row = screen.getByText(email).closest("tr") as HTMLElement;
+      await user.click(within(row).getByRole("button", { name: "Revoke" }));
+      await user.click(within(row).getByRole("button", { name: "Revoke invite" }));
+    };
+    await revokeIn("Anyone with the link");
+    await waitFor(() => {
+      expect(calls.filter((c) => c.path === "/admin/invites/i2/revoke")).toHaveLength(1);
+    });
+    expect(screen.getByRole("textbox", { name: "New invite link" })).toBeInTheDocument();
+    await revokeIn("new@example.com");
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "New invite link" })).not.toBeInTheDocument();
+    });
+    // A new invite replaces the resent link on screen.
+    await user.click(screen.getByRole("button", { name: "Resend" }));
+    await user.click(screen.getByRole("button", { name: "Resend invite" }));
+    expect(await screen.findByRole("textbox", { name: "New invite link" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create invite" }));
+    expect(await screen.findByRole("textbox", { name: "Invite link" })).toHaveValue(inviteUrl("tok"));
+    expect(screen.queryByRole("textbox", { name: "New invite link" })).not.toBeInTheDocument();
+  });
+
+  it("shows the server's answer when an invite cannot be resent", async () => {
+    mockApi({
+      ...asAdmin,
+      "GET /admin/users": { body: USERS },
+      "GET /admin/invites": { body: [invite("i1", { email: "new@example.com" })] },
+      "POST /admin/invites/i1/resend": {
+        status: 409,
+        body: { detail: "This invite has no email address; share its link instead." },
+      },
+    });
+    renderApp("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Invites" }));
+    await user.click(await screen.findByRole("button", { name: "Resend" }));
+    await user.click(screen.getByRole("button", { name: "Resend invite" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This invite has no email address; share its link instead.");
+    expect(screen.queryByRole("textbox", { name: "New invite link" })).not.toBeInTheDocument();
   });
 
   it("reports invites that cannot load and a revoke that fails", async () => {

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The admin console (F-ADMIN-1, F-ADMIN-2, F-ADMIN-5): users, invites and the
-// audit log. The server checks the admin role on every call; this screen only
+// The admin console (F-ADMIN-1 to F-ADMIN-5): users and their AI quotas,
+// invites, instance quotas, AI usage and the audit log. The server checks the admin role on every call; this screen only
 // hides itself from members and keeps admins from acting on their own account.
 // Loaded on first visit, so members never download it.
 
 import { useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
+import { adminUsage } from "../api/adminUsage";
 import { describeError } from "../api/client";
 import { admin } from "../api/endpoints";
 import type { AdminUser, AuditEvent, CreatedInvite, Invite, Role } from "../api/types";
@@ -14,6 +15,9 @@ import { ConfirmButton, CopyField, ErrorText, Loading } from "../components/ui";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { QuotasPanel } from "./QuotasPanel";
+import { UsagePanel } from "./UsagePanel";
+import { UserQuotaEditor } from "./UserQuota";
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -44,6 +48,12 @@ function UserRow({
   const action = useSubmit();
   const [note, setNote] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [quotaOpen, setQuotaOpen] = useState(false);
+  const quotaButton = useRef<HTMLButtonElement>(null);
+  const closeQuota = (): void => {
+    setQuotaOpen(false);
+    quotaButton.current?.focus();
+  };
 
   const act = (run: () => Promise<AdminUser>, done: string): void => {
     setNote(null);
@@ -54,92 +64,120 @@ function UserRow({
   };
 
   return (
-    <tr>
-      <th scope="row">
-        {account.email}
-        {self ? <span className="muted"> (you)</span> : null}
-      </th>
-      <td>
-        <select
-          aria-label={`Role of ${account.email}`}
-          value={account.role}
-          disabled={self || action.busy}
-          onChange={(event) => {
-            const role = event.target.value as Role;
-            act(() => admin.setRole(account.id, role), `Role set to ${role}.`);
-          }}
-        >
-          <option value="member">Member</option>
-          <option value="admin">Admin</option>
-        </select>
-      </td>
-      <td>
-        {account.suspended ? "Suspended" : "Active"}
-        {account.email_verified ? "" : ", email not confirmed"}
-      </td>
-      <td>{formatDay(account.created_at)}</td>
-      <td>
-        {self ? null : (
+    <>
+      <tr>
+        <th scope="row">
+          {account.email}
+          {self ? <span className="muted"> (you)</span> : null}
+        </th>
+        <td>
+          <select
+            aria-label={`Role of ${account.email}`}
+            value={account.role}
+            disabled={self || action.busy}
+            onChange={(event) => {
+              const role = event.target.value as Role;
+              act(() => admin.setRole(account.id, role), `Role set to ${role}.`);
+            }}
+          >
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+        </td>
+        <td>
+          {account.suspended ? "Suspended" : "Active"}
+          {account.email_verified ? "" : ", email not confirmed"}
+        </td>
+        <td>{formatDay(account.created_at)}</td>
+        <td>
           <div className="row">
-            {account.suspended ? (
-              <button
-                type="button"
-                className="button"
-                disabled={action.busy}
-                aria-label={`Unsuspend ${account.email}`}
-                onClick={() => {
-                  act(() => admin.unsuspend(account.id), "Unsuspended.");
-                }}
-              >
-                Unsuspend
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="button"
-                disabled={action.busy}
-                aria-label={`Suspend ${account.email}`}
-                onClick={() => {
-                  act(() => admin.suspend(account.id), "Suspended; their sessions have ended.");
-                }}
-              >
-                Suspend
-              </button>
-            )}
             <button
               type="button"
               className="button"
-              disabled={action.busy}
-              aria-label={`Unlock sign-in for ${account.email}`}
+              ref={quotaButton}
+              aria-expanded={quotaOpen}
+              aria-controls={quotaOpen ? `quota-row-${account.id}` : undefined}
+              aria-label={`AI quota for ${account.email}`}
               onClick={() => {
-                act(() => admin.unlock(account.id), "Sign-in unlocked.");
-              }}
-            >
-              Unlock
-            </button>
-            <ConfirmButton
-              label={`Delete ${account.email}`}
-              confirmLabel="Delete account"
-              prompt={`Delete ${account.email} and all their decks, cards and history? This cannot be undone.`}
-              onConfirm={async () => {
-                setRemoveError(null);
-                try {
-                  await admin.removeUser(account.id);
-                  onRemoved(account.id);
-                } catch (failure) {
-                  setRemoveError(describeError(failure));
+                if (quotaOpen) {
+                  closeQuota();
+                } else {
+                  setQuotaOpen(true);
                 }
               }}
-            />
+            >
+              AI quota
+            </button>
+            {self ? null : (
+              <>
+                {account.suspended ? (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={action.busy}
+                    aria-label={`Unsuspend ${account.email}`}
+                    onClick={() => {
+                      act(() => admin.unsuspend(account.id), "Unsuspended.");
+                    }}
+                  >
+                    Unsuspend
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={action.busy}
+                    aria-label={`Suspend ${account.email}`}
+                    onClick={() => {
+                      act(() => admin.suspend(account.id), "Suspended; their sessions have ended.");
+                    }}
+                  >
+                    Suspend
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="button"
+                  disabled={action.busy}
+                  aria-label={`Unlock sign-in for ${account.email}`}
+                  onClick={() => {
+                    act(() => admin.unlock(account.id), "Sign-in unlocked.");
+                  }}
+                >
+                  Unlock
+                </button>
+                <ConfirmButton
+                  label={`Delete ${account.email}`}
+                  confirmLabel="Delete account"
+                  prompt={`Delete ${account.email} and all their decks, cards and history? This cannot be undone.`}
+                  onConfirm={async () => {
+                    setRemoveError(null);
+                    try {
+                      await admin.removeUser(account.id);
+                      onRemoved(account.id);
+                    } catch (failure) {
+                      setRemoveError(describeError(failure));
+                    }
+                  }}
+                />
+              </>
+            )}
           </div>
-        )}
-        <span role="status" className="muted">
-          {note}
-        </span>
-        <ErrorText message={action.error} />
-        <ErrorText message={removeError} />
-      </td>
-    </tr>
+          <span role="status" className="muted">
+            {note}
+          </span>
+          <ErrorText message={action.error} />
+          <ErrorText message={removeError} />
+        </td>
+      </tr>
+      {quotaOpen ? (
+        <tr id={`quota-row-${account.id}`}>
+          <td colSpan={5}>
+            <UserQuotaEditor account={account} onClose={closeQuota} />
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 
@@ -196,6 +234,8 @@ function InvitesPanel() {
   const [days, setDays] = useState("7");
   const [created, setCreated] = useState<CreatedInvite | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [resent, setResent] = useState<CreatedInvite | null>(null);
+  const [resendError, setResendError] = useState<string | null>(null);
   const submit = useSubmit();
   const dayCount = Number(days);
   const validDays = Number.isInteger(dayCount) && dayCount >= 1 && dayCount <= 90;
@@ -205,6 +245,7 @@ function InvitesPanel() {
     void submit.run(async () => {
       const invite = await admin.createInvite(email.trim() === "" ? null : email.trim(), role, dayCount);
       setCreated(invite);
+      setResent(null);
       setEmail("");
       invites.reload();
     });
@@ -262,8 +303,18 @@ function InvitesPanel() {
           <CopyField label="Invite link" value={inviteUrl(created.token)} />
         </div>
       )}
+      {resent === null ? null : (
+        <div className="panel" role="status">
+          <p>
+            <strong>Invite emailed again to {resent.email}.</strong> The previous link no longer works. The new link
+            is shown only once and works until {formatTime(resent.expires_at)}.
+          </p>
+          <CopyField label="New invite link" value={inviteUrl(resent.token)} />
+        </div>
+      )}
       <ErrorText message={invites.error} />
       <ErrorText message={revokeError} />
+      <ErrorText message={resendError} />
       {invites.data === undefined ? (
         invites.error === null ? (
           <Loading />
@@ -294,20 +345,43 @@ function InvitesPanel() {
                   <td>{formatDay(invite.expires_at)}</td>
                   <td>
                     {invite.status === "active" ? (
-                      <ConfirmButton
-                        label="Revoke"
-                        confirmLabel="Revoke invite"
-                        prompt="Revoke this invite? Its link stops working at once."
-                        onConfirm={async () => {
-                          setRevokeError(null);
-                          try {
-                            await admin.revokeInvite(invite.id);
-                            invites.reload();
-                          } catch (failure) {
-                            setRevokeError(describeError(failure));
-                          }
-                        }}
-                      />
+                      <div className="row">
+                        {invite.email === null ? null : (
+                          <ConfirmButton
+                            label="Resend"
+                            confirmLabel="Resend invite"
+                            prompt={`Email a new sign-up link to ${invite.email}? The current link stops working; the expiry stays the same.`}
+                            onConfirm={async () => {
+                              setResendError(null);
+                              try {
+                                const rotated = await adminUsage.resendInvite(invite.id);
+                                setCreated(null);
+                                setResent(rotated);
+                                invites.reload();
+                              } catch (failure) {
+                                setResendError(describeError(failure));
+                              }
+                            }}
+                          />
+                        )}
+                        <ConfirmButton
+                          label="Revoke"
+                          confirmLabel="Revoke invite"
+                          prompt="Revoke this invite? Its link stops working at once."
+                          onConfirm={async () => {
+                            setRevokeError(null);
+                            try {
+                              await admin.revokeInvite(invite.id);
+                              // A link shown for this invite no longer works.
+                              setCreated((shown) => (shown?.id === invite.id ? null : shown));
+                              setResent((shown) => (shown?.id === invite.id ? null : shown));
+                              invites.reload();
+                            } catch (failure) {
+                              setRevokeError(describeError(failure));
+                            }
+                          }}
+                        />
+                      </div>
                     ) : null}
                   </td>
                 </tr>
@@ -412,6 +486,8 @@ function AuditPanel() {
 const TABS = [
   { id: "users", label: "Users" },
   { id: "invites", label: "Invites" },
+  { id: "quotas", label: "Quotas" },
+  { id: "usage", label: "Usage" },
   { id: "audit", label: "Audit log" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -482,6 +558,8 @@ export function AdminPage() {
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="tab-panel" tabIndex={0}>
         {tab === "users" ? <UsersPanel selfId={user.id} /> : null}
         {tab === "invites" ? <InvitesPanel /> : null}
+        {tab === "quotas" ? <QuotasPanel /> : null}
+        {tab === "usage" ? <UsagePanel /> : null}
         {tab === "audit" ? <AuditPanel /> : null}
       </div>
     </section>
