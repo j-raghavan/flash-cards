@@ -26,6 +26,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _SAME_ORIGIN_FETCH_SITES = frozenset({"same-origin", "none"})
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 _FORBIDDEN_BODY = json.dumps({"detail": "Cross-site request refused."}).encode()
 
 
@@ -33,11 +34,18 @@ def origin_of(url: str) -> str | None:
     """The lower-cased scheme://host[:port] of an absolute http(s) URL, else None."""
     try:
         parts = urlsplit(url.strip())
+        port = parts.port
     except ValueError:
         return None
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return None
-    return f"{parts.scheme}://{parts.netloc}".lower()
+    origin = f"{parts.scheme}://{parts.netloc}".lower()
+    # Browsers omit a scheme's default port from Origin, so a configured
+    # https://host:443 must compare equal to https://host.
+    default_port = _DEFAULT_PORTS[parts.scheme]
+    if port == default_port:
+        origin = origin.removesuffix(f":{default_port}")
+    return origin
 
 
 class CsrfOriginMiddleware:

@@ -109,6 +109,12 @@ def test_a_misconfigured_public_url_trusts_only_same_origin() -> None:
     [
         ("https://Cards.Example.com/path?q=1", "https://cards.example.com"),
         ("http://localhost:5173", "http://localhost:5173"),
+        ("https://cards.example.com:443", "https://cards.example.com"),
+        ("http://cards.example.com:80/x", "http://cards.example.com"),
+        ("http://cards.example.com:443", "http://cards.example.com:443"),
+        ("http://cards.example.com:8080", "http://cards.example.com:8080"),
+        ("http://[::1]:80", "http://[::1]"),
+        ("http://cards.example.com:99999", None),
         (" https://a.example ", "https://a.example"),
         ("ftp://files.example.com", None),
         ("/relative/path", None),
