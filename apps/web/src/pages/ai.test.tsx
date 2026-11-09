@@ -34,6 +34,18 @@ function lastSource(): FakeEventSource {
   return source;
 }
 
+/**
+ * The latest EventSource, once it exists. The job page opens it in an effect
+ * that runs after the job is shown, so a test that has just seen the job on
+ * screen waits for the stream rather than racing that effect.
+ */
+function openedSource(count = 1): Promise<FakeEventSource> {
+  return waitFor(() => {
+    expect(FakeEventSource.instances.length).toBeGreaterThanOrEqual(count);
+    return lastSource();
+  });
+}
+
 beforeEach(() => {
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -62,7 +74,7 @@ describe("generate page", () => {
       deck_id: "d1",
       thoroughness: "thorough",
     });
-    expect(lastSource().url).toBe("/api/ai/jobs/j1/events");
+    expect((await openedSource()).url).toBe("/api/ai/jobs/j1/events");
   });
 
   it("checks the file type and size before uploading, and shows server refusals", async () => {
@@ -134,7 +146,7 @@ describe("job page", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Generating cards…");
     expect(screen.getByRole("progressbar", { name: "Generation progress" })).toHaveAttribute("value", "50");
 
-    const source = lastSource();
+    const source = await openedSource();
     act(() => {
       source.emit("progress", JSON.stringify(job({ completed_units: 3, progress: 0.75 })));
       source.emit("progress", "not json");
@@ -174,9 +186,10 @@ describe("job page", () => {
     });
     renderApp("/jobs/j1");
     await screen.findByText(/Generating cards/);
+    const source = await openedSource();
     status = "succeeded";
     act(() => {
-      lastSource().fail(FakeEventSource.CONNECTING); // the browser retries on its own
+      source.fail(FakeEventSource.CONNECTING); // the browser retries on its own
     });
     expect(screen.getByText(/Generating cards/)).toBeInTheDocument();
     act(() => {
@@ -203,8 +216,9 @@ describe("job page", () => {
     }) as unknown as typeof window.setTimeout);
     renderApp("/jobs/j1");
     await screen.findByText(/2 of 4 pages/);
+    const first = await openedSource();
     act(() => {
-      lastSource().fail(FakeEventSource.CLOSED);
+      first.fail(FakeEventSource.CLOSED);
     });
     await waitFor(() => {
       expect(timers).toHaveLength(1);
@@ -233,8 +247,9 @@ describe("job page", () => {
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(await screen.findByText(/Cancelling…/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    const source = await openedSource();
     act(() => {
-      lastSource().emit("done", JSON.stringify(job({ status: "cancelled", cancel_requested: true })));
+      source.emit("done", JSON.stringify(job({ status: "cancelled", cancel_requested: true })));
     });
     expect(await screen.findByText("Cancelled.")).toBeInTheDocument();
 
