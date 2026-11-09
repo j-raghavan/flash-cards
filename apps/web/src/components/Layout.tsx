@@ -68,6 +68,8 @@ export function Layout() {
             Decks
           </NavLink>
           <NavLink to="/cards">Browse</NavLink>
+          <NavLink to="/goals">Goals</NavLink>
+          <NavLink to="/progress">Progress</NavLink>
         </nav>
         <button
           type="button"

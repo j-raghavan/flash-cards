@@ -167,14 +167,22 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
 }
 
 /** Deck proficiency (0 to 100) as a ring (F-PROG-2). */
-export function ProficiencyRing({ value, size = 96 }: { value: number; size?: number }) {
+export function ProficiencyRing({
+  value,
+  size = 96,
+  label = "Proficiency",
+}: {
+  value: number;
+  size?: number;
+  label?: string;
+}) {
   const clamped = Math.max(0, Math.min(100, Math.round(value)));
   const stroke = 8;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   return (
     <figure className="ring" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`Proficiency ${clamped}%`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${String(clamped)}%`}>
         <circle className="ring-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} fill="none" />
         <circle
           className="ring-value"

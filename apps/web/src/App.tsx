@@ -1,17 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { lazy, Suspense, type ReactNode } from "react";
 import { Link, Route, Routes } from "react-router";
 
 import { AuthProvider } from "./auth/AuthContext";
 import { Layout } from "./components/Layout";
+import { Loading } from "./components/ui";
 import { ForgotPasswordPage, LoginPage, ResetPasswordPage, SignupPage, VerifyEmailPage } from "./pages/auth";
 import { BrowserPage } from "./pages/BrowserPage";
 import { DeckDetailPage } from "./pages/DeckDetailPage";
 import { DeckListPage } from "./pages/DeckListPage";
 import { GeneratePage } from "./pages/GeneratePage";
+import { GoalPage, GoalsPage } from "./pages/GoalsPage";
 import { JobPage } from "./pages/JobPage";
 import { EditNotePage, NewNotePage } from "./pages/NoteEditorPage";
 import { useDocumentTitle } from "./lib/useDocumentTitle";
 import { StudyPage } from "./pages/StudyPage";
+
+// Screens with charts or editors load on first visit, keeping the start small.
+const ProgressPage = lazy(() => import("./progress/ProgressPage").then((m) => ({ default: m.ProgressPage })));
+
+function Lazy({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<Loading />}>{children}</Suspense>;
+}
 
 function NotFound() {
   useDocumentTitle("Page not found");
@@ -42,6 +52,16 @@ export function AppRoutes() {
         <Route path="/notes/:noteId/edit" element={<EditNotePage />} />
         <Route path="/cards" element={<BrowserPage />} />
         <Route path="/jobs/:jobId" element={<JobPage />} />
+        <Route path="/goals" element={<GoalsPage />} />
+        <Route path="/goals/:goalId" element={<GoalPage />} />
+        <Route
+          path="/progress"
+          element={
+            <Lazy>
+              <ProgressPage />
+            </Lazy>
+          }
+        />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

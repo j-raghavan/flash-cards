@@ -102,7 +102,8 @@ a {
 
 .site-header nav {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   flex: 1;
 }
 
@@ -605,6 +606,132 @@ progress {
 .celebration {
   color: var(--accent);
   font-weight: 600;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.panel {
+  margin: 16px 0;
+  padding: 12px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.panel h2 {
+  margin-top: 0.5rem;
+}
+
+.lead {
+  font: 1.15rem/1.5 var(--serif);
+}
+
+.charts {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.chart {
+  margin: 0;
+}
+
+.chart h3 {
+  font: 600 1rem/1.3 var(--serif);
+  margin: 0 0 8px;
+}
+
+.chart-scroll {
+  overflow-x: auto;
+}
+
+.chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.8rem;
+}
+
+.heat-0 {
+  fill: var(--line);
+}
+
+.heat-1 {
+  fill: color-mix(in srgb, var(--accent) 30%, var(--surface));
+}
+
+.heat-2 {
+  fill: color-mix(in srgb, var(--accent) 55%, var(--surface));
+}
+
+.heat-3 {
+  fill: color-mix(in srgb, var(--accent) 78%, var(--surface));
+}
+
+.heat-4 {
+  fill: var(--accent);
+}
+
+.line-chart,
+.bar-chart {
+  width: 100%;
+  height: auto;
+}
+
+.line-chart .line {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.line-chart .dot {
+  fill: var(--accent);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.bar-chart .bar {
+  fill: var(--accent);
+}
+
+.chart .grid {
+  stroke: var(--line);
+  stroke-dasharray: 2 3;
+}
+
+.chart .baseline {
+  stroke: var(--muted);
+}
+
+.chart .axis {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.chart-table summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.chart-table table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.chart-table th,
+.chart-table td {
+  text-align: left;
+  padding: 3px 16px 3px 0;
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 .dialog-backdrop {
