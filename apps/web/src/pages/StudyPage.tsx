@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A study session (F-STUDY-1, F-STUDY-3): show the question, reveal the answer,
 // rate it. Space reveals, 1 to 4 rate, U undoes the last answer and E edits the
-// card. Every answer carries its own idempotency key and is queued on the
-// device when the server is unreachable (F-STUDY-5), so the session never waits
-// on the network.
+// card. In the AI-evaluation mode (F-STUDY-2) the student types an answer and
+// the AI suggests a rating, which the student confirms or changes. Every
+// answer carries its own idempotency key and is queued on the device when the
+// server is unreachable (F-STUDY-5), so the session never waits on the network.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/client";
@@ -21,6 +22,28 @@ import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { pending, submitReview } from "../offline/reviewQueue";
 import { NoteEditor } from "./NoteEditorPage";
+
+// The typed-answer mode loads only when it is first used.
+const TypedAnswer = lazy(() => import("../aiStudy/TypedAnswer").then((m) => ({ default: m.TypedAnswer })));
+
+type StudyMode = "self" | "ai";
+const MODE_KEY = "flashcards.studyMode";
+
+function savedMode(): StudyMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "ai" ? "ai" : "self";
+  } catch {
+    return "self"; // storage blocked: the default mode
+  }
+}
+
+function saveMode(mode: StudyMode): void {
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // storage blocked: the choice lasts for this session only
+  }
+}
 
 const RATINGS: { rating: Rating; label: string }[] = [
   { rating: 1, label: "Again" },
@@ -115,6 +138,9 @@ export function StudyPage() {
   const [undoing, setUndoing] = useState(false);
   const [goal, setGoal] = useState<DailyGoal | null>(null);
   const [editing, setEditing] = useState(false);
+  const [mode, setMode] = useState<StudyMode>(savedMode);
+  // The rating the AI suggested for the card at a position.
+  const [suggested, setSuggested] = useState<{ position: string; rating: Rating } | null>(null);
 
   const details = useRef(new Map<string, Promise<CardDetail>>());
   const inFlight = useRef(new Set<Promise<unknown>>());
@@ -167,6 +193,7 @@ export function StudyPage() {
   const detail = shown.position === position ? shown.detail : null;
   const cardError = shown.position === position ? shown.error : null;
   const revealed = revealedAt === position;
+  const suggestion = suggested?.position === position ? suggested.rating : null;
 
   useEffect(() => {
     if (card === undefined) {
@@ -275,6 +302,7 @@ export function StudyPage() {
           answered.current.delete(last.card.id);
           setReviewed((n) => n - 1);
           setRevealedAt(null);
+          setSuggested(null);
           setLastAnswer(null);
           if (last.round === now.round) {
             setIndex(last.index);
@@ -352,6 +380,12 @@ export function StudyPage() {
         setRevealedAt(position);
         return;
       }
+      // Enter accepts the rating the AI suggested.
+      if (event.key === "Enter" && !onControl && revealed && suggestion !== null) {
+        event.preventDefault();
+        rate(suggestion);
+        return;
+      }
       const found = RATINGS.find((r) => String(r.rating) === event.key);
       if (found !== undefined && revealed) {
         event.preventDefault();
@@ -362,18 +396,19 @@ export function StudyPage() {
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [revealed, detail, rate, position, editing, undoTarget, undo]);
+  }, [revealed, detail, rate, position, editing, undoTarget, undo, suggestion]);
 
   // Keep keyboard and screen-reader focus with the session: the card when it
-  // appears, the rating buttons once the answer shows.
+  // appears (the answer box, in the typed-answer mode), the rating buttons once
+  // the answer shows.
   const cardRef = useRef<HTMLElement>(null);
   const ratingsRef = useRef<HTMLDivElement>(null);
   const loaded = detail !== null;
   useEffect(() => {
-    if (loaded) {
+    if (loaded && (revealed || mode === "self")) {
       (revealed ? ratingsRef.current : cardRef.current)?.focus();
     }
-  }, [loaded, revealed, position]);
+  }, [loaded, revealed, position, mode]);
 
   const header = (
     <nav aria-label="Breadcrumb" className="breadcrumb">
@@ -446,6 +481,29 @@ export function StudyPage() {
         </p>
         {goal === null ? null : <GoalProgress goal={goal} />}
       </div>
+      <fieldset className="segmented study-mode">
+        <legend>Answer by</legend>
+        {(
+          [
+            ["self", "Revealing it"],
+            ["ai", "Typing it (AI checks)"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value}>
+            <input
+              type="radio"
+              name="study-mode"
+              value={value}
+              checked={mode === value}
+              onChange={() => {
+                setMode(value);
+                saveMode(value);
+              }}
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
       <ErrorText message={submitError} />
       {cardError !== null ? (
         <div>
@@ -478,24 +536,41 @@ export function StudyPage() {
           ) : null}
         </article>
       )}
+      {sides !== null && mode === "ai" ? (
+        <Suspense fallback={<Loading />}>
+          <TypedAnswer
+            key={position}
+            cardId={card.id}
+            revealed={revealed}
+            onEvaluated={(rating) => {
+              setSuggested({ position, rating });
+              setRevealedAt(position);
+            }}
+            onReveal={() => {
+              setRevealedAt(position);
+            }}
+          />
+        </Suspense>
+      ) : null}
       {sides === null ? null : revealed ? (
         <div className="ratings" role="group" aria-label="How well did you know it?" tabIndex={-1} ref={ratingsRef}>
           {RATINGS.map(({ rating, label }) => (
             <button
               key={rating}
               type="button"
-              className={rating === 3 ? "button primary" : "button"}
-              aria-keyshortcuts={String(rating)}
+              className={rating === (suggestion ?? 3) ? "button primary" : "button"}
+              aria-keyshortcuts={rating === suggestion ? `${String(rating)} Enter` : String(rating)}
               disabled={undoing}
               onClick={() => {
                 rate(rating);
               }}
             >
               {label} <kbd>{rating}</kbd>
+              {rating === suggestion ? <span className="suggested"> (suggested)</span> : null}
             </button>
           ))}
         </div>
-      ) : (
+      ) : mode === "ai" ? null : (
         <button
           type="button"
           className="button primary reveal"

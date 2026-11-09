@@ -965,3 +965,19 @@ h2:focus {
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+.study-mode {
+  margin: 0 0 12px;
+}
+
+.evaluation {
+  margin: 12px 0;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.suggested {
+  font-size: 0.85rem;
+}
