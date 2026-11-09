@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -137,3 +138,56 @@ def test_daily_clone_limit_is_429(monkeypatch: pytest.MonkeyPatch) -> None:
     second = owner.post(f"/shared/{token}/clone")
     assert second.status_code == 429
     assert second.json()["detail"] == "Daily clone limit reached."
+
+
+def test_links_carry_an_expiry_chosen_at_creation(app: FastAPI) -> None:
+    owner = _member(app, "owner@example.com")
+    deck_id = _deck_with_note(owner)
+
+    default = owner.post(f"/decks/{deck_id}/shares", json={}).json()
+    week = owner.post(f"/decks/{deck_id}/shares", json={"expires_in_days": 7}).json()
+    never = owner.post(f"/decks/{deck_id}/shares", json={"expires_in_days": None}).json()
+
+    created = datetime.fromisoformat(default["created_at"])
+    assert datetime.fromisoformat(default["expires_at"]) - created == timedelta(days=30)
+    week_created = datetime.fromisoformat(week["created_at"])
+    assert datetime.fromisoformat(week["expires_at"]) - week_created == timedelta(days=7)
+    assert never["expires_at"] is None
+    listed = owner.get(f"/decks/{deck_id}/shares").json()
+    assert [link["id"] for link in listed if link["expires_at"] is None] == [never["id"]]
+    bad = owner.post(f"/decks/{deck_id}/shares", json={"expires_in_days": 2})
+    assert bad.status_code == 422
+
+
+def test_an_expired_link_answers_404_and_the_owner_can_extend_a_live_one(
+    app: FastAPI,
+) -> None:
+    owner = _member(app, "owner@example.com")
+    deck_id = _deck_with_note(owner)
+    body = owner.post(
+        f"/decks/{deck_id}/shares", json={"allow_clone": True, "expires_in_days": 1}
+    ).json()
+    recipient = _member(app, "friend@example.com")
+    assert recipient.get(f"/shared/{body['token']}").status_code == 200
+
+    extended = owner.patch(f"/shares/{body['id']}", json={"expires_in_days": 90})
+    assert extended.status_code == 200
+    assert extended.json()["allow_clone"] is True
+    expires = datetime.fromisoformat(extended.json()["expires_at"])
+    assert expires - datetime.now(UTC) > timedelta(days=89)
+    never = owner.patch(f"/shares/{body['id']}", json={"expires_in_days": None})
+    assert never.json()["expires_at"] is None
+    assert owner.patch(f"/shares/{body['id']}", json={}).status_code == 422
+    assert owner.patch(f"/shares/{body['id']}", json={"allow_clone": None}).status_code == 422
+
+    # Age the link past its expiry.
+    container: Container = app.state.container
+    links = container.sharing._links
+    link = asyncio.run(links.get(body["id"]))
+    assert link is not None
+    asyncio.run(links.update(link.with_expiry(datetime.now(UTC) - timedelta(seconds=1))))
+
+    assert recipient.get(f"/shared/{body['token']}").status_code == 404
+    assert recipient.post(f"/shared/{body['token']}/clone").status_code == 404
+    assert owner.patch(f"/shares/{body['id']}", json={"expires_in_days": 30}).status_code == 404
+    assert owner.get(f"/decks/{deck_id}/shares").json()[0]["expires_at"] is not None

@@ -14,6 +14,7 @@ from flashcards.adapters.memory import (
     InMemoryObjectStore,
     InMemoryQuotaRepository,
     InMemoryQuotaSettingsRepository,
+    InMemorySpendHoldRepository,
     InMemoryUsageRepository,
     InMemoryUserRepository,
 )
@@ -93,6 +94,7 @@ def _limits_and_spend(clock: FakeClock, quota_limit: int = 10) -> tuple[QuotaSer
         usage,
         InMemoryQuotaSettingsRepository(),
         clock,
+        InMemorySpendHoldRepository(usage),
         provider="test",
         prices=TokenPrices(),
         defaults=InstanceQuotas(),
@@ -131,6 +133,7 @@ def _service(
             usage,
             InMemoryQuotaSettingsRepository(),
             clock,
+            InMemorySpendHoldRepository(usage),
             provider="test",
             prices=TokenPrices(),
             defaults=InstanceQuotas(),

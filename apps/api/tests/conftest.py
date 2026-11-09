@@ -11,6 +11,10 @@ from functools import partialmethod
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 # Bound the readiness wait so a wedged daemon fails fast instead of hanging.
 os.environ.setdefault("TESTCONTAINERS_CONNECTION_TIMEOUT", "60")
+# Every TestClient comes from one address, and many tests sign in repeatedly, so
+# the per-address rate limit is off by default here; tests/test_rate_limit.py turns
+# it on explicitly (ADR 0019).
+os.environ.setdefault("FLASHCARDS_RATE_LIMIT_ENABLED", "false")
 
 import pytest
 from fastapi import FastAPI

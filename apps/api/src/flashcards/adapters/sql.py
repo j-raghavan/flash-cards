@@ -33,13 +33,14 @@ from sqlalchemy import (
 from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
 from flashcards.adapters.db import (
     AiBlobRow,
     AiJobRow,
     AiQuotaRow,
+    AiSpendHoldRow,
     AiUsageRow,
     AuditEventRow,
     CardRow,
@@ -137,7 +138,7 @@ from flashcards.domain.scheduling import (
 )
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
-from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
+from flashcards.domain.usage import AiUsage, ProviderUsage, SpendHold, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -232,9 +233,12 @@ class SqlUserRepository:
         self._session = session
 
     async def add(self, user: User) -> None:
-        self._session.add(user_to_row(user))
+        # A savepoint: when a concurrent sign-up took the email first, only this
+        # insert is undone, and the request's transaction stays usable. The caller
+        # can then answer as it does for any existing account (ADR 0019).
         try:
-            await self._session.flush()
+            async with self._session.begin_nested():
+                self._session.add(user_to_row(user))
         except IntegrityError as exc:
             raise EmailAlreadyRegistered(user.email) from exc
 
@@ -1025,6 +1029,68 @@ class SqlUsageRepository:
             ProviderUsage(provider, model, int(calls), int(inp), int(out), int(spent))
             for provider, model, calls, inp, out, spent in rows.tuples()
         ]
+
+
+class SqlSpendHoldRepository:
+    """Spend-cap holds (ADR 0019).
+
+    try_hold and release run in their own short transactions from `sessionmaker`,
+    committed at once: a hold must be visible to every other request while its
+    call runs, and must not wait for (or keep locked) the caller's transaction.
+    settle runs in the caller's session, so a hold disappears in the same commit
+    that records the call's usage, and the period total never counts both or
+    neither.
+    """
+
+    def __init__(
+        self, session: AsyncSession, sessionmaker: async_sessionmaker[AsyncSession]
+    ) -> None:
+        self._session = session
+        self._sessionmaker = sessionmaker
+
+    async def try_hold(self, hold: SpendHold, *, cap_micro_usd: int, now: datetime) -> bool:
+        async with self._sessionmaker() as session, session.begin():
+            # One holder per period at a time. Under READ COMMITTED each later
+            # statement takes a fresh snapshot, so it sees every hold and usage
+            # row committed by the previous holder of the lock.
+            lock_key = func.hashtextextended(f"flashcards:ai_spend:{hold.period}", 0)
+            await session.execute(select(func.pg_advisory_xact_lock(lock_key)))
+            await session.execute(
+                delete(AiSpendHoldRow).where(
+                    AiSpendHoldRow.period == hold.period, AiSpendHoldRow.expires_at <= now
+                )
+            )
+            spent = await SqlUsageRepository(session).total_cost(hold.period)
+            if spent + await _held(session, hold.period, now) >= cap_micro_usd:
+                return False
+            session.add(
+                AiSpendHoldRow(
+                    id=hold.id,
+                    period=hold.period,
+                    amount_micro_usd=hold.amount_micro_usd,
+                    expires_at=hold.expires_at,
+                )
+            )
+        return True
+
+    async def held(self, period: str, now: datetime) -> int:
+        return await _held(self._session, period, now)
+
+    async def settle(self, hold_id: str) -> None:
+        await self._session.execute(delete(AiSpendHoldRow).where(AiSpendHoldRow.id == hold_id))
+
+    async def release(self, hold_id: str) -> None:
+        async with self._sessionmaker() as session, session.begin():
+            await session.execute(delete(AiSpendHoldRow).where(AiSpendHoldRow.id == hold_id))
+
+
+async def _held(session: AsyncSession, period: str, now: datetime) -> int:
+    total = await session.scalar(
+        select(func.coalesce(func.sum(AiSpendHoldRow.amount_micro_usd), 0)).where(
+            AiSpendHoldRow.period == period, AiSpendHoldRow.expires_at > now
+        )
+    )
+    return int(total or 0)
 
 
 class SqlGoalRepository:

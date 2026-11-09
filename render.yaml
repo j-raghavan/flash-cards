@@ -14,6 +14,11 @@ services:
         value: production
       - key: FLASHCARDS_INVITE_ONLY
         value: "true"
+      # Render's load balancer appends the client's address to X-Forwarded-For;
+      # without this every client would share the balancer's rate-limit bucket
+      # (ADR 0019).
+      - key: FLASHCARDS_TRUSTED_PROXY_COUNT
+        value: "1"
       # Set in the Render dashboard to a Supabase (or any Postgres) connection
       # string. A plain postgresql:// URL is accepted; it is coerced to asyncpg.
       # When set, the container runs `alembic upgrade head` before serving.

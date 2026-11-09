@@ -32,6 +32,7 @@ import type {
   Rating,
   Role,
   SharedDeck,
+  ShareExpiryDays,
   ShareLink,
   StudyPlan,
   Thoroughness,
@@ -171,8 +172,11 @@ export const goals = {
 
 export const shares = {
   list: (deckId: string) => request<ShareLink[]>(`/decks/${id(deckId)}/shares`),
-  create: (deckId: string, allowClone: boolean) =>
-    request<CreatedShareLink>(`/decks/${id(deckId)}/shares`, { method: "POST", json: { allow_clone: allowClone } }),
+  create: (deckId: string, allowClone: boolean, expiresInDays: ShareExpiryDays) =>
+    request<CreatedShareLink>(`/decks/${id(deckId)}/shares`, {
+      method: "POST",
+      json: { allow_clone: allowClone, expires_in_days: expiresInDays },
+    }),
   setAllowClone: (shareId: string, allowClone: boolean) =>
     request<ShareLink>(`/shares/${id(shareId)}`, { method: "PATCH", json: { allow_clone: allowClone } }),
   revoke: (shareId: string) => request<ShareLink>(`/shares/${id(shareId)}/revoke`, { method: "POST" }),

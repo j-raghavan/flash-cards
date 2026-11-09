@@ -336,10 +336,14 @@ async def test_share_link_repository(engine: AsyncEngine) -> None:
         repo = SqlShareLinkRepository(s)
         current = await repo.get("l1")
         assert current is not None
-        await repo.update(current.with_allow_clone(True).revoked(NOW))
+        await repo.update(
+            current.with_allow_clone(True).with_expiry(NOW + timedelta(days=7)).revoked(NOW)
+        )
     async with sm() as s:
         updated = await SqlShareLinkRepository(s).get("l1")
         assert updated is not None and updated.allow_clone and updated.revoked_at == NOW
+        assert updated.expires_at == NOW + timedelta(days=7)
+        assert (await SqlShareLinkRepository(s).get("l2") or updated).expires_at is None
 
     async with sm() as s, s.begin():
         await SqlShareLinkRepository(s).delete_for_deck("d1")

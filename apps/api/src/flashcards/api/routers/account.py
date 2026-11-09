@@ -55,4 +55,10 @@ async def delete_account(
     )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_session_cookie(response, settings)
+    # Drop the browser's HTTP cache of this origin, so no cached response of the
+    # deleted account stays behind (ADR 0019). Not "storage": that would also wipe
+    # other accounts' unsynced offline answers on a shared device and unregister
+    # the app's service worker; the web client removes this account's own stored
+    # data itself.
+    response.headers["Clear-Site-Data"] = '"cache"'
     return response

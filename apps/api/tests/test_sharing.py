@@ -28,13 +28,18 @@ from flashcards.domain.invites import Role, hash_token
 from flashcards.domain.notes import InvalidNote, Note, NoteType
 from flashcards.domain.scheduling import Rating
 from flashcards.domain.sharing import (
+    DEFAULT_SHARE_EXPIRY_DAYS,
+    SHARE_EXPIRY_DAYS,
     CloneLimitReached,
     CloneNotAllowed,
     CloneTooLarge,
+    InvalidShareExpiry,
     SharedDeckNode,
     ShareLink,
     ShareNotFound,
+    expiry_after,
     trim_fields,
+    validate_expiry_days,
 )
 from flashcards.domain.users import User
 
@@ -354,3 +359,111 @@ async def test_deleting_the_deck_deletes_its_links() -> None:
     for token in tokens:
         with pytest.raises(ShareNotFound):
             await c.sharing.preview(token=token)
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.value = NOW
+
+    def now(self) -> datetime:
+        return self.value
+
+
+async def _expiry_rig() -> tuple[SharingService, DeckService, _Clock]:
+    clock = _Clock()
+    decks = DeckService(InMemoryDeckRepository(), clock)
+    note_repo, card_repo = InMemoryNoteRepository(), InMemoryCardRepository()
+    users = InMemoryUserRepository()
+    await users.add(_user(ALICE))
+    service = SharingService(
+        decks, NoteService(decks, note_repo, card_repo, clock), note_repo, card_repo,
+        InMemoryShareLinkRepository(), users, InMemoryQuotaRepository(limit=100), clock,
+        InMemoryNoteTypeRepository(), InMemoryMediaRepository(),
+    )
+    return service, decks, clock
+
+
+def test_a_link_is_live_until_it_expires_or_is_revoked() -> None:
+    link = ShareLink(
+        id="s", owner_id=ALICE, deck_id="d", token_hash="h", allow_clone=False,
+        created_at=NOW, expires_at=NOW + timedelta(days=1),
+    )
+    assert link.is_live(NOW)
+    assert not link.is_live(NOW + timedelta(days=1))  # expiry is exclusive
+    assert not link.revoked(NOW).is_live(NOW)
+    assert link.with_expiry(None).is_live(NOW + timedelta(days=9999))
+
+
+def test_expiry_days_are_one_of_the_offered_choices() -> None:
+    for days in (*SHARE_EXPIRY_DAYS, None):
+        validate_expiry_days(days)
+    with pytest.raises(InvalidShareExpiry):
+        validate_expiry_days(2)
+    assert expiry_after(NOW, None) is None
+    assert expiry_after(NOW, 7) == NOW + timedelta(days=7)
+
+
+async def test_links_expire_after_the_chosen_lifetime() -> None:
+    service, decks, clock = await _expiry_rig()
+    deck = await decks.create(owner_id=ALICE, name="Deck")
+    default = await service.create(owner_id=ALICE, deck_id=deck.id, allow_clone=True)
+    week = await service.create(
+        owner_id=ALICE, deck_id=deck.id, allow_clone=True, expires_in_days=7
+    )
+    never = await service.create(
+        owner_id=ALICE, deck_id=deck.id, allow_clone=True, expires_in_days=None
+    )
+    assert default.link.expires_at == NOW + timedelta(days=DEFAULT_SHARE_EXPIRY_DAYS)
+    assert never.link.expires_at is None
+    with pytest.raises(InvalidShareExpiry):
+        await service.create(owner_id=ALICE, deck_id=deck.id, allow_clone=True, expires_in_days=3)
+
+    clock.value = NOW + timedelta(days=7)
+    with pytest.raises(ShareNotFound):
+        await service.preview(token=week.raw_token)
+    with pytest.raises(ShareNotFound):
+        await service.clone(owner_id=BOB, token=week.raw_token)
+    await service.preview(token=default.raw_token)
+
+    clock.value = NOW + timedelta(days=365)
+    with pytest.raises(ShareNotFound):
+        await service.preview(token=default.raw_token)
+    await service.preview(token=never.raw_token)
+    # The owner still sees expired links in the list.
+    assert len(await service.list_for_deck(owner_id=ALICE, deck_id=deck.id)) == 3
+
+
+async def test_the_owner_extends_a_live_link_but_not_an_expired_one() -> None:
+    service, decks, clock = await _expiry_rig()
+    deck = await decks.create(owner_id=ALICE, name="Deck")
+    created = await service.create(
+        owner_id=ALICE, deck_id=deck.id, allow_clone=False, expires_in_days=1
+    )
+    clock.value = NOW + timedelta(hours=12)
+
+    extended = await service.update(
+        owner_id=ALICE, link_id=created.link.id, allow_clone=True,
+        change_expiry=True, expires_in_days=90,
+    )
+
+    assert extended.expires_at == clock.value + timedelta(days=90)
+    assert extended.allow_clone is True
+    kept = await service.update(owner_id=ALICE, link_id=created.link.id, allow_clone=False)
+    assert kept.expires_at == extended.expires_at  # no change_expiry: lifetime kept
+    forever = await service.update(
+        owner_id=ALICE, link_id=created.link.id, change_expiry=True, expires_in_days=None
+    )
+    assert forever.expires_at is None
+    with pytest.raises(InvalidShareExpiry):
+        await service.update(
+            owner_id=ALICE, link_id=created.link.id, change_expiry=True, expires_in_days=5
+        )
+
+    short = await service.create(
+        owner_id=ALICE, deck_id=deck.id, allow_clone=False, expires_in_days=1
+    )
+    clock.value = NOW + timedelta(days=2)
+    with pytest.raises(ShareNotFound):  # an expired link stays dead
+        await service.update(
+            owner_id=ALICE, link_id=short.link.id, change_expiry=True, expires_in_days=30
+        )

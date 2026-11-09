@@ -9,7 +9,7 @@ what a valid address is and no extra email-parsing dependency.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
 
@@ -41,7 +41,7 @@ from flashcards.domain.progress import (
 )
 from flashcards.domain.scheduling import CardSchedule, DeckStats, Rating, ScheduleState
 from flashcards.domain.sessions import Session
-from flashcards.domain.sharing import SharedDeckPreview, ShareLink
+from flashcards.domain.sharing import DEFAULT_SHARE_EXPIRY_DAYS, SharedDeckPreview, ShareLink
 from flashcards.domain.summary import DeckSummary
 from flashcards.domain.tags import MAX_TAG_LENGTH, MAX_TAGS_PER_NOTE
 from flashcards.domain.users import User
@@ -449,12 +449,33 @@ class AuditEventOut(BaseModel):
         )
 
 
+# The link lifetimes a client may choose (domain.sharing.SHARE_EXPIRY_DAYS); null is never.
+ShareExpiryDays = Literal[1, 7, 30, 90]
+
+
 class ShareCreateRequest(BaseModel):
     allow_clone: bool = False
+    # Omitted: the default lifetime. Null: the link never expires.
+    expires_in_days: ShareExpiryDays | None = DEFAULT_SHARE_EXPIRY_DAYS
 
 
 class ShareUpdateRequest(BaseModel):
-    allow_clone: bool
+    """Change the clone toggle, the lifetime (counted from now; null for never), or both."""
+
+    allow_clone: bool | None = None
+    expires_in_days: ShareExpiryDays | None = None
+
+    @model_validator(mode="after")
+    def _changes_something(self) -> ShareUpdateRequest:
+        if "allow_clone" in self.model_fields_set and self.allow_clone is None:
+            raise ValueError("allow_clone must be true or false")
+        if not self.model_fields_set & {"allow_clone", "expires_in_days"}:
+            raise ValueError("nothing to change")
+        return self
+
+    @property
+    def changes_expiry(self) -> bool:
+        return "expires_in_days" in self.model_fields_set
 
 
 class ShareLinkOut(BaseModel):
@@ -463,6 +484,7 @@ class ShareLinkOut(BaseModel):
     allow_clone: bool
     created_at: datetime
     revoked_at: datetime | None
+    expires_at: datetime | None  # null: never expires
 
     @classmethod
     def from_link(cls, link: ShareLink) -> ShareLinkOut:
@@ -472,6 +494,7 @@ class ShareLinkOut(BaseModel):
             allow_clone=link.allow_clone,
             created_at=link.created_at,
             revoked_at=link.revoked_at,
+            expires_at=link.expires_at,
         )
 
 

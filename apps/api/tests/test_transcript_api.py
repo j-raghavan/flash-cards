@@ -237,7 +237,7 @@ async def test_each_fetch_counts_against_the_daily_ai_requests() -> None:
     deck = await container.decks.create(owner_id="alice", name="Talk")
     budget = container.transcript_import._budget
     for _ in range(DEFAULT_DAILY_AI_CALLS - 1):
-        await budget.charge("alice")
+        await budget.count("alice")
     await container.transcript_import.from_youtube(
         owner_id="alice",
         deck_id=deck.id,

@@ -42,7 +42,7 @@ class TranscriptImportService:
         await self._generation.ensure_pages_left(owner_id)
         # Each fetch counts against the daily AI request allowance, which bounds how
         # often one user can make the server contact YouTube (ADR 0020).
-        await self._budget.charge(owner_id)  # raises AiCallLimitReached
+        await self._budget.count(owner_id)  # raises SpendCapReached, AiCallLimitReached
         # Commit before the network call: the charge sticks even if the fetch fails,
         # and in SQL mode the database connection goes back to the pool meanwhile.
         await self._uow.commit()

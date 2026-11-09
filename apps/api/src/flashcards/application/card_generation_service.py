@@ -45,14 +45,14 @@ from flashcards.domain.sources import (
     UnsupportedMediaType,
 )
 from flashcards.domain.transcripts import InvalidTranscript
-from flashcards.domain.usage import AiFeature
+from flashcards.domain.usage import AiFeature, SpendCapReached
 
 MAX_OUTPUT_TOKENS = 4096
 
 logger = logging.getLogger("flashcards")
 
 _DOCUMENT_ERRORS = (UnreadableDocument, UnsupportedMediaType, TooManyPages, InvalidTranscript)
-_QUOTA_ERRORS = (QuotaExceeded, AiCallLimitReached)
+_QUOTA_ERRORS = (QuotaExceeded, AiCallLimitReached, SpendCapReached)
 
 
 class _Superseded(Exception):
@@ -216,10 +216,17 @@ class CardGenerationService:
             schema=DRAFT_CARDS_SCHEMA,
             max_output_tokens=MAX_OUTPUT_TOKENS,
         )
-        result = await self._llm.generate_structured(request)
+        # Each page holds its estimated cost against the spend cap (ADR 0019); once
+        # the cap is reached the job fails here and can be retried next month.
+        hold = await self._spend.hold(request)
+        try:
+            result = await self._llm.generate_structured(request)
+        except BaseException:
+            await self._spend.release(hold)
+            raise
         # Recorded and committed before the output is parsed: the provider has
         # charged for the call even if its output turns out to be unusable.
-        await self._spend.record(job.owner_id, AiFeature.GENERATION, result)
+        await self._spend.record(job.owner_id, AiFeature.GENERATION, result, hold)
         await self._uow.commit()
         drafts = parse_draft_cards(result.data, source_page=page.ref.page)
         now = self._clock.now()

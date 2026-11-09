@@ -37,6 +37,7 @@ from flashcards.domain.ports import (
 from flashcards.domain.quotas import clone_period
 from flashcards.domain.sharing import (
     CLONE_UNIT_BYTES,
+    DEFAULT_SHARE_EXPIRY_DAYS,
     MAX_CLONE_CARDS,
     MAX_CLONE_DECKS,
     MAX_CLONE_MEDIA_BYTES,
@@ -51,7 +52,9 @@ from flashcards.domain.sharing import (
     SharedNote,
     ShareLink,
     ShareNotFound,
+    expiry_after,
     trim_fields,
+    validate_expiry_days,
 )
 from flashcards.domain.users import UserStatus
 
@@ -96,18 +99,27 @@ class SharingService:
         self._clock = clock
 
     async def create(
-        self, *, owner_id: str, deck_id: str, allow_clone: bool
+        self,
+        *,
+        owner_id: str,
+        deck_id: str,
+        allow_clone: bool,
+        expires_in_days: int | None = DEFAULT_SHARE_EXPIRY_DAYS,
     ) -> CreatedShareLink:
+        """Create a link; it stops working after `expires_in_days`, or never for None."""
+        validate_expiry_days(expires_in_days)
         # Raises DeckNotFound if the deck is missing or not the caller's.
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
         raw_token = secrets.token_urlsafe(TOKEN_BYTES)
+        now = self._clock.now()
         link = ShareLink(
             id=str(uuid.uuid4()),
             owner_id=owner_id,
             deck_id=deck_id,
             token_hash=hash_token(raw_token),
             allow_clone=allow_clone,
-            created_at=self._clock.now(),
+            created_at=now,
+            expires_at=expiry_after(now, expires_in_days),
         )
         await self._links.add(link)
         return CreatedShareLink(link=link, raw_token=raw_token)
@@ -117,10 +129,28 @@ class SharingService:
         return await self._links.list_for_deck(deck_id)
 
     async def set_allow_clone(self, *, owner_id: str, link_id: str, allow: bool) -> ShareLink:
-        link = await self._owned(owner_id, link_id)
-        if not link.is_active:
-            raise ShareNotFound(link_id)  # a revoked link cannot be changed
-        updated = link.with_allow_clone(allow)
+        return await self.update(owner_id=owner_id, link_id=link_id, allow_clone=allow)
+
+    async def update(
+        self,
+        *,
+        owner_id: str,
+        link_id: str,
+        allow_clone: bool | None = None,
+        change_expiry: bool = False,
+        expires_in_days: int | None = None,
+    ) -> ShareLink:
+        """Change a live link's clone toggle and, with change_expiry, its lifetime.
+
+        A new lifetime counts from now. A revoked or expired link cannot be changed.
+        """
+        if change_expiry:
+            validate_expiry_days(expires_in_days)
+        updated = await self._live_owned(owner_id, link_id)
+        if allow_clone is not None:
+            updated = updated.with_allow_clone(allow_clone)
+        if change_expiry:
+            updated = updated.with_expiry(expiry_after(self._clock.now(), expires_in_days))
         await self._links.update(updated)
         return updated
 
@@ -253,9 +283,16 @@ class SharingService:
             raise ShareNotFound(link_id)
         return link
 
+    async def _live_owned(self, owner_id: str, link_id: str) -> ShareLink:
+        link = await self._owned(owner_id, link_id)
+        # A revoked or expired link stays dead: the owner creates a new one instead.
+        if not link.is_live(self._clock.now()):
+            raise ShareNotFound(link_id)
+        return link
+
     async def _active(self, token: str) -> ShareLink:
         link = await self._links.get_by_token_hash(hash_token(token))
-        if link is None or not link.is_active:
+        if link is None or not link.is_live(self._clock.now()):
             raise ShareNotFound("token")
         owner = await self._users.get(link.owner_id)
         # A suspended (or deleted) owner's links stop serving.

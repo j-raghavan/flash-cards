@@ -25,6 +25,7 @@ from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.planner import PlanBaseline
+from flashcards.domain.ports import UsageRepository
 from flashcards.domain.progress import (
     ActivityBucket,
     DueBucket,
@@ -47,7 +48,7 @@ from flashcards.domain.two_factor import (
     RecoveryCode,
     TotpCredential,
 )
-from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
+from flashcards.domain.usage import AiUsage, ProviderUsage, SpendHold, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -598,6 +599,42 @@ class InMemoryUsageRepository:
             for (provider, model), records in groups.items()
         ]
         return sorted(totals, key=lambda t: (-t.cost_micro_usd, t.provider, t.model))
+
+
+class InMemorySpendHoldRepository:
+    """Spend-cap holds for one process, over any usage repository (ADR 0019).
+
+    Each method runs without awaiting between its check and its write, so on one
+    event loop a hold is atomic, as the SQL adapter's advisory lock makes it.
+    """
+
+    def __init__(self, usage: UsageRepository) -> None:
+        self._usage = usage
+        self._holds: dict[str, SpendHold] = {}
+
+    async def try_hold(self, hold: SpendHold, *, cap_micro_usd: int, now: datetime) -> bool:
+        spent = await self._usage.total_cost(hold.period)
+        # No await from here to the write: nothing else runs in between.
+        if spent + self._live(hold.period, now) >= cap_micro_usd:
+            return False
+        self._holds[hold.id] = hold
+        return True
+
+    async def held(self, period: str, now: datetime) -> int:
+        return self._live(period, now)
+
+    async def settle(self, hold_id: str) -> None:
+        self._holds.pop(hold_id, None)
+
+    async def release(self, hold_id: str) -> None:
+        self._holds.pop(hold_id, None)
+
+    def _live(self, period: str, now: datetime) -> int:
+        return sum(
+            h.amount_micro_usd
+            for h in self._holds.values()
+            if h.period == period and h.expires_at > now
+        )
 
 
 def _sums(records: list[AiUsage]) -> tuple[int, int, int, int]:

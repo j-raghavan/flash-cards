@@ -96,9 +96,10 @@ class ChatService:
             schema=CHAT_SCHEMA,
             max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
         )
-        await self._budget.charge(owner_id)  # raises AiCallLimitReached
-        result = await self._llm.generate_structured(request)
-        await self._budget.record(owner_id, AiFeature.CHAT, result)
+        # Raises SpendCapReached or AiCallLimitReached; releases the hold on failure.
+        async with self._budget.charge(owner_id, request) as hold:
+            result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.CHAT, result, hold)
         answer = parse_chat_answer(result.data, top)
         return dataclasses.replace(
             answer, citations=await self._named(jobs, answer.citations)

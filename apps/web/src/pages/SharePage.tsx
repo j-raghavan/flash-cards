@@ -13,7 +13,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 
 import { describeError } from "../api/client";
 import { decks, shares } from "../api/endpoints";
-import type { CreatedShareLink, ShareLink, SharedNote } from "../api/types";
+import type { CreatedShareLink, ShareExpiryDays, ShareLink, SharedNote } from "../api/types";
 import { CardContent, ConfirmButton, CopyField, ErrorText, Loading } from "../components/ui";
 import { cardSides } from "../lib/cardSides";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
@@ -28,12 +28,41 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+// The lifetimes the API accepts; a new link works for 30 days unless the owner picks another.
+const EXPIRY_CHOICES: { days: ShareExpiryDays; label: string }[] = [
+  { days: 1, label: "1 day" },
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+  { days: null, label: "Never expires" },
+];
+const NEVER = "never";
+
+function expiryValue(days: ShareExpiryDays): string {
+  return days === null ? NEVER : String(days);
+}
+
+function isExpired(link: ShareLink, now: number): boolean {
+  return link.expires_at !== null && Date.parse(link.expires_at) <= now;
+}
+
+function linkStatus(link: ShareLink, now: number): string {
+  if (link.revoked_at !== null) {
+    return `Revoked ${formatDate(link.revoked_at)}`;
+  }
+  if (link.expires_at === null) {
+    return "Active, never expires";
+  }
+  return isExpired(link, now) ? `Expired ${formatDate(link.expires_at)}` : `Active until ${formatDate(link.expires_at)}`;
+}
+
 function NewLink({ link }: { link: CreatedShareLink }) {
   return (
     <div className="panel" role="status">
       <p>
         <strong>Copy this link now.</strong> It is shown only once; anyone signed in who has it can{" "}
-        {link.allow_clone ? "preview and copy" : "preview"} the deck.
+        {link.allow_clone ? "preview and copy" : "preview"} the deck
+        {link.expires_at === null ? "." : ` until ${formatDate(link.expires_at)}.`}
       </p>
       <CopyField label="Share link" value={shareUrl(link.token)} />
     </div>
@@ -44,6 +73,10 @@ function LinkRow({ link, onChanged }: { link: ShareLink; onChanged: (link: Share
   const toggle = useSubmit();
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const revoked = link.revoked_at !== null;
+  // Read once per row: expiry is shown as of when the list was rendered.
+  const [now] = useState(() => Date.now());
+  // An expired link no longer works and cannot be changed; a new link replaces it.
+  const dead = revoked || isExpired(link, now);
   return (
     <tr>
       <td>{formatDate(link.created_at)}</td>
@@ -52,7 +85,7 @@ function LinkRow({ link, onChanged }: { link: ShareLink; onChanged: (link: Share
           <input
             type="checkbox"
             checked={link.allow_clone}
-            disabled={revoked || toggle.busy}
+            disabled={dead || toggle.busy}
             onChange={(event) => {
               const allow = event.target.checked;
               void toggle.run(async () => {
@@ -65,9 +98,9 @@ function LinkRow({ link, onChanged }: { link: ShareLink; onChanged: (link: Share
         </label>
         <ErrorText message={toggle.error} />
       </td>
-      <td>{link.revoked_at === null ? "Active" : `Revoked ${formatDate(link.revoked_at)}`}</td>
+      <td>{linkStatus(link, now)}</td>
       <td>
-        {revoked ? null : (
+        {dead ? null : (
           <ConfirmButton
             label="Revoke"
             confirmLabel="Revoke link"
@@ -93,6 +126,7 @@ export function SharePage() {
   const deck = useResource(() => decks.get(deckId), `deck:${deckId}`);
   const links = useResource(() => shares.list(deckId), `shares:${deckId}`);
   const [allowClone, setAllowClone] = useState(false);
+  const [expiry, setExpiry] = useState<ShareExpiryDays>(30);
   const [created, setCreated] = useState<CreatedShareLink | null>(null);
   const create = useSubmit();
   useDocumentTitle(deck.data === undefined ? "Share deck" : `Share ${deck.data.name}`);
@@ -108,8 +142,8 @@ export function SharePage() {
       </nav>
       <h1>Share {deck.data === undefined ? "deck" : `“${deck.data.name}”`}</h1>
       <p className="muted">
-        A share link lets anyone signed in to this app preview the deck and its sub-decks. Revoke a link to stop it
-        working.
+        A share link lets anyone signed in to this app preview the deck and its sub-decks until it expires. Revoke a
+        link to stop it working sooner.
       </p>
       <ErrorText message={deck.error} />
 
@@ -125,6 +159,22 @@ export function SharePage() {
           />
           Allow people with the link to copy the deck into their own decks
         </label>
+        <label className="row">
+          Link works for
+          <select
+            value={expiryValue(expiry)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setExpiry(value === NEVER ? null : (Number(value) as ShareExpiryDays));
+            }}
+          >
+            {EXPIRY_CHOICES.map((choice) => (
+              <option key={choice.label} value={expiryValue(choice.days)}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="row">
           <button
             type="button"
@@ -132,7 +182,7 @@ export function SharePage() {
             disabled={create.busy}
             onClick={() => {
               void create.run(async () => {
-                const link = await shares.create(deckId, allowClone);
+                const link = await shares.create(deckId, allowClone, expiry);
                 setCreated(link);
                 links.setData((current = []) => [link, ...current]);
               });

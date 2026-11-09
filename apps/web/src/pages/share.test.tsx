@@ -15,6 +15,7 @@ const link = (id: string, over: Partial<ShareLink> = {}): ShareLink => ({
   allow_clone: false,
   created_at: "2026-11-01T10:00:00Z",
   revoked_at: null,
+  expires_at: null,
   ...over,
 });
 
@@ -48,7 +49,7 @@ describe("share links", () => {
     await user.click(screen.getByRole("button", { name: "Copy" }));
     expect(await screen.findByText("Copied.")).toBeInTheDocument();
     await expect(navigator.clipboard.readText()).resolves.toBe(`${window.location.origin}/shared#token=tok%20en`);
-    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ allow_clone: true });
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ allow_clone: true, expires_in_days: 30 });
     expect(screen.getAllByRole("row")).toHaveLength(4);
 
     const toggle = screen
@@ -115,6 +116,50 @@ describe("share links", () => {
     mockApi({ ...me, "GET /decks/d1": { body: DECK }, "GET /decks/d1/shares": { status: 500 } });
     renderApp("/decks/d1/share");
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+  });
+
+  it("lets the owner choose how long a link works and shows when links expire", async () => {
+    const calls = mockApi({
+      ...me,
+      "GET /decks/d1": { body: DECK },
+      "GET /decks/d1/shares": {
+        body: [
+          link("live", { expires_at: "2999-01-01T00:00:00Z" }),
+          link("old", { expires_at: "2026-11-02T10:00:00Z" }),
+          link("forever"),
+        ],
+      },
+      "POST /decks/d1/shares": (call) => {
+        const days = (call.body as { expires_in_days: number | null }).expires_in_days;
+        return {
+          status: 201,
+          body: { ...link("new", { expires_at: days === null ? null : "2999-02-01T00:00:00Z" }), token: "t" },
+        };
+      },
+    });
+    renderApp("/decks/d1/share");
+    const user = userEvent.setup();
+    const rows = await screen.findAllByRole("row");
+    expect(within(rows[1] as HTMLElement).getByText(/^Active until/)).toBeInTheDocument();
+    expect(within(rows[2] as HTMLElement).getByText(/^Expired/)).toBeInTheDocument();
+    expect(within(rows[2] as HTMLElement).getByRole("checkbox")).toBeDisabled();
+    expect(within(rows[2] as HTMLElement).queryByRole("button", { name: "Revoke" })).toBeNull();
+    expect(within(rows[3] as HTMLElement).getByText("Active, never expires")).toBeInTheDocument();
+
+    const picker = screen.getByRole("combobox", { name: "Link works for" });
+    expect(picker).toHaveValue("30");
+    await user.selectOptions(picker, "7");
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    expect(await screen.findByText(/the deck until/)).toBeInTheDocument();
+    await user.selectOptions(picker, "Never expires");
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    await waitFor(() => {
+      expect(calls.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([
+        { allow_clone: false, expires_in_days: 7 },
+        { allow_clone: false, expires_in_days: null },
+      ]);
+    });
+    expect(await screen.findByText(/can preview the deck\.$/)).toBeInTheDocument();
   });
 
   it("is reached from the deck page", async () => {

@@ -74,6 +74,9 @@ export default defineConfig({
         FLASHCARDS_SESSION_COOKIE_SECURE: "false",
         FLASHCARDS_PUBLIC_BASE_URL: WEB_URL,
         FLASHCARDS_INVITE_ONLY: "true",
+        // Parallel workers sign many users in from one address; the per-address
+        // limit (ADR 0019) has its own API tests.
+        FLASHCARDS_RATE_LIMIT_ENABLED: "false",
         FLASHCARDS_SMTP_HOST: "",
       },
     },

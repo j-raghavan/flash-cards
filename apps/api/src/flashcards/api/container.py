@@ -39,6 +39,7 @@ from flashcards.adapters.memory import (
     InMemoryScheduleRepository,
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
+    InMemorySpendHoldRepository,
     InMemoryStudySettingsRepository,
     InMemoryStudyStatsRepository,
     InMemoryTwoFactorRepository,
@@ -126,6 +127,7 @@ from flashcards.domain.ports import (
     SecretBox,
     SessionRepository,
     ShareLinkRepository,
+    SpendHoldRepository,
     StudySettingsRepository,
     StudyStatsRepository,
     TranscriptProvider,
@@ -193,6 +195,9 @@ class Repositories:
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES
     # Lets the generation worker commit progress as it goes (ADR 0012).
     unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
+    # Holds on the spend cap (ADR 0019). SQL mode passes its own; otherwise holds
+    # are kept in this process, over `usage`.
+    spend_holds: SpendHoldRepository | None = None
     # Serializes deck exports (F-IMP-4); stateless, so every provider shares it.
     deck_export_writer: DeckExportWriter = field(default_factory=FileDeckExportWriter)
     # Two-factor sign-in (F-AUTH-3, ADR 0018). Without a secret box, authenticator
@@ -287,6 +292,7 @@ def build_services(repos: Repositories) -> Container:
         repos.usage,
         repos.quota_settings,
         repos.clock,
+        repos.spend_holds or InMemorySpendHoldRepository(repos.usage),
         provider=repos.metering.provider,
         prices=repos.metering.prices,
         defaults=repos.metering.default_quotas,
