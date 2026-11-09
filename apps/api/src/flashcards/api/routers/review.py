@@ -61,7 +61,8 @@ async def undo_review(
     container: Container = Depends(get_container, scope="function"),
 ) -> UndoOut:
     outcome = await container.reviews.undo(owner_id=caller.user.id, review_id=review_id)
-    return UndoOut.from_outcome(outcome)
+    progress = await container.progress.today(owner_id=caller.user.id, with_streak=False)
+    return UndoOut.from_outcome(outcome, progress)
 
 
 @router.post("/cards/{card_id}/evaluate", response_model=EvaluationOut)

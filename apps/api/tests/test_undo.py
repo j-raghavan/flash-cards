@@ -116,7 +116,7 @@ async def test_undo_of_a_new_cards_first_answer_makes_it_new_again(rig: _Rig) ->
     assert await rig.logs.list_for_owner(ALICE) == []
 
 
-async def test_undo_restores_the_previous_schedule_and_steps_back(rig: _Rig) -> None:
+async def test_undo_restores_the_previous_schedule_one_step_only(rig: _Rig) -> None:
     _, card = await rig.card()
     first = await rig.answer(card, Rating.GOOD)
     after_first = await rig.schedules.get(card)
@@ -126,9 +126,46 @@ async def test_undo_restores_the_previous_schedule_and_steps_back(rig: _Rig) -> 
     outcome = await rig.reviews.undo(owner_id=ALICE, review_id=second)
     assert outcome.schedule == after_first
     assert await rig.schedules.get(card) == after_first
-    # The answer before it is now the most recent one, so it can be undone too.
-    await rig.reviews.undo(owner_id=ALICE, review_id=first)
+    # One step only: the answer before it stays, until a new answer comes.
+    with pytest.raises(UndoRejected, match="most recent"):
+        await rig.reviews.undo(owner_id=ALICE, review_id=first)
+    assert await rig.schedules.get(card) == after_first
+
+
+async def test_a_late_retry_of_an_undone_answer_is_refused(rig: _Rig) -> None:
+    _, card = await rig.card()
+    review_id = await rig.answer(card, key="k1")
+    await rig.reviews.undo(owner_id=ALICE, review_id=review_id)
+    with pytest.raises(UndoRejected, match="was undone"):
+        await rig.answer(card, key="k1")
+    assert await rig.logs.list_for_owner(ALICE) == []
     assert await rig.schedules.get(card) is None
+    # Other keys, other cards and keyless answers still go through.
+    await rig.answer(card, key="k2")
+    await rig.answer(card)
+    assert len(await rig.logs.list_for_owner(ALICE)) == 2
+
+
+async def test_deleting_the_last_answered_card_never_exposes_an_older_answer(
+    rig: _Rig,
+) -> None:
+    _, card_a = await rig.card()
+    note_b, card_b = await rig.card()
+    older = await rig.answer(card_a)
+    await rig.answer(card_b)
+    await rig.library.delete_note(owner_id=ALICE, note_id=note_b)
+    with pytest.raises(UndoRejected, match="most recent"):
+        await rig.reviews.undo(owner_id=ALICE, review_id=older)
+
+
+async def test_last_answer_bookkeeping_goes_with_the_account() -> None:
+    logs = InMemoryReviewLogRepository()
+    await logs.mark_undone(ALICE)  # nothing recorded yet: a no-op
+    assert await logs.last_answer(ALICE) is None
+    log = ReviewLog(id="r", owner_id=ALICE, card_id="c", rating=Rating.GOOD, reviewed_at=NOW)
+    await logs.set_last_answer(log)
+    await logs.delete_for_owner(ALICE)
+    assert await logs.last_answer(ALICE) is None
 
 
 async def test_repeating_an_undo_changes_nothing(rig: _Rig) -> None:
@@ -172,9 +209,11 @@ async def test_undo_of_someone_elses_or_an_unknown_review_is_not_found(rig: _Rig
 
 async def test_a_review_without_a_snapshot_cannot_be_undone(rig: _Rig) -> None:
     _, card = await rig.card()
-    await rig.logs.append(
-        ReviewLog(id="legacy", owner_id=ALICE, card_id=card, rating=Rating.GOOD, reviewed_at=NOW)
+    legacy = ReviewLog(
+        id="legacy", owner_id=ALICE, card_id=card, rating=Rating.GOOD, reviewed_at=NOW
     )
+    await rig.logs.append(legacy)
+    await rig.logs.set_last_answer(legacy)
     with pytest.raises(UndoRejected, match="cannot be undone"):
         await rig.reviews.undo(owner_id=ALICE, review_id="legacy")
 
@@ -312,13 +351,14 @@ def test_undo_last_answer_over_http(app: FastAPI, admin_client: TestClient) -> N
 
     undone = admin_client.post(f"/reviews/{latest}/undo")
     assert undone.status_code == 200
-    assert undone.json() == {"review_id": latest, "card_id": b, "schedule": None}
+    body = undone.json()
+    assert (body["review_id"], body["card_id"], body["schedule"]) == (latest, b, None)
     assert admin_client.post(f"/reviews/{latest}/undo").status_code == 404  # repeat: no-op
-    # The older answer is now the most recent one, so it can be taken back next.
-    restored = admin_client.post(f"/reviews/{older}/undo").json()
-    assert restored["schedule"] is None
+    assert undone.json()["daily_goal"]["reviews"] == 1  # the undone answer no longer counts
+    # One step only: the older answer stays.
+    assert admin_client.post(f"/reviews/{older}/undo").status_code == 409
     queue = admin_client.get(f"/decks/{_deck_of(admin_client, a)}/review").json()
-    assert {card["id"] for card in queue} == {a, b}  # both new again
+    assert [card["id"] for card in queue] == [b]  # b is new again; a is scheduled
 
 
 def _deck_of(client: TestClient, card_id: str) -> str:

@@ -45,6 +45,7 @@ from flashcards.adapters.db import (
     DraftCardRow,
     GoalRow,
     InviteRow,
+    LastAnswerRow,
     LoginThrottleRow,
     MediaRow,
     MockExamRow,
@@ -71,6 +72,7 @@ from flashcards.adapters.db import (
     goal_to_row,
     invite_from_row,
     invite_to_row,
+    last_answer_from_row,
     media_from_row,
     media_to_row,
     mock_exam_from_row,
@@ -115,7 +117,13 @@ from flashcards.domain.notes import Card, Note
 from flashcards.domain.planner import PlanBaseline
 from flashcards.domain.progress import BUCKET_SECONDS, ActivityBucket, DueBucket, StudySettings
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
-from flashcards.domain.scheduling import CardSchedule, DuplicateReview, Rating, ReviewLog
+from flashcards.domain.scheduling import (
+    CardSchedule,
+    DuplicateReview,
+    LastAnswer,
+    Rating,
+    ReviewLog,
+)
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
@@ -501,14 +509,31 @@ class SqlReviewLogRepository:
         )
         return review_log_from_row(row) if row is not None else None
 
-    async def latest_for_owner(self, owner_id: str) -> ReviewLog | None:
-        row = await self._session.scalar(
-            select(ReviewLogRow)
-            .where(ReviewLogRow.owner_id == owner_id)
-            .order_by(ReviewLogRow.reviewed_at.desc(), ReviewLogRow.id.desc())
-            .limit(1)
+    async def set_last_answer(self, log: ReviewLog) -> None:
+        values = {
+            "review_id": log.id,
+            "card_id": log.card_id,
+            "idempotency_key": log.idempotency_key,
+            "undone": False,
+        }
+        await self._session.execute(
+            pg_insert(LastAnswerRow)
+            .values(owner_id=log.owner_id, **values)
+            .on_conflict_do_update(index_elements=[LastAnswerRow.owner_id], set_=values)
         )
-        return review_log_from_row(row) if row is not None else None
+
+    async def last_answer(self, owner_id: str) -> LastAnswer | None:
+        row = await self._session.scalar(
+            select(LastAnswerRow)
+            .where(LastAnswerRow.owner_id == owner_id)
+            .execution_options(populate_existing=True)
+        )
+        return last_answer_from_row(row) if row is not None else None
+
+    async def mark_undone(self, owner_id: str) -> None:
+        await self._session.execute(
+            update(LastAnswerRow).where(LastAnswerRow.owner_id == owner_id).values(undone=True)
+        )
 
     async def try_delete(self, log_id: str) -> bool:
         deleted = await self._session.scalar(
@@ -538,6 +563,9 @@ class SqlReviewLogRepository:
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(
             delete(ReviewLogRow).where(ReviewLogRow.owner_id == owner_id)
+        )
+        await self._session.execute(
+            delete(LastAnswerRow).where(LastAnswerRow.owner_id == owner_id)
         )
 
 

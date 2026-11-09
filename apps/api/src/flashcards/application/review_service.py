@@ -94,32 +94,47 @@ class ReviewService:
             undo=UndoSnapshot(existing),
         )
 
+        # An undone answer's log is gone, so its key no longer collides; a late
+        # retry of that answer must not record it again behind the user's back.
+        last = await self._logs.last_answer(owner_id)
+        if (
+            idempotency_key is not None
+            and last is not None
+            and last.undone
+            and last.card_id == card_id
+            and last.idempotency_key == idempotency_key
+        ):
+            raise UndoRejected("This answer was undone.")
+
         # Append first: the storage layer rejects a duplicate idempotency key
         # atomically, so the schedule is only advanced when a new review lands.
         try:
             await self._logs.append(log)
         except DuplicateReview:
             original = await self._logs.find_by_key(owner_id, card_id, idempotency_key or "")
-            if original is None:  # recorded, then undone, in between
+            if original is None:  # cannot happen under the owner lock; never guess
                 raise ReviewNotFound(card_id) from None
             stored = await self._schedules.get(card_id)
             return ReviewOutcome(original.id, stored or current)
 
         await self._schedules.upsert(updated)
+        await self._logs.set_last_answer(log)
         return ReviewOutcome(log.id, updated)
 
     async def undo(self, *, owner_id: str, review_id: str) -> UndoOutcome:
         """Take back the caller's most recent answer, within UNDO_WINDOW.
 
-        Repeating it is harmless: the review is gone, so it answers ReviewNotFound
-        and changes nothing; it can never take back an older answer by mistake.
+        "Most recent" is a per-owner pointer set by every new answer, not the
+        newest surviving log, so deleting a card never exposes an older answer.
+        One step only: once undone, the pointer stays spent until the next answer.
+        Repeating an undo changes nothing (ReviewNotFound).
         """
         await self._logs.lock_owner(owner_id)
         log = await self._logs.get(review_id)
         if log is None or log.owner_id != owner_id:
             raise ReviewNotFound(review_id)
-        latest = await self._logs.latest_for_owner(owner_id)
-        if latest is None or latest.id != log.id:
+        last = await self._logs.last_answer(owner_id)
+        if last is None or last.review_id != log.id or last.undone:
             raise UndoRejected("Only the most recent answer can be undone.")
         if log.undo is None:
             raise UndoRejected("This answer cannot be undone.")
@@ -131,6 +146,7 @@ class ReviewService:
             raise UndoRejected("The card has changed since this answer.")
         if not await self._logs.try_delete(log.id):
             raise ReviewNotFound(review_id)
+        await self._logs.mark_undone(owner_id)
         previous = log.undo.schedule
         if previous is None:
             await self._schedules.delete(log.card_id)

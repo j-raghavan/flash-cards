@@ -39,6 +39,7 @@ APP_TABLES = {
     "login_throttle",
     "user_tokens",
     "study_settings",
+    "review_last_answers",
     "plan_baselines",
 }
 

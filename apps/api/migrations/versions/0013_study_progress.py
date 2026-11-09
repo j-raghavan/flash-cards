@@ -34,6 +34,15 @@ def upgrade() -> None:
     op.create_index(
         "ix_review_logs_owner_reviewed", "review_logs", ["owner_id", "reviewed_at"]
     )
+    # Each owner's most recent answer: the one undo may take back.
+    op.create_table(
+        "review_last_answers",
+        sa.Column("owner_id", sa.String(), primary_key=True),
+        sa.Column("review_id", sa.String(), nullable=False),
+        sa.Column("card_id", sa.String(), nullable=False),
+        sa.Column("idempotency_key", sa.String(), nullable=True),
+        sa.Column("undone", sa.Boolean(), nullable=False),
+    )
 
     op.create_table(
         "study_settings",
@@ -70,6 +79,7 @@ def downgrade() -> None:
     op.drop_index("ix_plan_baselines_owner_id", table_name="plan_baselines")
     op.drop_table("plan_baselines")
     op.drop_table("study_settings")
+    op.drop_table("review_last_answers")
     op.drop_index("ix_review_logs_owner_reviewed", table_name="review_logs")
     for column in (
         "prior_last_reviewed_at",

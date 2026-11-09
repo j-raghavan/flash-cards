@@ -25,6 +25,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import (
     CardSchedule,
+    LastAnswer,
     Rating,
     ReviewLog,
     ReviewNotFound,
@@ -106,9 +107,16 @@ async def test_review_log_lookup_latest_and_delete(engine: AsyncEngine) -> None:
         found = await repo.find_by_key("alice", "a1", "k")
         assert found is not None and found.undo == UndoSnapshot(prior)
         assert await repo.find_by_key("bob", "a1", "k") is None
-        latest = await repo.latest_for_owner("alice")
-        assert latest is not None and latest.id == "keyed"
-        assert await repo.latest_for_owner("nobody") is None
+        assert await repo.last_answer("alice") is None
+        await repo.set_last_answer(found)
+        assert await repo.last_answer("alice") == LastAnswer("alice", "keyed", "a1", "k")
+        await repo.mark_undone("alice")
+        last = await repo.last_answer("alice")
+        assert last is not None and last.undone is True
+        await repo.set_last_answer(found)  # a new answer resets the flag
+        last = await repo.last_answer("alice")
+        assert last is not None and last.undone is False
+        assert await repo.last_answer("nobody") is None
         assert await repo.get("missing") is None
         assert await repo.try_delete("keyed") is True
         assert await repo.try_delete("keyed") is False
@@ -146,3 +154,17 @@ async def test_answer_and_undo_through_sql(engine: AsyncEngine) -> None:
         assert await SqlScheduleRepository(s).get(card_id) is None
         with pytest.raises(ReviewNotFound):
             await reviews(s).undo(owner_id="alice", review_id=outcome.review_id)
+
+
+async def test_account_deletion_clears_the_last_answer(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    await _seed(engine)
+    log = ReviewLog(id="r1", owner_id="alice", card_id="a1", rating=Rating.GOOD, reviewed_at=NOW)
+    async with sm() as s, s.begin():
+        repo = SqlReviewLogRepository(s)
+        await repo.append(log)
+        await repo.set_last_answer(log)
+    async with sm() as s, s.begin():
+        await SqlReviewLogRepository(s).delete_for_owner("alice")
+    async with sm() as s:
+        assert await SqlReviewLogRepository(s).last_answer("alice") is None

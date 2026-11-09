@@ -31,7 +31,13 @@ from flashcards.domain.progress import (
     bucket_start,
 )
 from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
-from flashcards.domain.scheduling import CardSchedule, DuplicateReview, Rating, ReviewLog
+from flashcards.domain.scheduling import (
+    CardSchedule,
+    DuplicateReview,
+    LastAnswer,
+    Rating,
+    ReviewLog,
+)
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
@@ -271,6 +277,7 @@ class InMemoryScheduleRepository:
 class InMemoryReviewLogRepository:
     def __init__(self) -> None:
         self._logs: list[ReviewLog] = []
+        self._last: dict[str, LastAnswer] = {}
 
     async def append(self, log: ReviewLog) -> None:
         if log.idempotency_key is not None and any(
@@ -306,9 +313,18 @@ class InMemoryReviewLogRepository:
             None,
         )
 
-    async def latest_for_owner(self, owner_id: str) -> ReviewLog | None:
-        owned = [log for log in self._logs if log.owner_id == owner_id]
-        return max(owned, key=lambda log: (log.reviewed_at, log.id), default=None)
+    async def set_last_answer(self, log: ReviewLog) -> None:
+        self._last[log.owner_id] = LastAnswer(
+            log.owner_id, log.id, log.card_id, log.idempotency_key
+        )
+
+    async def last_answer(self, owner_id: str) -> LastAnswer | None:
+        return self._last.get(owner_id)
+
+    async def mark_undone(self, owner_id: str) -> None:
+        last = self._last.get(owner_id)
+        if last is not None:
+            self._last[owner_id] = replace(last, undone=True)
 
     async def try_delete(self, log_id: str) -> bool:
         kept = [log for log in self._logs if log.id != log_id]
@@ -321,6 +337,7 @@ class InMemoryReviewLogRepository:
 
     async def delete_for_owner(self, owner_id: str) -> None:
         self._logs = [log for log in self._logs if log.owner_id != owner_id]
+        self._last.pop(owner_id, None)
 
 
 class InMemoryObjectStore:

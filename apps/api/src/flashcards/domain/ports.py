@@ -22,7 +22,7 @@ from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.planner import PlanBaseline
 from flashcards.domain.progress import ActivityBucket, DueBucket, StudySettings
-from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
+from flashcards.domain.scheduling import CardSchedule, LastAnswer, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
@@ -296,8 +296,14 @@ class ReviewLogRepository(Protocol):
         """The review a retried submission with this idempotency key recorded."""
         ...
 
-    async def latest_for_owner(self, owner_id: str) -> ReviewLog | None:
-        """The owner's most recent review (latest reviewed_at, then id)."""
+    async def set_last_answer(self, log: ReviewLog) -> None:
+        """Record this review as the owner's most recent answer (not undone)."""
+        ...
+
+    async def last_answer(self, owner_id: str) -> LastAnswer | None: ...
+
+    async def mark_undone(self, owner_id: str) -> None:
+        """Flag the owner's most recent answer as undone."""
         ...
 
     async def try_delete(self, log_id: str) -> bool:
@@ -309,7 +315,8 @@ class ReviewLogRepository(Protocol):
         ...
 
     async def delete_for_owner(self, owner_id: str) -> None:
-        """Delete every review log owned by the user (account deletion, F-IMP-5)."""
+        """Delete every review log owned by the user, and their last-answer
+        record (account deletion, F-IMP-5)."""
         ...
 
 

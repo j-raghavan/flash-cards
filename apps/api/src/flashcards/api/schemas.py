@@ -957,14 +957,16 @@ class UndoOut(BaseModel):
     review_id: str
     card_id: str
     schedule: CardScheduleOut | None  # None: the card is new again
+    daily_goal: DailyGoalOut  # today's count without the undone answer
 
     @classmethod
-    def from_outcome(cls, outcome: UndoOutcome) -> UndoOut:
+    def from_outcome(cls, outcome: UndoOutcome, progress: DailyProgress) -> UndoOut:
         restored = outcome.schedule
         return cls(
             review_id=outcome.review_id,
             card_id=outcome.card_id,
             schedule=CardScheduleOut.from_schedule(restored) if restored is not None else None,
+            daily_goal=DailyGoalOut.from_progress(progress),
         )
 
 

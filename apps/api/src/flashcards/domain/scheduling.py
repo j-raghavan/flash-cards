@@ -113,6 +113,21 @@ class ReviewLog:
     undo: UndoSnapshot | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LastAnswer:
+    """The owner's most recent answer: the only one undo may take back.
+
+    Kept apart from the logs, so deleting a card never makes an older answer
+    "most recent", and an undone answer keeps its idempotency key reserved.
+    """
+
+    owner_id: str
+    review_id: str
+    card_id: str
+    idempotency_key: str | None
+    undone: bool = False
+
+
 # How long after answering a card the answer can still be taken back.
 UNDO_WINDOW = timedelta(minutes=10)
 

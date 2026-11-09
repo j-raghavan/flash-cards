@@ -47,6 +47,7 @@ from flashcards.domain.planner import PlanBaseline, StudyPlan
 from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import (
     CardSchedule,
+    LastAnswer,
     Rating,
     ReviewLog,
     ScheduleState,
@@ -269,6 +270,28 @@ class ReviewLogRow(Base):
 
 UNDO_NEW = "new"
 UNDO_SCHEDULE = "schedule"
+
+
+class LastAnswerRow(Base):
+    """One row per owner: the answer undo may take back (F-STUDY-3)."""
+
+    __tablename__ = "review_last_answers"
+
+    owner_id: Mapped[str] = mapped_column(String, primary_key=True)
+    review_id: Mapped[str] = mapped_column(String)
+    card_id: Mapped[str] = mapped_column(String)
+    idempotency_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    undone: Mapped[bool] = mapped_column(Boolean)
+
+
+def last_answer_from_row(row: LastAnswerRow) -> LastAnswer:
+    return LastAnswer(
+        owner_id=row.owner_id,
+        review_id=row.review_id,
+        card_id=row.card_id,
+        idempotency_key=row.idempotency_key,
+        undone=row.undone,
+    )
 
 
 def deck_to_row(deck: Deck) -> DeckRow:
