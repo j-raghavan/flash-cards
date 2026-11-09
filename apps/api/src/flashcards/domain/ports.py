@@ -281,6 +281,28 @@ class ReviewLogRepository(Protocol):
         """Return the owner's review logs, oldest first (for data export)."""
         ...
 
+    async def lock_owner(self, owner_id: str) -> None:
+        """Serialize review writes (answer, undo) for one owner until the
+        transaction ends, so an undo never interleaves with a new answer.
+        A SQL adapter takes a transaction-scoped advisory lock."""
+        ...
+
+    async def get(self, log_id: str) -> ReviewLog | None: ...
+
+    async def find_by_key(
+        self, owner_id: str, card_id: str, idempotency_key: str
+    ) -> ReviewLog | None:
+        """The review a retried submission with this idempotency key recorded."""
+        ...
+
+    async def latest_for_owner(self, owner_id: str) -> ReviewLog | None:
+        """The owner's most recent review (latest reviewed_at, then id)."""
+        ...
+
+    async def try_delete(self, log_id: str) -> bool:
+        """Delete one review log; True only for the caller that removed it."""
+        ...
+
     async def delete_for_card(self, card_id: str) -> None:
         """Delete every review log for a card."""
         ...

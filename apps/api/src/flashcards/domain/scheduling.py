@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class DuplicateReview(Exception):
@@ -94,6 +94,14 @@ class DeckStats:
 
 
 @dataclass(frozen=True, slots=True)
+class UndoSnapshot:
+    """The card's schedule just before a review, kept on its log so the answer can
+    be taken back (F-STUDY-3). schedule is None when the card was new."""
+
+    schedule: CardSchedule | None
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewLog:
     id: str
     owner_id: str
@@ -101,3 +109,17 @@ class ReviewLog:
     rating: Rating
     reviewed_at: datetime
     idempotency_key: str | None = None
+    # None for a review that cannot be undone (one recorded before undo existed).
+    undo: UndoSnapshot | None = None
+
+
+# How long after answering a card the answer can still be taken back.
+UNDO_WINDOW = timedelta(minutes=10)
+
+
+class ReviewNotFound(Exception):
+    """A review that does not exist (or was already undone) or is not the caller's."""
+
+
+class UndoRejected(Exception):
+    """The review exists but cannot be undone; str(exc) says why."""

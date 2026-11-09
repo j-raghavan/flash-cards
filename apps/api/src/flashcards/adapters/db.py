@@ -44,7 +44,13 @@ from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.progress import StudySettings
-from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
+from flashcards.domain.scheduling import (
+    CardSchedule,
+    Rating,
+    ReviewLog,
+    ScheduleState,
+    UndoSnapshot,
+)
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
@@ -234,7 +240,7 @@ class ReviewLogRow(Base):
         UniqueConstraint(
             "owner_id", "card_id", "idempotency_key", name="uq_review_owner_card_idempotency"
         ),
-        # Range reads per owner: the activity aggregates.
+        # Range reads per owner: activity aggregates and the most recent review.
         Index("ix_review_logs_owner_reviewed", "owner_id", "reviewed_at"),
     )
 
@@ -246,6 +252,22 @@ class ReviewLogRow(Base):
     rating: Mapped[int] = mapped_column(Integer)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     idempotency_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The schedule before this review, for undo (F-STUDY-3). undo_kind is NULL when
+    # the review cannot be undone, "new" when the card had no schedule, and
+    # "schedule" when the prior_* columns hold it.
+    undo_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    prior_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    prior_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prior_stability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prior_difficulty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prior_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    prior_last_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+UNDO_NEW = "new"
+UNDO_SCHEDULE = "schedule"
 
 
 def deck_to_row(deck: Deck) -> DeckRow:
@@ -345,13 +367,45 @@ def schedule_from_row(row: CardScheduleRow) -> CardSchedule:
 
 
 def review_log_to_row(log: ReviewLog) -> ReviewLogRow:
-    return ReviewLogRow(
+    row = ReviewLogRow(
         id=log.id,
         owner_id=log.owner_id,
         card_id=log.card_id,
         rating=int(log.rating),
         reviewed_at=log.reviewed_at,
         idempotency_key=log.idempotency_key,
+    )
+    if log.undo is None:
+        return row
+    prior = log.undo.schedule
+    if prior is None:
+        row.undo_kind = UNDO_NEW
+        return row
+    row.undo_kind = UNDO_SCHEDULE
+    row.prior_state = prior.state.value
+    row.prior_step = prior.step
+    row.prior_stability = prior.stability
+    row.prior_difficulty = prior.difficulty
+    row.prior_due_at = prior.due_at
+    row.prior_last_reviewed_at = prior.last_reviewed_at
+    return row
+
+
+def _undo_from_row(row: ReviewLogRow) -> UndoSnapshot | None:
+    if row.undo_kind == UNDO_NEW:
+        return UndoSnapshot(None)
+    if row.undo_kind != UNDO_SCHEDULE or row.prior_state is None or row.prior_due_at is None:
+        return None
+    return UndoSnapshot(
+        CardSchedule(
+            card_id=row.card_id,
+            state=ScheduleState(row.prior_state),
+            step=row.prior_step,
+            stability=row.prior_stability,
+            difficulty=row.prior_difficulty,
+            due_at=row.prior_due_at,
+            last_reviewed_at=row.prior_last_reviewed_at,
+        )
     )
 
 
@@ -363,6 +417,7 @@ def review_log_from_row(row: ReviewLogRow) -> ReviewLog:
         rating=Rating(row.rating),
         reviewed_at=row.reviewed_at,
         idempotency_key=row.idempotency_key,
+        undo=_undo_from_row(row),
     )
 
 

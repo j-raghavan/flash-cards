@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Review routes: the due queue and grading a card (F-SRS-2, F-STUDY-1).
+"""Review routes: the due queue, grading a card and undoing the last answer
+(F-SRS-2, F-STUDY-1, F-STUDY-3).
 
-Each answer also reports today's progress against the daily goal (F-PROG-1).
+Editing a card mid-session is PATCH /notes/{note_id}: a card keeps its id,
+schedule and history across an edit, so the session carries on with it.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from flashcards.api.schemas import (
     EvaluationOut,
     ReviewRequest,
     ReviewResultOut,
+    UndoOut,
 )
 
 router = APIRouter(tags=["review"])
@@ -41,14 +44,24 @@ async def submit_review(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> ReviewResultOut:
-    schedule = await container.reviews.submit(
+    outcome = await container.reviews.submit(
         owner_id=caller.user.id,
         card_id=card_id,
         rating=body.rating,
         idempotency_key=body.idempotency_key,
     )
     progress = await container.progress.today(owner_id=caller.user.id, with_streak=False)
-    return ReviewResultOut.from_schedule_and_progress(schedule, progress)
+    return ReviewResultOut.from_outcome(outcome, progress)
+
+
+@router.post("/reviews/{review_id}/undo", response_model=UndoOut)
+async def undo_review(
+    review_id: str,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> UndoOut:
+    outcome = await container.reviews.undo(owner_id=caller.user.id, review_id=review_id)
+    return UndoOut.from_outcome(outcome)
 
 
 @router.post("/cards/{card_id}/evaluate", response_model=EvaluationOut)

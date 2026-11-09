@@ -285,6 +285,36 @@ class InMemoryReviewLogRepository:
         owned = [log for log in self._logs if log.owner_id == owner_id]
         return sorted(owned, key=lambda log: log.reviewed_at)
 
+    async def lock_owner(self, owner_id: str) -> None:
+        return None  # one event loop and no awaits inside a method: nothing interleaves
+
+    async def get(self, log_id: str) -> ReviewLog | None:
+        return next((log for log in self._logs if log.id == log_id), None)
+
+    async def find_by_key(
+        self, owner_id: str, card_id: str, idempotency_key: str
+    ) -> ReviewLog | None:
+        return next(
+            (
+                log
+                for log in self._logs
+                if log.owner_id == owner_id
+                and log.card_id == card_id
+                and log.idempotency_key == idempotency_key
+            ),
+            None,
+        )
+
+    async def latest_for_owner(self, owner_id: str) -> ReviewLog | None:
+        owned = [log for log in self._logs if log.owner_id == owner_id]
+        return max(owned, key=lambda log: (log.reviewed_at, log.id), default=None)
+
+    async def try_delete(self, log_id: str) -> bool:
+        kept = [log for log in self._logs if log.id != log_id]
+        removed = len(kept) != len(self._logs)
+        self._logs = kept
+        return removed
+
     async def delete_for_card(self, card_id: str) -> None:
         self._logs = [log for log in self._logs if log.card_id != card_id]
 

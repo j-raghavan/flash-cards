@@ -15,6 +15,7 @@ from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_v
 
 from flashcards.application.account_service import AccountExport
 from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
+from flashcards.application.review_service import ReviewOutcome, UndoOutcome
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport
 from flashcards.domain.audit import AuditEvent
@@ -939,15 +940,30 @@ class TodayOut(DailyGoalOut):
 
 
 class ReviewResultOut(CardScheduleOut):
+    review_id: str  # pass to POST /reviews/{review_id}/undo to take the answer back
     daily_goal: DailyGoalOut
 
     @classmethod
-    def from_schedule_and_progress(
-        cls, schedule: CardSchedule, progress: DailyProgress
-    ) -> ReviewResultOut:
+    def from_outcome(cls, outcome: ReviewOutcome, progress: DailyProgress) -> ReviewResultOut:
         return cls(
-            **CardScheduleOut.from_schedule(schedule).model_dump(),
+            **CardScheduleOut.from_schedule(outcome.schedule).model_dump(),
+            review_id=outcome.review_id,
             daily_goal=DailyGoalOut.from_progress(progress),
+        )
+
+
+class UndoOut(BaseModel):
+    review_id: str
+    card_id: str
+    schedule: CardScheduleOut | None  # None: the card is new again
+
+    @classmethod
+    def from_outcome(cls, outcome: UndoOutcome) -> UndoOut:
+        restored = outcome.schedule
+        return cls(
+            review_id=outcome.review_id,
+            card_id=outcome.card_id,
+            schedule=CardScheduleOut.from_schedule(restored) if restored is not None else None,
         )
 
 

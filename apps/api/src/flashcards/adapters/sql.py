@@ -118,6 +118,8 @@ from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
 _IN_CHUNK = 5_000  # ids per IN (...) list, well under the bind-parameter cap
+# First key of the two-key advisory lock that serializes one owner's review writes.
+_REVIEW_LOCK_CLASS = 7301
 _TERMINAL = (JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value)
 
 
@@ -470,6 +472,45 @@ class SqlReviewLogRepository:
             .order_by(ReviewLogRow.reviewed_at)
         )
         return [review_log_from_row(row) for row in rows]
+
+    async def lock_owner(self, owner_id: str) -> None:
+        # Transaction-scoped: released at commit or rollback. A hash collision only
+        # makes two owners wait for each other briefly; it never breaks correctness.
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(_REVIEW_LOCK_CLASS, func.hashtext(owner_id)))
+        )
+
+    async def get(self, log_id: str) -> ReviewLog | None:
+        # A query, not session.get: try_delete deletes past the identity map.
+        row = await self._session.scalar(select(ReviewLogRow).where(ReviewLogRow.id == log_id))
+        return review_log_from_row(row) if row is not None else None
+
+    async def find_by_key(
+        self, owner_id: str, card_id: str, idempotency_key: str
+    ) -> ReviewLog | None:
+        row = await self._session.scalar(
+            select(ReviewLogRow).where(
+                ReviewLogRow.owner_id == owner_id,
+                ReviewLogRow.card_id == card_id,
+                ReviewLogRow.idempotency_key == idempotency_key,
+            )
+        )
+        return review_log_from_row(row) if row is not None else None
+
+    async def latest_for_owner(self, owner_id: str) -> ReviewLog | None:
+        row = await self._session.scalar(
+            select(ReviewLogRow)
+            .where(ReviewLogRow.owner_id == owner_id)
+            .order_by(ReviewLogRow.reviewed_at.desc(), ReviewLogRow.id.desc())
+            .limit(1)
+        )
+        return review_log_from_row(row) if row is not None else None
+
+    async def try_delete(self, log_id: str) -> bool:
+        deleted = await self._session.scalar(
+            delete(ReviewLogRow).where(ReviewLogRow.id == log_id).returning(ReviewLogRow.id)
+        )
+        return deleted is not None
 
     async def append(self, log: ReviewLog) -> None:
         if log.idempotency_key is None:
