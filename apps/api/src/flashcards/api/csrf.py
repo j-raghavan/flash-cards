@@ -8,8 +8,9 @@ from a trusted origin. The rule, checked in order (ADR 0017):
 
 1. ``Origin`` present and not ``null``: allowed only if it is a trusted origin.
 2. ``Sec-Fetch-Site`` present: allowed only if it is ``same-origin`` or ``none``.
-3. ``Referer`` present: allowed only if its origin is trusted.
-4. None of these: allowed only with an ``X-Requested-With`` header. Browsers
+3. ``Origin: null`` with no ``Sec-Fetch-Site``: refused.
+4. ``Referer`` present: allowed only if its origin is trusted.
+5. None of these: allowed only with an ``X-Requested-With`` header. Browsers
    cannot send that header cross-origin without a CORS preflight, which this API
    never approves, so only same-origin scripts and non-browser clients can.
 
