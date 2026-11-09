@@ -174,7 +174,9 @@ export function StudyPage() {
       if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
-      if ((event.key === " " || event.key === "Enter") && !revealed && detail !== null) {
+      // Space and Enter on a link or button keep their own meaning.
+      const onControl = event.target instanceof HTMLElement && ["A", "BUTTON"].includes(event.target.tagName);
+      if ((event.key === " " || event.key === "Enter") && !onControl && !revealed && detail !== null) {
         event.preventDefault();
         setRevealedAt(position);
         return;
@@ -190,6 +192,17 @@ export function StudyPage() {
       window.removeEventListener("keydown", onKey);
     };
   }, [revealed, detail, rate, position]);
+
+  // Keep keyboard and screen-reader focus with the session: the card when it
+  // appears, the rating buttons once the answer shows.
+  const cardRef = useRef<HTMLElement>(null);
+  const ratingsRef = useRef<HTMLDivElement>(null);
+  const loaded = detail !== null;
+  useEffect(() => {
+    if (loaded) {
+      (revealed ? ratingsRef.current : cardRef.current)?.focus();
+    }
+  }, [loaded, revealed, position]);
 
   const header = (
     <nav aria-label="Breadcrumb" className="breadcrumb">
@@ -239,7 +252,7 @@ export function StudyPage() {
   return (
     <section className="study">
       {header}
-      <p className="muted" aria-live="polite">
+      <p className="muted">
         Card {index + 1} of {queue.length}
       </p>
       <ErrorText message={submitError} />
@@ -256,7 +269,12 @@ export function StudyPage() {
           <Loading label="Loading card…" />
         ) : null
       ) : (
-        <article className="study-card" aria-label="Flashcard">
+        <article
+          className="study-card"
+          aria-label={`Card ${String(index + 1)} of ${String(queue.length)}`}
+          tabIndex={-1}
+          ref={cardRef}
+        >
           <CardContent markdown={sides.front} className="front" />
           {revealed ? (
             <>
@@ -267,7 +285,7 @@ export function StudyPage() {
         </article>
       )}
       {sides === null ? null : revealed ? (
-        <div className="ratings" role="group" aria-label="How well did you know it?">
+        <div className="ratings" role="group" aria-label="How well did you know it?" tabIndex={-1} ref={ratingsRef}>
           {RATINGS.map(({ rating, label }) => (
             <button
               key={rating}

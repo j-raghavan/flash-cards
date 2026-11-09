@@ -15,6 +15,8 @@ import { clozeRevealAll } from "../lib/cloze";
 import { useJobEvents } from "../lib/useJobEvents";
 import { useSubmit } from "../lib/useSubmit";
 
+const RECONNECT_MS = 3000;
+
 const STATUS_TEXT: Record<Job["status"], string> = {
   queued: "Waiting to start…",
   running: "Generating cards…",
@@ -54,7 +56,7 @@ function DraftReview({ jobId, deckId }: { jobId: string; deckId: string | null }
   const target = approved?.deckId ?? deckId;
   const deckLink =
     target === null ? null : (
-      <Link className="button" to={`/decks/${target}`}>
+      <Link className="button" to={`/decks/${encodeURIComponent(target)}`}>
         Go to the deck
       </Link>
     );
@@ -163,14 +165,33 @@ export function JobPage() {
 
   useEffect(fetchJob, [fetchJob]);
 
+  // When the stream ends without `done` (too many streams open, a dropped
+  // connection), read the job again and, if it is still going, reconnect later.
+  const [attempt, setAttempt] = useState(0);
+  const onStreamClosed = useCallback(() => {
+    ai.job(jobId).then(
+      (latest) => {
+        setJob(latest);
+        if (!TERMINAL_JOB_STATUSES.includes(latest.status)) {
+          window.setTimeout(() => {
+            setAttempt((n) => n + 1);
+          }, RECONNECT_MS);
+        }
+      },
+      (failure: unknown) => {
+        setError(describeError(failure));
+      },
+    );
+  }, [jobId]);
+
   const finished = job !== null && TERMINAL_JOB_STATUSES.includes(job.status);
-  useJobEvents(jobId, job !== null && !finished, setJob, fetchJob);
+  useJobEvents(jobId, attempt, job !== null && !finished, setJob, onStreamClosed);
 
   const back =
     deckId === null ? (
       <Link to="/">Back to decks</Link>
     ) : (
-      <Link to={`/decks/${deckId}/generate`}>Back to generation</Link>
+      <Link to={`/decks/${encodeURIComponent(deckId)}/generate`}>Back to generation</Link>
     );
 
   if (error !== null) {
@@ -193,8 +214,9 @@ export function JobPage() {
         {back}
       </nav>
       <h1>Card generation</h1>
-      <p role="status" aria-live="polite">
-        {job.cancel_requested && !finished ? "Cancelling…" : STATUS_TEXT[job.status]}
+      <p>
+        {/* Only status changes are announced, not every page. */}
+        <span role="status">{job.cancel_requested && !finished ? "Cancelling…" : STATUS_TEXT[job.status]}</span>
         {job.total_units > 0 && !finished ? ` ${job.completed_units} of ${job.total_units} pages.` : ""}
       </p>
       {finished ? null : (

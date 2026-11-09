@@ -72,6 +72,27 @@ describe("study session", () => {
     expect(new Set(keys).size).toBe(2);
   });
 
+  it("keeps focus with the session and leaves links and buttons their own keys", async () => {
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1")] },
+      "GET /cards/c1": { body: basic("c1", "Q", "A") },
+      "GET /decks": { body: [] },
+      "GET /decks/d1/stats": { status: 404, body: { detail: "Not found." } },
+    });
+    renderApp("/decks/d1/study");
+    const article = await screen.findByRole("article", { name: "Card 1 of 1" });
+    await waitFor(() => {
+      expect(article).toHaveFocus();
+    });
+    const user = userEvent.setup();
+    await user.keyboard(" ");
+    expect(screen.getByRole("group", { name: "How well did you know it?" })).toHaveFocus();
+    screen.getByRole("link", { name: "Back to deck" }).focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("heading", { name: "Deck not found" })).toBeInTheDocument();
+  });
+
   it("ignores keys typed into a field and keys with modifiers", async () => {
     mockApi({
       ...me,

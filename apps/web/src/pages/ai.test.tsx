@@ -120,7 +120,8 @@ describe("job page", () => {
       },
     });
     renderApp("/jobs/j1?deck=d1");
-    expect(await screen.findByText("Generating cards… 2 of 4 pages.")).toBeInTheDocument();
+    expect(await screen.findByText(/2 of 4 pages\./)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Generating cards…");
     expect(screen.getByRole("progressbar", { name: "Generation progress" })).toHaveAttribute("value", "50");
 
     const source = lastSource();
@@ -129,7 +130,7 @@ describe("job page", () => {
       source.emit("progress", "not json");
       source.emit("progress", 42);
     });
-    expect(await screen.findByText("Generating cards… 3 of 4 pages.")).toBeInTheDocument();
+    expect(await screen.findByText(/3 of 4 pages\./)).toBeInTheDocument();
     act(() => {
       source.emit("done", JSON.stringify(job({ status: "succeeded", completed_units: 4, progress: 1 })));
     });
@@ -173,6 +174,42 @@ describe("job page", () => {
     });
     expect(await screen.findByText("There are no drafts left to review.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to decks" })).toBeInTheDocument();
+  });
+
+  it("reconnects later when the stream closes on a job that is still running", async () => {
+    let fail = false;
+    mockApi({
+      ...me,
+      "GET /ai/jobs/j1": () => (fail ? { status: 500 } : { body: job() }),
+    });
+    const timers: (() => void)[] = [];
+    const realSetTimeout = window.setTimeout.bind(window);
+    vi.spyOn(window, "setTimeout").mockImplementation(((callback: () => void, delay?: number) => {
+      if (delay === 3000) {
+        timers.push(callback); // the reconnect, run by hand below
+        return 0;
+      }
+      return realSetTimeout(callback, delay);
+    }) as unknown as typeof window.setTimeout);
+    renderApp("/jobs/j1");
+    await screen.findByText(/2 of 4 pages/);
+    act(() => {
+      lastSource().fail(FakeEventSource.CLOSED);
+    });
+    await waitFor(() => {
+      expect(timers).toHaveLength(1);
+    });
+    act(() => {
+      timers[0]?.();
+    });
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(2);
+    });
+    fail = true;
+    act(() => {
+      lastSource().fail(FakeEventSource.CLOSED);
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
   });
 
   it("cancels a running job and retries a cancelled or failed one", async () => {
