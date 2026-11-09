@@ -10,6 +10,7 @@ import type { Thoroughness } from "../api/types";
 import { ErrorText } from "../components/ui";
 import { recentJobs, rememberJob } from "../lib/recentJobs";
 import { useSubmit } from "../lib/useSubmit";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const ACCEPTED = ["application/pdf", "image/png", "image/jpeg"];
@@ -21,6 +22,7 @@ const LEVELS: { value: Thoroughness; label: string; hint: string }[] = [
 ];
 
 export function GeneratePage() {
+  useDocumentTitle("Generate cards");
   const { deckId = "" } = useParams();
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);

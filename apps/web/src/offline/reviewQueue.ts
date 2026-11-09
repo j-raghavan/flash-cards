@@ -7,6 +7,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 
 import { ApiError, NetworkError } from "../api/client";
 import { cards } from "../api/endpoints";
+import type { ReviewResult } from "../api/studyProgress";
 import type { Rating } from "../api/types";
 
 export interface QueuedReview {
@@ -86,23 +87,26 @@ function isTransient(error: unknown): boolean {
   );
 }
 
-export type SubmitOutcome = "sent" | "queued";
+/** Sent, with the server's answer (which can be undone), or queued on this device. */
+export type SubmitOutcome = { outcome: "sent"; result: ReviewResult } | { outcome: "queued" };
+
+const QUEUED: SubmitOutcome = { outcome: "queued" };
 
 /** Send an answer now, or queue it when the server cannot be reached. */
 export async function submitReview(review: Omit<QueuedReview, "queued_at">): Promise<SubmitOutcome> {
   const queued: QueuedReview = { ...review, queued_at: Date.now() };
   if (!navigator.onLine) {
     await enqueue(queued);
-    return "queued";
+    return QUEUED;
   }
   try {
-    await cards.review(review.card_id, review.rating, review.idempotency_key);
-    return "sent";
+    const result = await cards.review(review.card_id, review.rating, review.idempotency_key);
+    return { outcome: "sent", result };
   } catch (error) {
     // A lapsed session is kept too: it is replayed after the user signs in again.
     if (isTransient(error) || (error instanceof ApiError && error.status === 401)) {
       await enqueue(queued);
-      return "queued";
+      return QUEUED;
     }
     throw error;
   }

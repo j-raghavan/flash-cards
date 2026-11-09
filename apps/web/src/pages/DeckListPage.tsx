@@ -10,6 +10,7 @@ import { ErrorText, Loading } from "../components/ui";
 import { buildDeckTree, deckOptions, type DeckNode } from "../lib/deckTree";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 
 function DeckTree({ nodes }: { nodes: DeckNode[] }) {
   return (
@@ -87,6 +88,7 @@ export function CreateDeckForm({
 }
 
 export function DeckListPage() {
+  useDocumentTitle("Decks");
   const list = useResource(() => decks.list(), "decks");
 
   return (
@@ -104,6 +106,10 @@ export function DeckListPage() {
             <DeckTree nodes={buildDeckTree(list.data)} />
           )}
           <CreateDeckForm all={list.data} onCreated={list.reload} />
+          <p className="row">
+            <Link to="/import">Import decks from Anki</Link>
+            <Link to="/note-types">Custom note types</Link>
+          </p>
         </>
       )}
     </section>

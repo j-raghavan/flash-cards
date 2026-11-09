@@ -9,11 +9,13 @@ import { auth } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorText, Loading } from "../components/ui";
 import { safeNextPath, tokenFromLocation } from "../lib/text";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useSubmit } from "../lib/useSubmit";
 
 const MIN_PASSWORD_LENGTH = 12;
 
 function AuthFrame({ title, children }: { title: string; children: ReactNode }) {
+  useDocumentTitle(title);
   return (
     <main id="main" className="auth">
       <p className="brand">Flash-Cards</p>
@@ -96,7 +98,8 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const submit = useSubmit();
-  const next = safeNextPath(params.get("next"));
+  const location = useLocation();
+  const next = safeNextPath(params.get("next") ?? new URLSearchParams(location.hash.replace(/^#/, "")).get("next"));
 
   if (user !== null) {
     return <Navigate to={next} replace />;
