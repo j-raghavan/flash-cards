@@ -319,3 +319,15 @@ async def test_deck_stats_proficiency_zero_when_all_suspended(
     stats = await reviews.deck_stats(owner_id=ALICE, deck_id=deck.id)
     assert stats.proficiency == 0
     assert stats.suspended == 1
+
+
+def test_scheduler_never_waits_for_a_unique_fsrs_card_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    # py-fsrs sleeps 1 ms whenever it has to invent a card id; we always pass one.
+    def no_sleep(_seconds: float) -> None:
+        raise AssertionError("the scheduler slept")
+
+    monkeypatch.setattr("fsrs.card.time.sleep", no_sleep)
+    scheduler = FsrsScheduler()
+    now = datetime(2026, 11, 8, tzinfo=UTC)
+    schedule = scheduler.review(scheduler.new_schedule("c1", now), Rating.GOOD, now)
+    assert schedule.card_id == "c1"
