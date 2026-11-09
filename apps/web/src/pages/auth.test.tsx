@@ -253,3 +253,75 @@ describe("AuthProvider", () => {
     expect(() => render(<Probe />)).toThrow("useAuth must be used inside AuthProvider");
   });
 });
+
+describe("public sign-up", () => {
+  const open = { ...signedOut, "GET /auth/options": { body: { invite_only: false } } };
+
+  it("links to sign-up from sign-in when the server takes public sign-ups", async () => {
+    mockApi(open);
+    renderApp("/login");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("link", { name: "Create an account" }));
+    expect(await screen.findByRole("heading", { name: "Create your account" })).toBeInTheDocument();
+    expect(screen.queryByText(/invite-only/)).toBeNull();
+  });
+
+  it("says sign-up is invite-only when the server says so", async () => {
+    mockApi({ ...signedOut, "GET /auth/options": { body: { invite_only: true } } });
+    renderApp("/login");
+    expect(await screen.findByText(/Flash-Cards is invite-only/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Create an account" })).toBeNull();
+  });
+
+  it("registers, never signs in, and asks to check email", async () => {
+    const calls = mockApi({
+      ...open,
+      "POST /auth/register": { status: 202, body: { detail: "If the address can be registered, an email is on its way." } },
+    });
+    renderApp("/signup");
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByRole("heading", { name: "Check your email" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("a confirmation link is on its way");
+    expect(calls.find((c) => c.path === "/auth/register")?.body).toEqual({
+      email: "new@example.com",
+      password: "correct-horse-battery",
+    });
+    expect(calls.some((c) => c.path === "/auth/signup" || c.path === "/auth/login")).toBe(false);
+    expect(localStorage.getItem("flashcards.lastUser")).toBeNull();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("shows a refused password", async () => {
+    mockApi({ ...open, "POST /auth/register": { status: 422, body: { detail: "Password is too short." } } });
+    renderApp("/signup");
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "short");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Password is too short.");
+  });
+
+  it("explains when sign-up closed in the meantime", async () => {
+    mockApi({ ...open, "POST /auth/register": { status: 404, body: { detail: "Not found." } } });
+    renderApp("/signup");
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Flash-Cards is invite-only.");
+  });
+
+  it("still uses the invitation when the link has one", async () => {
+    const calls = mockApi({ ...open, "POST /auth/signup": { status: 201, body: USER }, "GET /decks": { body: [] } });
+    renderApp("/signup#token=inv-9");
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByRole("heading", { name: "Decks" })).toBeInTheDocument();
+    expect(calls.some((c) => c.path === "/auth/register")).toBe(false);
+  });
+});
