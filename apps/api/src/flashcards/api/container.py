@@ -389,6 +389,7 @@ def build_container(
     cards = InMemoryCardRepository()
     schedules = InMemoryScheduleRepository()
     review_logs = InMemoryReviewLogRepository()
+    goals = InMemoryGoalRepository()
     return build_services(
         Repositories(
             clock=SystemClock(),
@@ -409,7 +410,7 @@ def build_container(
             extractor=TranscriptAwareExtractor(PyMuPDFExtractor()),
             job_queue=job_queue or InProcessJobQueue(),
             llm=llm or NullLLMProvider(),
-            goals=InMemoryGoalRepository(),
+            goals=goals,
             package_reader=ApkgReader(),
             media=InMemoryMediaRepository(),
             media_sniffer=PuremagicMediaSniffer(),
@@ -424,7 +425,7 @@ def build_container(
             user_tokens=InMemoryUserTokenRepository(),
             mailer=mailer or LogMailer(show_content=True),
             study_settings=InMemoryStudySettingsRepository(),
-            plan_baselines=InMemoryPlanBaselineRepository(),
+            plan_baselines=InMemoryPlanBaselineRepository(goals),
             study_stats=InMemoryStudyStatsRepository(cards, schedules, review_logs),
             public_base_url=public_base_url,
         )

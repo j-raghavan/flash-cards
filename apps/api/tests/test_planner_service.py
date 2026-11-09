@@ -49,7 +49,9 @@ class _Fixture:
         self.schedules = InMemoryScheduleRepository()
         self.logs = InMemoryReviewLogRepository()
         self.notes = NoteService(self.decks, InMemoryNoteRepository(), self.cards, clock)
-        self.goals = GoalService(self.decks, InMemoryGoalRepository(), clock)
+        goal_repo = InMemoryGoalRepository()
+        self.baselines = InMemoryPlanBaselineRepository(goal_repo)
+        self.goals = GoalService(self.decks, goal_repo, clock)
         self.progress = ProgressService(
             self.decks,
             InMemoryStudySettingsRepository(),
@@ -60,7 +62,7 @@ class _Fixture:
             self.goals,
             self.cards,
             self.schedules,
-            InMemoryPlanBaselineRepository(),
+            self.baselines,
             self.progress,
             clock,
         )
@@ -239,3 +241,12 @@ def test_baseline_round_trip_through_rows() -> None:
         ),
     )
     assert plan_baseline_from_row(plan_baseline_to_row(baseline)) == baseline
+
+
+async def test_a_deleted_goal_takes_its_baseline_with_it(fx: _Fixture) -> None:
+    deck = await fx.decks.create(owner_id=ALICE, name="Bio")
+    goal_id = await _goal(fx, deck.id)
+    await fx.planner.report(owner_id=ALICE, goal_id=goal_id)
+    assert await fx.baselines.get(goal_id) is not None
+    await fx.goals.delete(owner_id=ALICE, goal_id=goal_id)
+    assert await fx.baselines.get(goal_id) is None

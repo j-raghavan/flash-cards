@@ -106,9 +106,12 @@ class ProgressService:
         today = local_date(self._clock.now(), zone)
         first = today - timedelta(days=days - 1)
         today_start = day_start(today, zone)
+        # From the Monday of the first week, so the oldest retention point covers
+        # a whole week; the heatmap still shows only the requested days.
+        week_start = first - timedelta(days=first.weekday())
         activity = await self._stats.review_activity(
             owner_id,
-            since=day_start(first, zone),
+            since=day_start(week_start, zone),
             until=day_start(today + timedelta(days=1), zone),
             deck_ids=deck_ids,
         )

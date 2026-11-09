@@ -117,7 +117,7 @@ class PlanBaseline:
 
 class ChangeReason(enum.StrEnum):
     CARDS_ADDED = "cards_added"  # net new cards in the goal's decks
-    CARDS_REMOVED = "cards_removed"  # net cards deleted or suspended
+    CARDS_REMOVED = "cards_removed"  # net cards leaving the goal (deleted, suspended, deck removed)
     CARDS_STARTED = "cards_started"  # net new cards reviewed for the first time
     MISSED_DAYS = "missed_days"  # days since the baseline with no reviews
     DAYS_PASSED = "days_passed"  # fewer days left until the exam

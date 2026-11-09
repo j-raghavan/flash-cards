@@ -658,14 +658,23 @@ class InMemoryStudySettingsRepository:
 
 
 class InMemoryPlanBaselineRepository:
-    def __init__(self) -> None:
+    """Baselines go with their goal, as the SQL foreign key cascade does."""
+
+    def __init__(self, goals: InMemoryGoalRepository) -> None:
+        self._goals = goals
         self._by_goal: dict[str, PlanBaseline] = {}
 
     async def get(self, goal_id: str) -> PlanBaseline | None:
+        await self._drop_if_goal_gone(goal_id)
         return self._by_goal.get(goal_id)
 
     async def add_if_absent(self, baseline: PlanBaseline) -> PlanBaseline:
+        await self._drop_if_goal_gone(baseline.goal_id)
         return self._by_goal.setdefault(baseline.goal_id, baseline)
+
+    async def _drop_if_goal_gone(self, goal_id: str) -> None:
+        if await self._goals.get(goal_id) is None:
+            self._by_goal.pop(goal_id, None)
 
     async def save(self, baseline: PlanBaseline) -> None:
         self._by_goal[baseline.goal_id] = baseline
