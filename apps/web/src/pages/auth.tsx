@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Sign-in, invite sign-up, email verification and password reset (F-AUTH-1, F-AUTH-2).
+// Sign-in, invite and public sign-up, email verification and password reset
+// (F-AUTH-1, F-AUTH-2, F-AUTH-7).
 
 import { useEffect, useId, useRef, useState, type SubmitEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 
-import { describeError } from "../api/client";
+import { signup } from "../api/account";
+import { ApiError, describeError } from "../api/client";
 import { auth } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorText, Loading } from "../components/ui";
 import { safeNextPath, tokenFromLocation } from "../lib/text";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 
 const MIN_PASSWORD_LENGTH = 12;
@@ -128,7 +131,97 @@ export function LoginPage() {
       <p className="muted">
         <Link to="/forgot-password">Forgot your password?</Link>
       </p>
-      <p className="muted">Flash-Cards is invite-only. Use the link in your invitation to create an account.</p>
+      <SignupHint />
+    </AuthFrame>
+  );
+}
+
+const INVITE_ONLY = "Flash-Cards is invite-only. Use the link in your invitation to create an account.";
+
+/** Whether this server takes public sign-ups; when unknown, it is treated as invite-only. */
+function useSignupOpen(): boolean | undefined {
+  const options = useResource(signup.options, "auth-options");
+  if (options.loading) {
+    return undefined;
+  }
+  return options.data?.invite_only === false;
+}
+
+function SignupHint() {
+  const open = useSignupOpen();
+  if (open === undefined) {
+    return null;
+  }
+  return open ? (
+    <p className="muted">
+      New here? <Link to="/signup">Create an account</Link>
+    </p>
+  ) : (
+    <p className="muted">{INVITE_ONLY}</p>
+  );
+}
+
+/** Public sign-up: the answer is the same for a new or a known address, and it never signs in. */
+function PublicSignup() {
+  const open = useSignupOpen();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [sent, setSent] = useState(false);
+  const submit = useSubmit();
+
+  if (open === undefined) {
+    return (
+      <AuthFrame title="Create your account">
+        <Loading />
+      </AuthFrame>
+    );
+  }
+  if (!open) {
+    return (
+      <AuthFrame title="Create your account">
+        <p>This page needs the invitation link you were sent. Open the link from your invitation email.</p>
+        <p>
+          <Link to="/login">Already have an account? Sign in</Link>
+        </p>
+      </AuthFrame>
+    );
+  }
+
+  const onSubmit = (event: SubmitEvent): void => {
+    event.preventDefault();
+    void submit.run(async () => {
+      try {
+        await signup.register(email, password);
+      } catch (failure) {
+        if (failure instanceof ApiError && failure.status === 404) {
+          throw new Error(INVITE_ONLY, { cause: failure });
+        }
+        throw failure;
+      }
+      setPassword("");
+      setSent(true);
+    });
+  };
+
+  return (
+    <AuthFrame title={sent ? "Check your email" : "Create your account"}>
+      {sent ? (
+        <p role="status">
+          If the address can be registered, a confirmation link is on its way. Follow it, then sign in.
+        </p>
+      ) : (
+        <form onSubmit={onSubmit} className="stack">
+          <EmailField value={email} onChange={setEmail} />
+          <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" />
+          <ErrorText message={submit.error} />
+          <button type="submit" className="button primary" disabled={submit.busy}>
+            {submit.busy ? "Creating…" : "Create account"}
+          </button>
+        </form>
+      )}
+      <p className="muted">
+        <Link to="/login">Already have an account? Sign in</Link>
+      </p>
     </AuthFrame>
   );
 }
@@ -142,14 +235,7 @@ export function SignupPage() {
   const submit = useSubmit();
 
   if (token === "") {
-    return (
-      <AuthFrame title="Create your account">
-        <p>This page needs the invitation link you were sent. Open the link from your invitation email.</p>
-        <p>
-          <Link to="/login">Already have an account? Sign in</Link>
-        </p>
-      </AuthFrame>
-    );
+    return <PublicSignup />;
   }
 
   const onSubmit = (event: SubmitEvent): void => {
