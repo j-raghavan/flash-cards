@@ -413,3 +413,9 @@ async def test_unusable_grading_reopens_the_exam_and_still_counts_the_call() -> 
     llm.queue({"grades": [{"question": 1, "score": 1.0}]})
     result = await service.grade(owner_id="alice", exam_id=exam.id, answers={first: "x"})
     assert result.overall_score == 0.5
+
+
+async def test_reopening_an_unknown_exam_does_nothing() -> None:
+    exams = InMemoryMockExamRepository()
+    await exams.reopen("missing")
+    assert await exams.get("missing") is None
