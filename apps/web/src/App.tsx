@@ -23,6 +23,7 @@ const ProgressPage = lazy(() => import("./progress/ProgressPage").then((m) => ({
 const MockExamPage = lazy(() => import("./aiStudy/MockExamPage").then((m) => ({ default: m.MockExamPage })));
 const AdminPage = lazy(() => import("./admin/AdminPage").then((m) => ({ default: m.AdminPage })));
 const AccountPage = lazy(() => import("./account/AccountPage").then((m) => ({ default: m.AccountPage })));
+const LegalPage = lazy(() => import("./legal/LegalPage").then((m) => ({ default: m.LegalPage })));
 const noteTypePages = () => import("./noteTypes/NoteTypesPage");
 const NoteTypesPage = lazy(() => noteTypePages().then((m) => ({ default: m.NoteTypesPage })));
 const NewNoteTypePage = lazy(() => noteTypePages().then((m) => ({ default: m.NewNoteTypePage })));
@@ -52,6 +53,17 @@ export function AppRoutes() {
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {(["privacy", "terms", "imprint"] as const).map((page) => (
+        <Route
+          key={page}
+          path={`/${page}`}
+          element={
+            <Lazy>
+              <LegalPage page={page} />
+            </Lazy>
+          }
+        />
+      ))}
       <Route element={<Layout />}>
         <Route index element={<DeckListPage />} />
         <Route path="/decks/:deckId" element={<DeckDetailPage />} />

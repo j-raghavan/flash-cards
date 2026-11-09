@@ -131,16 +131,19 @@ function insertMath(root: Node, parts: MathPart[]): void {
  * restyle or imitate the app. KaTeX output is then put into text positions
  * and keeps the inline styles it needs.
  */
-export function renderMarkdown(source: string): string {
+export function renderMarkdown(source: string, options: { math?: boolean } = {}): string {
   installHooks();
-  const { text, parts } = extractMath(source);
+  // Prose such as a legal page has no math, and "$5 or $10" must stay as written.
+  const { text, parts } = options.math === false ? { text: source, parts: [] } : extractMath(source);
   const fragment = DOMPurify.sanitize(marked.parse(text, { async: false }), {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ["style", "form", "input", "button", "textarea", "select"],
     FORBID_ATTR: ["style", "id", "srcset"],
     RETURN_DOM_FRAGMENT: true,
   });
-  insertMath(fragment, parts);
+  if (options.math !== false) {
+    insertMath(fragment, parts);
+  }
   const container = document.createElement("div");
   container.append(fragment);
   return container.innerHTML;

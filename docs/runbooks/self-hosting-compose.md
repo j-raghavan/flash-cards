@@ -91,6 +91,26 @@ curl -si https://flashcards.example.org/api/auth/signup \
 
 The response is `201` with a session cookie. From then on the admin endpoints (`/api/admin/invites`, `/api/admin/users`, `/api/admin/audit`) mint invites and manage accounts. The token is printed to the terminal, so treat the terminal scrollback and any captured output as sensitive until the invite has been redeemed.
 
+### Privacy policy, terms and imprint
+
+The web app shows `/privacy`, `/terms` and `/imprint` to everyone and links them from every page and from sign-up. Their text is the operator's to write: until it is provided, each page shows a template headed by a notice that the operator has not filled it in, with every part to complete marked *Operator: ...*. The templates are not legal advice.
+
+1. Write the three pages as Markdown files named exactly `privacy.md`, `terms.md` and `imprint.md` (UTF-8, at most 200 KB each), for example in `deploy/compose/legal/`. Start from the templates: `curl -s http://127.0.0.1:8000/api/legal/privacy | jq -r .markdown > legal/privacy.md`, then replace the notice and every *Operator* part.
+2. Mount the directory into the `api` service read-only and point the API at it. In a `compose.override.yaml` next to `compose.yaml`:
+
+   ```yaml
+   services:
+     api:
+       volumes:
+         - ./legal:/etc/flashcards/legal:ro
+   ```
+
+   and in `.env`: `FLASHCARDS_LEGAL_DIR=/etc/flashcards/legal`.
+3. Restart the API (`docker compose up -d api`). The pages are read once at startup, so every edit needs a restart.
+4. Check: `curl -s http://127.0.0.1:8000/api/legal/imprint | jq .is_template` prints `false` for a page you provided.
+
+A missing file falls back to its template, with a warning in the API log. A file that is there but unusable (too large, not UTF-8, empty) or a `FLASHCARDS_LEGAL_DIR` that is not a directory stops the API at startup with the reason in its log, so a mistake shows up on deploy. The Markdown is rendered through the same sanitizer as card text: plain formatting and links work, while scripts, forms, inline styles and images from other sites are removed.
+
 ### YouTube transcripts
 
 Generating a deck from a YouTube link is off by default: the link answers that no transcript is available, and the user pastes the transcript instead. With `FLASHCARDS_YOUTUBE_TRANSCRIPTS_ENABLED=true` the API fetches the video's captions from youtube.com itself (the `api` container reaches the internet through the `frontend` network). Only YouTube's own hosts are contacted, each request is time-limited and size-capped, and at most two fetches run at once (ADR 0020). `FLASHCARDS_YOUTUBE_TRANSCRIPT_LANGUAGES` (default `en`, for example `de,en`) sets the preferred caption languages.

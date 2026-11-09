@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # Connect and read timeout for each request to YouTube; one fetch as a whole is
     # cut off after three times this.
     youtube_transcript_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    # Legal pages (F-LEGAL-1): a directory holding privacy.md, terms.md and
+    # imprint.md, served at GET /legal/{page}. A missing file falls back to a
+    # template that says the operator has not filled the page in yet.
+    legal_dir: str | None = None
     # Where the web client lives; links in emails point here.
     public_base_url: str = "http://localhost:5173"
     # Outgoing mail. Without smtp_host, mail is not sent: in development it is

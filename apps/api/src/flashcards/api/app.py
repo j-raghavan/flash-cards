@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from flashcards import __version__
+from flashcards.adapters.legal_pages import load_legal_pages
 from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.transcripts import NullTranscriptProvider
 from flashcards.api.body_limit import BodySizeLimitMiddleware
@@ -326,6 +327,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     metering = _metering_from_settings(settings, ai_enabled=ai_enabled)
     mailer = _mailer_from_settings(settings)
     transcripts = _transcripts_from_settings(settings)
+    legal_pages = load_legal_pages(settings.legal_dir)  # raises on an unusable page
     _warn_on_local_links(settings)
     if settings.database_url:
         engine, provider, job_queue = sql_provider(
@@ -387,6 +389,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.state.services_provider = provider
     app.state.event_stream_slots = StreamSlots()
     app.state.ai_disclosure = _disclosure_from_settings(settings, ai_enabled=ai_enabled)
+    app.state.legal_pages = legal_pages
     if not settings.invite_only:
         logger.warning("INVITE_ONLY is off: anyone can create an account at /auth/register.")
     app.state.bootstrap_invite_token = _maybe_bootstrap_invite(settings, container)
