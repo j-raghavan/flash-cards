@@ -33,6 +33,8 @@ FastAPI, SQLAlchemy 2, PostgreSQL (including the job queue), React, TypeScript, 
 - [Product requirements](docs/PRD.md)
 - [Engineering principles](docs/ENGINEERING.md) (Reuse first, KISS, DRY, SOLID, DDD, 97% coverage)
 - [Architecture decisions](docs/adr/)
+- [Self-hosting with Docker Compose](docs/runbooks/self-hosting-compose.md)
+- [Threat model](docs/security/threat-model.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
