@@ -24,9 +24,16 @@ describe("apiBaseUrl", () => {
     expect(apiUrl("/decks")).toBe("/api/decks");
   });
 
-  it("uses the configured base without a trailing slash", () => {
-    vi.stubEnv("VITE_API_BASE_URL", "https://api.example.com/");
-    expect(apiUrl("/decks")).toBe("https://api.example.com/decks");
+  it("uses a configured same-origin path without a trailing slash", () => {
+    vi.stubEnv("VITE_API_BASE_URL", "/flashcards/api/");
+    expect(apiUrl("/decks")).toBe("/flashcards/api/decks");
+  });
+
+  it("never calls another origin", () => {
+    for (const base of ["https://api.example.com", "//api.example.com", "/\\api.example.com", "api"]) {
+      vi.stubEnv("VITE_API_BASE_URL", base);
+      expect(apiBaseUrl()).toBe("/api");
+    }
   });
 });
 
@@ -55,7 +62,7 @@ describe("request", () => {
     await expect(request("/decks", { method: "POST", json: { name: "A" } })).resolves.toEqual({ id: "d1" });
     expect(calls[0]).toEqual({ method: "POST", path: "/decks", body: { name: "A" } });
     const init = vi.mocked(fetch).mock.calls[0]?.[1];
-    expect(init?.credentials).toBe("include");
+    expect(init?.credentials).toBe("same-origin");
     expect(init?.headers).toMatchObject({ "Content-Type": "application/json" });
   });
 
@@ -100,6 +107,15 @@ describe("request", () => {
     const error = await request("/decks/x").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 404, message: "Not found." });
+  });
+
+  it("does not treat a wrong password as a lost session, and marks its requests", async () => {
+    mockApi({ "POST /auth/login": { status: 401, body: { detail: "Invalid email or password." } } });
+    const handler = vi.fn();
+    onUnauthorized(handler);
+    await expect(request("/auth/login", { method: "POST", json: {} })).rejects.toThrow("Invalid email or password.");
+    expect(handler).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Requested-With": "fetch" });
   });
 
   it("tells the app when the session is gone", async () => {

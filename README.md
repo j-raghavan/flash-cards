@@ -33,7 +33,15 @@ FastAPI, SQLAlchemy 2, PostgreSQL (including the job queue), React, TypeScript, 
 
 ## Web client
 
-The client lives in `apps/web` (React, TypeScript, Vite). It calls the API under `/api` on its own origin unless `VITE_API_BASE_URL` points elsewhere; in development, Vite proxies `/api` to the API at `http://localhost:8000` (override with `FLASHCARDS_API_PROXY_TARGET`).
+The client lives in `apps/web` (React, TypeScript, Vite). It calls the API only on its own origin, under `/api` unless `VITE_API_BASE_URL` names another path; in development, Vite proxies `/api` to the API at `http://localhost:8000` (override with `FLASHCARDS_API_PROXY_TARGET`). In production, serve the built app and the API from one origin, with the API under `/api`.
+
+The build adds a strict Content-Security-Policy as a `<meta>` tag. A reverse proxy in front of it should also send the same policy as a header, since browsers ignore `frame-ancestors` in a `<meta>` tag:
+
+```
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+`style-src` allows inline styles because KaTeX positions math with style attributes; card text itself is sanitized and may not carry styles. Scripts are never inline.
 
 ```sh
 cd apps/web

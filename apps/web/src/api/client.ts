@@ -2,11 +2,16 @@
 // A small fetch wrapper: JSON in and out, the session cookie sent on every call,
 // and the API's error bodies turned into readable messages.
 
-/** Where the API lives. Same origin under /api unless VITE_API_BASE_URL says otherwise. */
+/**
+ * Where the API lives: a path on this origin, "/api" unless VITE_API_BASE_URL
+ * names another path. The API is only ever called same-origin, because the
+ * session cookie is SameSite=Lax and the server checks the Origin of every
+ * state-changing request; an absolute or protocol-relative URL is ignored.
+ */
 export function apiBaseUrl(): string {
   const configured: unknown = import.meta.env.VITE_API_BASE_URL;
-  const base = typeof configured === "string" && configured !== "" ? configured : "/api";
-  return base.replace(/\/+$/, "");
+  const samePath = typeof configured === "string" && /^\/(?![/\\])/.test(configured);
+  return (samePath ? configured : "/api").replace(/\/+$/, "");
 }
 
 export function apiUrl(path: string): string {
@@ -70,7 +75,9 @@ export interface RequestOptions {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" };
+  // X-Requested-With marks calls as coming from this app's scripts, which a
+  // plain cross-site form post cannot set, so the API can require it (CSRF).
+  const headers: Record<string, string> = { Accept: "application/json", "X-Requested-With": "fetch" };
   let body: BodyInit | undefined;
   if (options.form !== undefined) {
     body = options.form;
@@ -81,7 +88,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const init: RequestInit = {
     method: options.method ?? "GET",
     headers,
-    credentials: "include",
+    credentials: "same-origin",
   };
   if (body !== undefined) {
     init.body = body;
@@ -111,7 +118,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
   if (!response.ok) {
-    if (response.status === 401) {
+    // A wrong password is a 401 too, but it says nothing about a session.
+    if (response.status === 401 && path !== "/auth/login") {
       unauthorizedHandler?.();
     }
     throw new ApiError(response.status, errorMessage(response.status, parsed));

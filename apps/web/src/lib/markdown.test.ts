@@ -63,6 +63,46 @@ describe("renderMarkdown", () => {
     expect(root.querySelector("img, [onerror], [href]")).toBeNull();
   });
 
+  it("keeps card text from restyling or imitating the app", () => {
+    const root = dom(
+      renderMarkdown(
+        '<div style="position:fixed;inset:0" class="banner" id="main">x</div><mark class="cloze">c</mark><mark class="cloze evil">d</mark>',
+      ),
+    );
+    const div = root.querySelector("div");
+    expect(div?.getAttribute("style")).toBeNull();
+    expect(div?.getAttribute("class")).toBeNull();
+    expect(div?.getAttribute("id")).toBeNull();
+    const marks = root.querySelectorAll("mark");
+    expect(marks[0]?.getAttribute("class")).toBe("cloze");
+    expect(marks[1]?.getAttribute("class")).toBeNull();
+  });
+
+  it("keeps KaTeX styling", () => {
+    expect(dom(renderMarkdown("$x^2$")).querySelector(".katex [style]")).not.toBeNull();
+  });
+
+  it("loads images only from this app or inline data", () => {
+    const root = dom(
+      renderMarkdown(
+        '![a](/api/media/1) ![b](https://tracker.example/p.gif) <img src="data:image/png;base64,AA=="> <img src="http://[bad">',
+      ),
+    );
+    const sources = [...root.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+    expect(sources).toEqual(["/api/media/1", null, "data:image/png;base64,AA==", null]);
+  });
+
+  it("never puts math markup inside an attribute", () => {
+    const root = dom(renderMarkdown("![$x$](/api/media/1) a < b $y$ & c"));
+    expect(root.querySelector("img")?.getAttribute("alt")).toBe("MATHPLACEHOLDER0END");
+    expect(root.querySelectorAll(".katex")).toHaveLength(1);
+    expect(root.textContent).toContain("a < b");
+  });
+
+  it("leaves math in tilde fences alone", () => {
+    expect(renderMarkdown("~~~\n$x$\n~~~")).not.toContain("katex");
+  });
+
   it("opens links in a new tab without an opener", () => {
     const link = dom(renderMarkdown("[site](https://example.com)")).querySelector("a");
     expect(link?.getAttribute("target")).toBe("_blank");

@@ -1,8 +1,47 @@
 /// <reference types="vitest/config" />
 // SPDX-License-Identifier: AGPL-3.0-only
 import react from "@vitejs/plugin-react";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+// The Content-Security-Policy of the built app. Scripts, connections, fonts and
+// the service worker come only from this origin; no inline script is allowed.
+// style-src needs 'unsafe-inline' because KaTeX positions math with inline
+// style attributes (card HTML itself may carry no style: see src/lib/markdown.ts).
+// frame-ancestors is ignored in a <meta> tag, so the reverse proxy must also
+// send this policy as a header (see README).
+export const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+/** Adds the policy to the built index.html only: the dev server needs inline scripts for hot reload. */
+function contentSecurityPolicy(): Plugin {
+  return {
+    name: "flashcards-csp",
+    apply: "build",
+    transformIndexHtml: () => [
+      {
+        tag: "meta",
+        attrs: {
+          "http-equiv": "Content-Security-Policy",
+          content: CONTENT_SECURITY_POLICY.replace("; frame-ancestors 'none'", ""),
+        },
+        injectTo: "head-prepend",
+      },
+    ],
+  };
+}
 
 // The API is reached under /api by default (same origin). In development the
 // proxy strips that prefix and forwards to the FastAPI server, whose routes
@@ -14,6 +53,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
+      contentSecurityPolicy(),
       VitePWA({
         registerType: "autoUpdate",
         injectRegister: false,
@@ -63,6 +103,11 @@ export default defineConfig(({ mode }) => {
         },
       }),
     ],
+    build: {
+      // Emit every asset as a file, never a data: URI, so KaTeX's fonts load
+      // under font-src 'self' and are precached by the service worker.
+      assetsInlineLimit: 0,
+    },
     server: {
       port: 5173,
       proxy: {

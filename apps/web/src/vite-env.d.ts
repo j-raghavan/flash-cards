@@ -2,7 +2,7 @@
 /// <reference types="vite-plugin-pwa/client" />
 
 interface ImportMetaEnv {
-  /** Base URL of the API. Defaults to "/api" on the same origin. */
+  /** Path of the API on this origin. Defaults to "/api"; other origins are refused. */
   readonly VITE_API_BASE_URL?: string;
 }
 

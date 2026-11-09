@@ -22,7 +22,13 @@ function parseJob(event: MessageEvent<unknown>): Job | null {
 }
 
 /** While `active`, push every job snapshot to `onJob`; `onClosed` if the stream ends without `done`. */
-export function useJobEvents(jobId: string, active: boolean, onJob: (job: Job) => void, onClosed: () => void): void {
+export function useJobEvents(
+  jobId: string,
+  attempt: number,
+  active: boolean,
+  onJob: (job: Job) => void,
+  onClosed: () => void,
+): void {
   const handlers = useRef({ onJob, onClosed });
   useEffect(() => {
     handlers.current = { onJob, onClosed };
@@ -32,7 +38,7 @@ export function useJobEvents(jobId: string, active: boolean, onJob: (job: Job) =
     if (!active || typeof EventSource === "undefined") {
       return;
     }
-    const source = new EventSource(apiUrl(ai.eventsPath(jobId)), { withCredentials: true });
+    const source = new EventSource(apiUrl(ai.eventsPath(jobId)));
     const onProgress = (event: MessageEvent<unknown>): void => {
       const job = parseJob(event);
       if (job !== null) {
@@ -55,5 +61,5 @@ export function useJobEvents(jobId: string, active: boolean, onJob: (job: Job) =
     return () => {
       source.close();
     };
-  }, [jobId, active]);
+  }, [jobId, attempt, active]);
 }
