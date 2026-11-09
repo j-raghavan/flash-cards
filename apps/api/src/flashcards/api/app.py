@@ -28,6 +28,7 @@ from flashcards.api.routers import (
     decks,
     goals,
     imports,
+    legal,
     media,
     mock_exams,
     note_types,
@@ -39,6 +40,7 @@ from flashcards.domain.ai import DraftNotFound, InvalidModelOutput, LlmError
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
 from flashcards.domain.chat import NoChatSources
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
+from flashcards.domain.disclosure import AiDisclosure, ai_disclosure
 from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import IllegalJobTransition, JobNotFound
@@ -346,6 +348,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.state.container = container
     app.state.services_provider = provider
     app.state.event_stream_slots = StreamSlots()
+    app.state.ai_disclosure = _disclosure_from_settings(settings, ai_enabled=ai_enabled)
     if not settings.invite_only:
         logger.warning("INVITE_ONLY is off: anyone can create an account at /auth/register.")
     app.state.bootstrap_invite_token = _maybe_bootstrap_invite(settings, container)
@@ -365,6 +368,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(chat.router)
     app.include_router(sharing.router)
     app.include_router(note_types.router)
+    app.include_router(legal.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
@@ -418,6 +422,14 @@ def _metering_from_settings(settings: Settings, *, ai_enabled: bool) -> AiMeteri
             default_monthly_pages=settings.ai_default_monthly_pages,
             monthly_spend_cap_micro_usd=_to_micro_usd(settings.ai_monthly_spend_cap_usd),
         ),
+    )
+
+
+def _disclosure_from_settings(settings: Settings, *, ai_enabled: bool) -> AiDisclosure:
+    return ai_disclosure(
+        provider_key=settings.llm_provider if ai_enabled else None,
+        name=settings.ai_provider_name,
+        terms_url=settings.ai_provider_terms_url,
     )
 
 

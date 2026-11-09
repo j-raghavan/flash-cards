@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Request and response models for AI quotas and usage (F-ADMIN-3, F-ADMIN-4,
-F-AI-11).
+"""Request and response models for AI quotas, usage and the data-use disclosure
+(F-ADMIN-3, F-ADMIN-4, F-AI-11, F-LEGAL-2).
 
 Costs travel as integer micro-USD (millionths of a dollar), so sums are exact.
 """
@@ -12,6 +12,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field, StringConstraints
 
 from flashcards.application.quota_service import UsageReport, UserQuota
+from flashcards.domain.disclosure import AiDisclosure
 from flashcards.domain.quotas import MAX_MONTHLY_PAGES, InstanceQuotas
 from flashcards.domain.usage import ProviderUsage, UserUsage
 
@@ -127,4 +128,30 @@ class UsageReportOut(BaseModel):
             spend_cap_micro_usd=report.spend_cap_micro_usd,
             by_user=[UserUsageOut.from_usage(u) for u in report.by_user],
             by_provider=[ProviderUsageOut.from_usage(p) for p in report.by_provider],
+        )
+
+
+class AiProviderOut(BaseModel):
+    name: str
+    terms_url: str | None
+
+
+class AiDisclosureOut(BaseModel):
+    ai_enabled: bool
+    trains_on_user_content: bool
+    statements: list[str]
+    provider: AiProviderOut | None
+
+    @classmethod
+    def from_disclosure(cls, disclosure: AiDisclosure) -> AiDisclosureOut:
+        provider = disclosure.provider
+        return cls(
+            ai_enabled=disclosure.ai_enabled,
+            trains_on_user_content=disclosure.trains_on_user_content,
+            statements=list(disclosure.statements),
+            provider=(
+                AiProviderOut(name=provider.name, terms_url=provider.terms_url)
+                if provider is not None
+                else None
+            ),
         )

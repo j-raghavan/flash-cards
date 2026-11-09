@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # Initial quotas, used until an admin sets them at PUT /admin/quotas.
     ai_default_monthly_pages: int = Field(default=DEFAULT_MONTHLY_PAGES, ge=0, le=MAX_MONTHLY_PAGES)
     ai_monthly_spend_cap_usd: float | None = Field(default=None, ge=0)
+    # The AI data-use disclosure (F-LEGAL-2): the provider's display name and terms
+    # link. Known providers have defaults; a self-hosted endpoint should set both.
+    ai_provider_name: str | None = None
+    ai_provider_terms_url: str | None = None
     # Where the web client lives; links in emails point here.
     public_base_url: str = "http://localhost:5173"
     # Outgoing mail. Without smtp_host, mail is not sent: in development it is
