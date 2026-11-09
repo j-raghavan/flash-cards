@@ -166,6 +166,44 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
   );
 }
 
+/** A read-only value, such as a link shown once, with a button that copies it. */
+export function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
+  return (
+    <>
+      <div className="row">
+        <input
+          className="grow"
+          readOnly
+          aria-label={label}
+          value={value}
+          onFocus={(event) => {
+            event.target.select();
+          }}
+        />
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            navigator.clipboard.writeText(value).then(
+              () => {
+                setCopied("copied");
+              },
+              () => {
+                setCopied("failed");
+              },
+            );
+          }}
+        >
+          Copy
+        </button>
+      </div>
+      {copied === "copied" ? <p className="muted">Copied.</p> : null}
+      {copied === "failed" ? <p className="muted">Could not copy; select the text and copy it by hand.</p> : null}
+    </>
+  );
+}
+
 /** Deck proficiency (0 to 100) as a ring (F-PROG-2). */
 export function ProficiencyRing({
   value,

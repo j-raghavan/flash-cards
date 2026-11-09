@@ -71,6 +71,7 @@ export function Layout() {
           <NavLink to="/cards">Browse</NavLink>
           <NavLink to="/goals">Goals</NavLink>
           <NavLink to="/progress">Progress</NavLink>
+          {user.role === "admin" ? <NavLink to="/admin">Admin</NavLink> : null}
         </nav>
         <button
           type="button"

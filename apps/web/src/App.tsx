@@ -20,6 +20,7 @@ import { StudyPage } from "./pages/StudyPage";
 
 // Screens with charts or editors load on first visit, keeping the start small.
 const ProgressPage = lazy(() => import("./progress/ProgressPage").then((m) => ({ default: m.ProgressPage })));
+const AdminPage = lazy(() => import("./admin/AdminPage").then((m) => ({ default: m.AdminPage })));
 
 function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<Loading />}>{children}</Suspense>;
@@ -64,6 +65,14 @@ export function AppRoutes() {
           element={
             <Lazy>
               <ProgressPage />
+            </Lazy>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <Lazy>
+              <AdminPage />
             </Lazy>
           }
         />

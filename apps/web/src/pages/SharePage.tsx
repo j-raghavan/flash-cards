@@ -12,7 +12,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { describeError } from "../api/client";
 import { decks, shares } from "../api/endpoints";
 import type { CreatedShareLink, ShareLink, SharedNote } from "../api/types";
-import { CardContent, ConfirmButton, ErrorText, Loading } from "../components/ui";
+import { CardContent, ConfirmButton, CopyField, ErrorText, Loading } from "../components/ui";
 import { cardSides } from "../lib/cardSides";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
@@ -27,43 +27,13 @@ function formatDate(iso: string): string {
 }
 
 function NewLink({ link }: { link: CreatedShareLink }) {
-  const url = shareUrl(link.token);
-  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   return (
     <div className="panel" role="status">
       <p>
         <strong>Copy this link now.</strong> It is shown only once; anyone signed in who has it can{" "}
         {link.allow_clone ? "preview and copy" : "preview"} the deck.
       </p>
-      <div className="row">
-        <input
-          className="grow"
-          readOnly
-          aria-label="Share link"
-          value={url}
-          onFocus={(event) => {
-            event.target.select();
-          }}
-        />
-        <button
-          type="button"
-          className="button"
-          onClick={() => {
-            navigator.clipboard.writeText(url).then(
-              () => {
-                setCopied("copied");
-              },
-              () => {
-                setCopied("failed");
-              },
-            );
-          }}
-        >
-          Copy
-        </button>
-      </div>
-      {copied === "copied" ? <p className="muted">Copied.</p> : null}
-      {copied === "failed" ? <p className="muted">Could not copy; select the link and copy it by hand.</p> : null}
+      <CopyField label="Share link" value={shareUrl(link.token)} />
     </div>
   );
 }
