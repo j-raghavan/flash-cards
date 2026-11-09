@@ -11,7 +11,9 @@ import pytest
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryQuotaRepository,
     InMemoryShareLinkRepository,
     InMemoryUserRepository,
@@ -300,7 +302,8 @@ async def _rig(
     await users.add(_user(BOB))
     service = SharingService(
         decks, notes, note_repo, card_repo, InMemoryShareLinkRepository(), users,
-        InMemoryQuotaRepository(limit=clone_allowance), clock,
+        InMemoryQuotaRepository(limit=clone_allowance), clock, InMemoryNoteTypeRepository(),
+        InMemoryMediaRepository(),
     )
     return service, decks, note_repo, users
 

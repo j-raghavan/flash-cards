@@ -29,6 +29,7 @@ from flashcards.api.routers import (
     imports,
     media,
     mock_exams,
+    note_types,
     review,
     sharing,
 )
@@ -42,6 +43,12 @@ from flashcards.domain.invites import Role
 from flashcards.domain.jobs import IllegalJobTransition, JobNotFound
 from flashcards.domain.media import MediaNotFound, MediaTooLarge, UnsupportedMedia
 from flashcards.domain.mock_exam import ExamClosed, ExamLocked, ExamNotFound
+from flashcards.domain.note_types import (
+    InvalidNoteType,
+    NoteTypeInUse,
+    NoteTypeNotFound,
+    TooManyNoteTypes,
+)
 from flashcards.domain.notes import (
     CardNotFound,
     InvalidBury,
@@ -88,6 +95,16 @@ def _register_error_handlers(app: FastAPI) -> None:
 
     async def invalid_note(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    async def note_type_in_use(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=409, content={"detail": "Notes still use this note type."}
+        )
+
+    async def too_many_note_types(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=409, content={"detail": "The note type limit has been reached."}
+        )
 
     async def invalid_deck_name(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": "Invalid deck name."})
@@ -213,6 +230,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         ExamNotFound,
         ShareNotFound,
         UserNotFound,
+        NoteTypeNotFound,
     )
     for not_found_error in not_found_errors:
         app.add_exception_handler(not_found_error, not_found)
@@ -220,6 +238,9 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidDeckName, invalid_deck_name)
     app.add_exception_handler(RequestValidationError, invalid_request)
     app.add_exception_handler(InvalidNote, invalid_note)
+    app.add_exception_handler(InvalidNoteType, invalid_note)
+    app.add_exception_handler(NoteTypeInUse, note_type_in_use)
+    app.add_exception_handler(TooManyNoteTypes, too_many_note_types)
     app.add_exception_handler(InvalidTags, invalid_note)
     app.add_exception_handler(InvalidFlag, invalid_note)
     app.add_exception_handler(InvalidBury, invalid_note)
@@ -316,6 +337,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(mock_exams.router)
     app.include_router(chat.router)
     app.include_router(sharing.router)
+    app.include_router(note_types.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

@@ -4,7 +4,9 @@
 Link management is owner-scoped. Preview and clone are open to any signed-in
 account holding an active token; neither reveals who owns the deck. A clone
 re-creates decks and notes for the caller, so cards are derived again and no
-schedule or review history is copied. Both are bounded: a preview is a small
+schedule or review history is copied. Custom note types and image occlusion
+images the notes use are copied too, so the clone owns everything it needs
+(ADR 0013). Both are bounded: a preview is a small
 sample, and a clone is checked against its caps and the caller's daily allowance
 before anything is written.
 """
@@ -13,17 +15,21 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
 from flashcards.domain.decks import Deck, DeckNotFound
 from flashcards.domain.invites import hash_token
+from flashcards.domain.media import MediaAsset
+from flashcards.domain.note_types import MAX_NOTE_TYPES_PER_OWNER, CustomNoteType, TooManyNoteTypes
 from flashcards.domain.notes import Note, card_ordinals
 from flashcards.domain.ports import (
     CardRepository,
     Clock,
+    MediaRepository,
     NoteRepository,
+    NoteTypeRepository,
     QuotaRepository,
     ShareLinkRepository,
     UserRepository,
@@ -32,6 +38,7 @@ from flashcards.domain.quotas import clone_period
 from flashcards.domain.sharing import (
     MAX_CLONE_CARDS,
     MAX_CLONE_DECKS,
+    MAX_CLONE_MEDIA_BYTES,
     MAX_CLONE_NOTES,
     MAX_PREVIEW_DECKS,
     MAX_PREVIEW_NOTES,
@@ -73,7 +80,11 @@ class SharingService:
         users: UserRepository,
         clone_quota: QuotaRepository,
         clock: Clock,
+        note_types: NoteTypeRepository,
+        media: MediaRepository,
     ) -> None:
+        self._note_types = note_types
+        self._media = media
         self._decks = decks
         self._notes = notes
         self._note_repo = note_repo
@@ -155,18 +166,43 @@ class SharingService:
         notes_by_deck: dict[str, list[Note]] = {
             node.deck.id: await self._note_repo.list_for_deck(node.deck.id) for node in tree
         }
+        all_notes = [note for notes in notes_by_deck.values() for note in notes]
+        source_types = {t.id: t for t in await self._note_types.list_for_owner(link.owner_id)}
+        used_ids = dict.fromkeys(n.note_type_id for n in all_notes if n.note_type_id is not None)
+        used_types = [source_types[type_id] for type_id in used_ids]
         # Validate every note and count the cards it will make before writing, so a
         # clone either happens in full or not at all, in every storage mode.
         card_total = sum(
-            len(card_ordinals(note.note_type, note.fields))
-            for notes in notes_by_deck.values()
-            for note in notes
+            len(
+                card_ordinals(
+                    note.note_type,
+                    note.fields,
+                    custom=source_types[note.note_type_id] if note.note_type_id else None,
+                    occlusion=note.occlusion,
+                )
+            )
+            for note in all_notes
         )
         if card_total > MAX_CLONE_CARDS:
             raise CloneTooLarge(link.id)
+        images = await self._images(link, all_notes)
+        owned_types = await self._note_types.count_for_owner(owner_id)
+        if used_types and owned_types + len(used_types) > MAX_NOTE_TYPES_PER_OWNER:
+            raise TooManyNoteTypes(owner_id)
         period = clone_period(self._clock.now())
         if not await self._clone_quota.try_reserve_pages(owner_id, card_total, period):
             raise CloneLimitReached(owner_id)
+        now = self._clock.now()
+        type_copies: dict[str, CustomNoteType] = {}
+        for source_type in used_types:
+            copy = replace(source_type, id=str(uuid.uuid4()), owner_id=owner_id, created_at=now)
+            await self._note_types.add(copy)
+            type_copies[source_type.id] = copy
+        image_copies: dict[str, str] = {}
+        for asset in images:
+            copied = replace(asset, id=str(uuid.uuid4()), owner_id=owner_id, created_at=now)
+            await self._media.add(copied)
+            image_copies[asset.id] = copied.id
         # Parents come before children in the tree, so each new parent exists first.
         new_ids: dict[str, str] = {}
         for node in tree:
@@ -177,14 +213,35 @@ class SharingService:
             )
             new_ids[source.id] = created.id
             for note in notes_by_deck[source.id]:
+                occlusion = note.occlusion
+                if occlusion is not None:
+                    occlusion = replace(occlusion, image_id=image_copies[occlusion.image_id])
                 await self._notes.create_note(
                     owner_id=owner_id,
                     deck_id=created.id,
                     note_type=note.note_type,
                     fields=dict(note.fields),
                     tags=note.tags,
+                    custom=type_copies[note.note_type_id] if note.note_type_id else None,
+                    occlusion=occlusion,
                 )
         return await self._decks.get(owner_id=owner_id, deck_id=new_ids[link.deck_id])
+
+    async def _images(self, link: ShareLink, notes: list[Note]) -> list[MediaAsset]:
+        """The distinct occlusion images the clone copies, within the byte cap."""
+        image_ids = dict.fromkeys(n.occlusion.image_id for n in notes if n.occlusion is not None)
+        images: list[MediaAsset] = []
+        total = 0
+        for image_id in image_ids:
+            asset = await self._media.get(image_id)
+            # Checked when the note was saved, and media outlives the owner's notes.
+            if asset is None or asset.owner_id != link.owner_id:  # pragma: no cover
+                raise ShareNotFound(link.id)
+            total += len(asset.data)
+            if total > MAX_CLONE_MEDIA_BYTES:
+                raise CloneTooLarge(link.id)
+            images.append(asset)
+        return images
 
     async def _owned(self, owner_id: str, link_id: str) -> ShareLink:
         link = await self._links.get(link_id)

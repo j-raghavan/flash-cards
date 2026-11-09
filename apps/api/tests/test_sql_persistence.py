@@ -9,10 +9,12 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from flashcards.adapters.apkg import ApkgReader
@@ -40,6 +42,7 @@ from flashcards.adapters.sql import (
     SqlMediaRepository,
     SqlMockExamRepository,
     SqlNoteRepository,
+    SqlNoteTypeRepository,
     SqlObjectStore,
     SqlPassageRepository,
     SqlQuotaRepository,
@@ -57,6 +60,7 @@ from flashcards.application.invite_service import InviteService
 from flashcards.config import Settings
 from flashcards.domain.decks import Deck
 from flashcards.domain.invites import InviteStatus, Role
+from flashcards.domain.note_types import CardTemplate, CustomNoteType
 from flashcards.domain.ports import PasswordHasher
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
@@ -73,6 +77,7 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         sessions=SqlSessionRepository(session),
         decks=SqlDeckRepository(session),
         notes=SqlNoteRepository(session),
+        note_types=SqlNoteTypeRepository(session),
         cards=SqlCardRepository(session),
         schedules=SqlScheduleRepository(session),
         review_logs=SqlReviewLogRepository(session),
@@ -581,3 +586,201 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
         assert await SqlNoteRepository(s).get("n1") is None
         assert await SqlCardRepository(s).get("c1") is None
         assert await SqlScheduleRepository(s).get("c1") is None
+
+
+# --- Custom note types and image occlusion on Postgres (ADR 0013) ---
+
+
+def _vocab_type(type_id: str = "t1", owner: str = "alice") -> CustomNoteType:
+    return CustomNoteType(
+        id=type_id,
+        owner_id=owner,
+        name="Vocab",
+        fields=("Word", "Meaning"),
+        templates=(
+            CardTemplate(ordinal=0, name="Forward", front="{{Word}}", back="{{Meaning}}"),
+            CardTemplate(ordinal=2, name="Reverse", front="{{Meaning}}", back="{{Word}}"),
+        ),
+        created_at=_now(),
+    )
+
+
+async def test_note_type_sql_repository(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        repo = SqlNoteTypeRepository(s)
+        await repo.add(_vocab_type())
+        await repo.add(_vocab_type("t2"))
+        await repo.add(_vocab_type("t3", owner="bob"))
+    async with sm() as s, s.begin():
+        repo = SqlNoteTypeRepository(s)
+        fetched = await repo.get("t1")
+        assert fetched is not None
+        expected = _vocab_type()
+        assert replace(fetched, created_at=expected.created_at) == expected
+        assert await repo.get("missing") is None
+        assert await repo.lock("missing") is None
+        locked = await repo.lock("t1")
+        assert locked is not None and locked.templates[1].ordinal == 2
+        assert [t.id for t in await repo.list_for_owner("alice")] == ["t1", "t2"]
+        assert await repo.count_for_owner("alice") == 2
+        await repo.update(replace(locked, name="Words", fields=("Word",)))
+        await repo.update(_vocab_type("never-added"))  # a missing type is left alone
+    async with sm() as s, s.begin():
+        repo = SqlNoteTypeRepository(s)
+        renamed = await repo.lock("t1")
+        assert renamed is not None and renamed.name == "Words" and renamed.fields == ("Word",)
+        assert await repo.get("never-added") is None
+        await repo.delete("t2")
+        assert await repo.get("t2") is None
+        await repo.delete_for_owner("alice")
+    async with sm() as s:
+        repo = SqlNoteTypeRepository(s)
+        assert await repo.list_for_owner("alice") == []
+        assert [t.id for t in await repo.list_for_owner("bob")] == ["t3"]
+
+
+async def test_notes_keep_their_type_and_masks_on_postgres(engine: AsyncEngine) -> None:
+    from flashcards.domain.notes import Mask, Note, NoteType, Occlusion
+
+    sm = create_sessionmaker(engine)
+    custom = Note(
+        id="n1", owner_id="alice", deck_id="d1", note_type=NoteType.CUSTOM,
+        fields=(("Word", "chat"), ("Meaning", "cat")), created_at=_now(), note_type_id="t1",
+    )
+    occluded = Note(
+        id="n2", owner_id="alice", deck_id="d1", note_type=NoteType.IMAGE_OCCLUSION,
+        fields=(("header", "Heart"),), created_at=_now(),
+        occlusion=Occlusion(image_id="img", masks=(Mask(1, 0.1, 0.2, 0.3, 0.4),)),
+    )
+    async with sm() as s, s.begin():
+        await SqlDeckRepository(s).add(_mk_deck())
+        await SqlNoteTypeRepository(s).add(_vocab_type())
+        await SqlNoteRepository(s).add(custom)
+        await SqlNoteRepository(s).add(occluded)
+    async with sm() as s:
+        notes = SqlNoteRepository(s)
+        fetched_custom, fetched_occluded = await notes.get("n1"), await notes.get("n2")
+        assert fetched_custom is not None and fetched_occluded is not None
+        assert fetched_custom.fields == custom.fields  # field order survives the JSON column
+        assert fetched_custom.note_type_id == "t1" and fetched_custom.occlusion is None
+        assert fetched_occluded.occlusion == occluded.occlusion
+        assert fetched_occluded.note_type_id is None
+        assert [n.id for n in await notes.list_for_note_type("t1")] == ["n1"]
+        assert await notes.count_for_note_type("t1") == 1
+        assert await notes.count_for_note_type("t2") == 0
+    # A type in use cannot be deleted underneath its notes.
+    with pytest.raises(IntegrityError):
+        async with sm() as s, s.begin():
+            await SqlNoteTypeRepository(s).delete("t1")
+
+
+def test_note_types_and_occlusion_over_http_on_postgres(pg_url: str) -> None:
+    async def seed() -> list[str]:
+        eng = create_engine(pg_url)
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+        sm = create_sessionmaker(eng)
+        tokens: list[str] = []
+        async with sm() as s, s.begin():
+            for _ in range(2):
+                created = await InviteService(SqlInviteRepository(s), SystemClock()).create(
+                    created_by="seed", role=Role.MEMBER
+                )
+                tokens.append(created.raw_token)
+        await eng.dispose()
+        return tokens
+
+    alice_token, bob_token = asyncio.run(seed())
+    app = create_app(
+        Settings(database_url=pg_url, environment="test", session_cookie_secure=False)
+    )
+    # One client (one event loop for the app's engine); the two users take turns.
+    with TestClient(app) as alice:
+        signup = alice.post(
+            "/auth/signup",
+            json={"token": alice_token, "email": "alice@example.com", "password": PASSWORD},
+        )
+        assert signup.status_code == 201
+        vocab = {
+            "name": "Vocab",
+            "fields": ["Word", "Meaning"],
+            "templates": [
+                {"name": "Forward", "front": "{{Word}}", "back": "{{Meaning}}"},
+                {"name": "Reverse", "front": "{{Meaning}}", "back": "{{Word}}"},
+            ],
+        }
+        type_id = alice.post("/note-types", json=vocab).json()["id"]
+        deck_id = alice.post("/decks", json={"name": "Lang"}).json()["id"]
+        cards = alice.post(
+            f"/decks/{deck_id}/notes",
+            json={
+                "note_type": "custom",
+                "note_type_id": type_id,
+                "fields": {"Word": "chat", "Meaning": "cat"},
+            },
+        ).json()
+        assert [c["ordinal"] for c in cards] == [0, 1]
+        reviewed = alice.post(f"/cards/{cards[0]['id']}/review", json={"rating": 3})
+        assert reviewed.status_code == 200
+
+        edited = alice.patch(
+            f"/note-types/{type_id}",
+            json={
+                "fields": ["Term", "Meaning"],
+                "renamed": {"Word": "Term"},
+                "templates": [{"ordinal": 0, "name": "Forward", "front": "{{Term}}", "back": ""}],
+            },
+        )
+        assert edited.status_code == 200
+        note = alice.get(f"/notes/{cards[0]['note_id']}").json()
+        assert note["fields"] == {"Term": "chat", "Meaning": "cat"}
+        assert [c["id"] for c in note["cards"]] == [cards[0]["id"]]
+        assert alice.delete(f"/note-types/{type_id}").status_code == 409
+
+        image_id = alice.post(
+            "/media", files={"file": ("x.png", _tiny_png(), "image/png")}
+        ).json()["id"]
+        masks = [{"id": 1, "left": 0.1, "top": 0.1, "width": 0.2, "height": 0.2}]
+        occluded = alice.post(
+            f"/decks/{deck_id}/notes",
+            json={
+                "note_type": "image_occlusion",
+                "fields": {},
+                "occlusion": {"image_id": image_id, "masks": masks},
+            },
+        )
+        assert occluded.status_code == 201
+        detail = alice.get(f"/cards/{occluded.json()[0]['id']}").json()
+        assert detail["occlusion"] == {"image_id": image_id, "masks": masks}
+
+        share = alice.post(f"/decks/{deck_id}/shares", json={"allow_clone": True})
+        share_token = share.json()["token"]
+
+        alice.cookies.clear()  # now Bob
+        bob = alice
+        signup = bob.post(
+            "/auth/signup",
+            json={"token": bob_token, "email": "bob@example.com", "password": PASSWORD},
+        )
+        assert signup.status_code == 201
+        assert bob.post(f"/shared/{share_token}/clone").status_code == 201
+        assert len(bob.get("/note-types").json()) == 1
+        assert len(bob.get("/account/export").json()["media"]) == 1
+        assert bob.delete("/account").status_code == 204
+
+        login = {"email": "alice@example.com", "password": PASSWORD}
+        assert alice.post("/auth/login", json=login).status_code == 200
+        assert alice.delete("/account").status_code == 204
+
+
+def _tiny_png() -> bytes:
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=16, height=16)
+    try:
+        return bytes(page.get_pixmap().tobytes("png"))
+    finally:
+        doc.close()
