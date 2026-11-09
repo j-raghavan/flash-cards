@@ -28,7 +28,29 @@ export interface DeckStats {
   proficiency: number;
 }
 
-export type NoteType = "basic" | "cloze";
+export type NoteType = "basic" | "cloze" | "custom" | "image_occlusion";
+
+/** A custom note type's card template: text with {{Field}} placeholders. */
+export interface CardTemplate {
+  ordinal: number;
+  name: string;
+  front: string;
+  back: string;
+}
+
+/** A rectangle normalized to the image (0..1); its id is the card ordinal it hides. */
+export interface Mask {
+  id: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface Occlusion {
+  image_id: string;
+  masks: Mask[];
+}
 
 export type Fields = Record<string, string>;
 
@@ -46,6 +68,9 @@ export interface CardDetail extends Card {
   note_type: NoteType;
   fields: Fields;
   tags: string[];
+  note_type_id?: string | null;
+  template?: CardTemplate | null;
+  occlusion?: Occlusion | null;
 }
 
 export interface Note {

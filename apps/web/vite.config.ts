@@ -90,7 +90,8 @@ export default defineConfig(({ mode }) => {
               // start without a connection. Network first: online data always wins.
               // The cache is cleared on sign-out (see src/offline/apiCache.ts).
               urlPattern: ({ url, request }) =>
-                request.method === "GET" && /\/api\/(decks|decks\/[^/]+\/review|cards\/[^/]+)$/.test(url.pathname),
+                request.method === "GET" &&
+                /\/api\/(decks|decks\/[^/]+\/review|cards\/[^/]+|media\/[^/]+)$/.test(url.pathname),
               handler: "NetworkFirst",
               options: {
                 cacheName: "flashcards-study-data",

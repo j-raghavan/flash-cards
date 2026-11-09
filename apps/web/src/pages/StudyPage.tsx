@@ -11,6 +11,7 @@ import { describeError } from "../api/client";
 import { cards, decks } from "../api/endpoints";
 import type { Card, CardDetail, Rating } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { OcclusionImage } from "../components/OcclusionImage";
 import { CardContent, ErrorText, Loading } from "../components/ui";
 import { cardSides } from "../lib/cardSides";
 import { newIdempotencyKey } from "../lib/text";
@@ -247,7 +248,8 @@ export function StudyPage() {
     );
   }
 
-  const sides = detail === null ? null : cardSides(detail.note_type, detail.fields, detail.ordinal);
+  const sides = detail === null ? null : cardSides(detail.note_type, detail.fields, detail.ordinal, detail.template);
+  const occlusion = detail?.occlusion ?? null;
 
   return (
     <section className="study">
@@ -276,6 +278,9 @@ export function StudyPage() {
           ref={cardRef}
         >
           <CardContent markdown={sides.front} className="front" />
+          {occlusion === null ? null : (
+            <OcclusionImage occlusion={occlusion} ordinal={card.ordinal} revealed={revealed} />
+          )}
           {revealed ? (
             <>
               <hr />

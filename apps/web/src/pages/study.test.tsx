@@ -136,6 +136,57 @@ describe("study session", () => {
     expect(screen.getByText("France")).toBeInTheDocument();
   });
 
+  it("shows an image occlusion card with its own masks hidden, then revealed", async () => {
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1", 2)] },
+      "GET /cards/c1": {
+        body: {
+          ...card("c1", 2),
+          note_type: "image_occlusion",
+          fields: { header: "Label the heart", back_extra: "" },
+          tags: [],
+          occlusion: {
+            image_id: "img 1",
+            masks: [
+              { id: 1, left: 0.1, top: 0.1, width: 0.2, height: 0.2 },
+              { id: 2, left: 0.5, top: 0.5, width: 0.25, height: 0.1 },
+            ],
+          },
+        },
+      },
+    });
+    const { container } = renderApp("/decks/d1/study");
+    expect(await screen.findByText("Label the heart")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Image with hidden parts" })).toHaveAttribute("src", "/api/media/img%201");
+    expect(container.querySelectorAll(".mask")).toHaveLength(2);
+    const own = container.querySelector(".mask-own") as HTMLElement;
+    expect(own.style.left).toBe("50%");
+    await userEvent.setup().keyboard(" ");
+    expect(container.querySelectorAll(".mask")).toHaveLength(1);
+    expect(container.querySelector(".mask-own")).toBeNull();
+  });
+
+  it("shows a custom card through its template", async () => {
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1")] },
+      "GET /cards/c1": {
+        body: {
+          ...card("c1"),
+          note_type: "custom",
+          fields: { Word: "chat", Meaning: "cat" },
+          tags: [],
+          template: { ordinal: 0, name: "Recognize", front: "**{{Word}}**", back: "{{FrontSide}} means {{Meaning}}" },
+        },
+      },
+    });
+    renderApp("/decks/d1/study");
+    expect(await screen.findByText("chat")).toBeInTheDocument();
+    await userEvent.setup().keyboard(" ");
+    expect(screen.getByText(/means cat/)).toBeInTheDocument();
+  });
+
   it("queues answers on the device when offline and leaves them out of the next queue", async () => {
     await enqueue({ idempotency_key: "old", user_id: USER.id, card_id: "c0", deck_id: "d1", rating: 1, queued_at: 1 });
     const calls = mockApi({

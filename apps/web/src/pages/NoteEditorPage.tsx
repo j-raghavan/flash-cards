@@ -242,7 +242,14 @@ export function EditNotePage() {
       <p role="status" className="muted">
         {message}
       </p>
-      <NoteEditor deckId={loaded.deck_id} initial={loaded} onSaved={setMessage} />
+      {loaded.note_type === "basic" || loaded.note_type === "cloze" ? (
+        <NoteEditor deckId={loaded.deck_id} initial={loaded} onSaved={setMessage} />
+      ) : (
+        <p>
+          {loaded.note_type === "custom" ? "Custom" : "Image occlusion"} notes can be studied here; they are edited
+          through the API for now.
+        </p>
+      )}
       <div className="row actions">
         <ConfirmButton
           label="Delete note"

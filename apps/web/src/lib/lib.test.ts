@@ -54,6 +54,28 @@ describe("cardSides", () => {
     expect(cardSides("cloze", { text: "{{c1::x}}", extra: "more" }, 1).back).toContain("---\n\nmore");
     expect(cardSides("cloze", {}, 1)).toEqual({ front: "", back: "" });
   });
+
+  it("fills a custom template, with {{FrontSide}} on the back", () => {
+    const template = {
+      ordinal: 0,
+      name: "Card 1",
+      front: "{{Word}} ({{Missing}})",
+      back: "{{FrontSide}}\n\n{{Meaning}}",
+    };
+    expect(cardSides("custom", { Word: "chat", Meaning: "cat" }, 0, template)).toEqual({
+      front: "chat ()",
+      back: "chat ()\n\ncat",
+    });
+    expect(cardSides("custom", { Word: "chat" }, 0, null)).toEqual({ front: "", back: "" });
+  });
+
+  it("uses the header and back extra of an image occlusion note", () => {
+    expect(cardSides("image_occlusion", { header: "Heart", back_extra: "Atria" }, 1)).toEqual({
+      front: "Heart",
+      back: "Atria",
+    });
+    expect(cardSides("image_occlusion", {}, 1)).toEqual({ front: "", back: "" });
+  });
 });
 
 describe("deckTree", () => {

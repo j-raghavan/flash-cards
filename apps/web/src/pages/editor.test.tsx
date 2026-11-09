@@ -132,6 +132,17 @@ describe("edit card", () => {
     expect(await screen.findByRole("heading", { name: "Deck not found" })).toBeInTheDocument();
   });
 
+  it("explains that custom and image occlusion notes are not edited here yet", async () => {
+    mockApi({ ...me, "GET /notes/n1": { body: note({ note_type: "custom", fields: { Word: "x" } }) } });
+    const { unmount } = renderApp("/notes/n1/edit");
+    expect(await screen.findByText(/Custom notes can be studied here/)).toBeInTheDocument();
+    unmount();
+    mockApi({ ...me, "GET /notes/n1": { body: note({ note_type: "image_occlusion", fields: {} }) } });
+    renderApp("/notes/n1/edit");
+    expect(await screen.findByText(/Image occlusion notes can be studied here/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Front")).not.toBeInTheDocument();
+  });
+
   it("shows a note that cannot load", async () => {
     mockApi({ ...me, "GET /notes/n1": { status: 404, body: { detail: "Not found." } } });
     renderApp("/notes/n1/edit");

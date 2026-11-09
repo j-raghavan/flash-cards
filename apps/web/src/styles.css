@@ -567,6 +567,29 @@ progress {
   padding-left: 18px;
 }
 
+.occlusion {
+  position: relative;
+  margin: 12px 0;
+  line-height: 0;
+}
+
+.occlusion img {
+  width: 100%;
+  height: auto;
+}
+
+.mask {
+  position: absolute;
+  background: var(--line);
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+}
+
+.mask-own {
+  background: var(--mark);
+  border: 2px solid var(--accent);
+}
+
 @media (max-width: 520px) {
   .ratings {
     grid-template-columns: repeat(2, 1fr);

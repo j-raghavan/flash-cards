@@ -17,12 +17,13 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - Administrator user management (suspend, role changes, deletion) with an append-only audit log
 - Deck sharing by revocable link, with optional cloning
 - Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint, including locally hosted models
-- Installable web client (PWA): invite sign-up, sign-in, email verification and password reset; nested decks with statistics and a proficiency ring; keyboard-first study sessions (Space to reveal, 1 to 4 to rate); a Basic and Cloze card editor with Markdown and KaTeX preview; the card browser with bulk actions; and AI generation with live progress and draft approval
+- Installable web client (PWA): invite sign-up, sign-in, email verification and password reset; nested decks with statistics and a proficiency ring; keyboard-first study sessions for every note type, including Image Occlusion and custom templates (Space to reveal, 1 to 4 to rate); a Basic and Cloze card editor with Markdown and KaTeX preview; the card browser with bulk actions; and AI generation with live progress and draft approval
 - Offline review: the app shell and recently opened decks stay available offline, and answers given offline are kept on the device and synced when the connection returns
 
 ## Roadmap
 
 - Web client screens for exam goals and study plans, mock exams, document chat, deck sharing, Anki import and the admin console
+- Web editors for Image Occlusion masks and custom note types
 - Interface translations
 - Anki `.apkg` export
 - Automatic YouTube transcript retrieval
