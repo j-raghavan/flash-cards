@@ -47,6 +47,10 @@ APP_TABLES = {
     "study_settings",
     "review_last_answers",
     "plan_baselines",
+    "totp_credentials",
+    "recovery_codes",
+    "passkeys",
+    "two_factor_challenges",
 }
 
 

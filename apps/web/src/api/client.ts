@@ -118,8 +118,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
   if (!response.ok) {
-    // A wrong password is a 401 too, but it says nothing about a session.
-    if (response.status === 401 && path !== "/auth/login") {
+    // A wrong password or second-factor code is a 401 too, but it says nothing
+    // about a session.
+    if (response.status === 401 && !path.startsWith("/auth/login")) {
       unauthorizedHandler?.();
     }
     throw new ApiError(response.status, errorMessage(response.status, parsed));

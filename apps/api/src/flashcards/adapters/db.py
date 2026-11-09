@@ -56,6 +56,7 @@ from flashcards.domain.scheduling import (
 )
 from flashcards.domain.sessions import UNKNOWN_DEVICE, Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.two_factor import Challenge, ChallengePurpose, Passkey, TotpCredential
 from flashcards.domain.usage import AiUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
@@ -929,6 +930,128 @@ def user_token_from_row(row: UserTokenRow) -> UserToken:
         token_hash=row.token_hash,
         created_at=row.created_at,
         expires_at=row.expires_at,
+        used_at=row.used_at,
+    )
+
+
+class TotpCredentialRow(Base):
+    __tablename__ = "totp_credentials"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    secret_ciphertext: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+def totp_from_row(row: TotpCredentialRow) -> TotpCredential:
+    return TotpCredential(
+        user_id=row.user_id,
+        secret_ciphertext=row.secret_ciphertext,
+        created_at=row.created_at,
+        confirmed_at=row.confirmed_at,
+        last_used_step=row.last_used_step,
+    )
+
+
+class RecoveryCodeRow(Base):
+    __tablename__ = "recovery_codes"
+    __table_args__ = (UniqueConstraint("user_id", "code_hash"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PasskeyRow(Base):
+    __tablename__ = "passkeys"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    credential_id: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary)
+    sign_count: Mapped[int] = mapped_column(BigInteger)
+    name: Mapped[str] = mapped_column(String)
+    transports: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def passkey_to_row(passkey: Passkey) -> PasskeyRow:
+    return PasskeyRow(
+        id=passkey.id,
+        user_id=passkey.user_id,
+        credential_id=passkey.credential_id,
+        public_key=passkey.public_key,
+        sign_count=passkey.sign_count,
+        name=passkey.name,
+        transports=list(passkey.transports),
+        created_at=passkey.created_at,
+        last_used_at=passkey.last_used_at,
+    )
+
+
+def passkey_from_row(row: PasskeyRow) -> Passkey:
+    return Passkey(
+        id=row.id,
+        user_id=row.user_id,
+        credential_id=row.credential_id,
+        public_key=row.public_key,
+        sign_count=row.sign_count,
+        name=row.name,
+        transports=tuple(row.transports),
+        created_at=row.created_at,
+        last_used_at=row.last_used_at,
+    )
+
+
+class TwoFactorChallengeRow(Base):
+    """A pending sign-in or passkey registration (only the token's hash is kept)."""
+
+    __tablename__ = "two_factor_challenges"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    purpose: Mapped[str] = mapped_column(String)
+    token_hash: Mapped[str] = mapped_column(String, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    webauthn_challenge: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def challenge_to_row(challenge: Challenge) -> TwoFactorChallengeRow:
+    return TwoFactorChallengeRow(
+        id=challenge.id,
+        user_id=challenge.user_id,
+        purpose=challenge.purpose.value,
+        token_hash=challenge.token_hash,
+        created_at=challenge.created_at,
+        expires_at=challenge.expires_at,
+        webauthn_challenge=challenge.webauthn_challenge,
+        used_at=challenge.used_at,
+    )
+
+
+def challenge_from_row(row: TwoFactorChallengeRow) -> Challenge:
+    return Challenge(
+        id=row.id,
+        user_id=row.user_id,
+        purpose=ChallengePurpose(row.purpose),
+        token_hash=row.token_hash,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        webauthn_challenge=row.webauthn_challenge,
         used_at=row.used_at,
     )
 

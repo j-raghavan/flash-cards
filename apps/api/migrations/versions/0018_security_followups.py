@@ -2,7 +2,7 @@
 """Share link expiry and AI spend holds
 
 Revision ID: 0018
-Revises: 0016
+Revises: 0017
 Create Date: 2026-11-08
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0018"
-down_revision = "0016"
+down_revision = "0017"
 branch_labels = None
 depends_on = None
 

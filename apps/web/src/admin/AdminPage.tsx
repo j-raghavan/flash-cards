@@ -9,6 +9,7 @@ import { useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 import { adminUsage } from "../api/adminUsage";
 import { describeError } from "../api/client";
 import { admin } from "../api/endpoints";
+import { twoFactor } from "../api/twoFactor";
 import type { AdminUser, AuditEvent, CreatedInvite, Invite, Role } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmButton, CopyField, ErrorText, Loading } from "../components/ui";
@@ -87,6 +88,7 @@ function UserRow({
         <td>
           {account.suspended ? "Suspended" : "Active"}
           {account.email_verified ? "" : ", email not confirmed"}
+          {account.two_factor === true ? ", two-step sign-in on" : ""}
         </td>
         <td>{formatDay(account.created_at)}</td>
         <td>
@@ -146,6 +148,23 @@ function UserRow({
                 >
                   Unlock
                 </button>
+                {account.two_factor === true ? (
+                  <ConfirmButton
+                    label={`Reset two-step sign-in for ${account.email}`}
+                    confirmLabel="Reset two-step sign-in"
+                    prompt={`Remove the authenticator app, passkeys and recovery codes of ${account.email}? They can then sign in with their password alone. Do this only after confirming who is asking.`}
+                    onConfirm={async () => {
+                      setNote(null);
+                      setRemoveError(null);
+                      try {
+                        onChanged(await twoFactor.adminReset(account.id));
+                        setNote("Two-step sign-in reset.");
+                      } catch (failure) {
+                        setRemoveError(describeError(failure));
+                      }
+                    }}
+                  />
+                ) : null}
                 <ConfirmButton
                   label={`Delete ${account.email}`}
                   confirmLabel="Delete account"
@@ -212,7 +231,12 @@ function UsersPanel({ selfId }: { selfId: string }) {
               account={account}
               self={account.id === selfId}
               onChanged={(changed) => {
-                users.setData((current = []) => current.map((u) => (u.id === changed.id ? changed : u)));
+                // Most answers do not look up two-step sign-in (null): keep what the list said.
+                users.setData((current = []) =>
+                  current.map((u) =>
+                    u.id === changed.id ? { ...changed, two_factor: changed.two_factor ?? u.two_factor ?? null } : u,
+                  ),
+                );
               }}
               onRemoved={(userId) => {
                 users.setData((current = []) => current.filter((u) => u.id !== userId));

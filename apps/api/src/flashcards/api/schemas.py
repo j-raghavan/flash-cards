@@ -407,9 +407,12 @@ class AdminUserOut(BaseModel):
     email_verified: bool
     suspended: bool
     created_at: datetime
+    # Whether two-factor sign-in is on (F-AUTH-3). Only the user list and the
+    # two-factor reset report it; other answers leave it null (not looked up).
+    two_factor: bool | None = None
 
     @classmethod
-    def from_user(cls, user: User) -> AdminUserOut:
+    def from_user(cls, user: User, *, two_factor: bool | None = None) -> AdminUserOut:
         return cls(
             id=user.id,
             email=user.email,
@@ -417,6 +420,7 @@ class AdminUserOut(BaseModel):
             email_verified=user.is_verified,
             suspended=user.suspended_at is not None,
             created_at=user.created_at,
+            two_factor=two_factor,
         )
 
 

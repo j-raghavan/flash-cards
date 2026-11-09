@@ -5,9 +5,15 @@ Wraps AuthService.login: every attempt is counted atomically before the password
 is checked, an attempt past the limit is refused, and a successful sign-in clears
 the count. Only the failure that starts a lock is audited, so a guessing attack
 cannot flood the audit log.
+
+When the account has two-factor sign-in on (F-AUTH-3), a right password raises
+SecondFactorRequired with a pending sign-in instead of issuing a session, and
+the count is kept until the second step succeeds.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import (
@@ -22,6 +28,10 @@ from flashcards.domain.invites import hash_token, normalize_email
 from flashcards.domain.login_throttle import LOCKOUT, MAX_FAILED_LOGINS, LoginLocked, admitted
 from flashcards.domain.ports import Clock, LoginThrottleRepository, UserRepository
 from flashcards.domain.sessions import UNKNOWN_DEVICE
+from flashcards.domain.two_factor import SecondFactorRequired
+
+if TYPE_CHECKING:
+    from flashcards.application.two_factor_service import TwoFactorService
 
 
 def throttle_key(email: str) -> str:
@@ -37,8 +47,11 @@ class SignInService:
         users: UserRepository,
         audit: AuditService,
         clock: Clock,
+        *,
+        two_factor: TwoFactorService | None = None,
     ) -> None:
         self._auth = auth
+        self._two_factor = two_factor
         self._throttle = throttle
         self._users = users
         self._audit = audit
@@ -54,16 +67,20 @@ class SignInService:
         if not admitted(state):
             raise LoginLocked(state.locked_for(now) or LOCKOUT)
         try:
-            issued = await self._auth.login(email=email, password=password, device=device)
+            user = await self._auth.check_password(email=email, password=password)
         except InvalidCredentials:
             if state.failures == MAX_FAILED_LOGINS:  # this failure started the lock
-                user = await self._users.get_by_email(normalize_email(email))
+                known = await self._users.get_by_email(normalize_email(email))
                 await self._audit.record(
-                    AuditAction.LOGIN_LOCKED, target_id=user.id if user is not None else None
+                    AuditAction.LOGIN_LOCKED, target_id=known.id if known is not None else None
                 )
             raise
         except (AccountSuspended, EmailNotVerified):
             await self._throttle.delete(key)  # the password was right
             raise
+        if self._two_factor is not None:
+            pending = await self._two_factor.start_sign_in(user)
+            if pending is not None:
+                raise SecondFactorRequired(pending)
         await self._throttle.delete(key)
-        return issued
+        return await self._auth.start_session(user, device=device)

@@ -32,6 +32,7 @@ from flashcards.api.schemas import (
     TokenRequest,
     UserOut,
 )
+from flashcards.api.two_factor_schemas import SecondFactorRequiredOut
 from flashcards.application.auth_service import (
     AccountSuspended,
     EmailNotVerified,
@@ -41,6 +42,7 @@ from flashcards.config import Settings
 from flashcards.domain.invites import InviteError
 from flashcards.domain.login_throttle import LoginLocked
 from flashcards.domain.sessions import device_label
+from flashcards.domain.two_factor import SecondFactorRequired
 from flashcards.domain.user_tokens import InvalidUserToken
 from flashcards.domain.users import (
     EmailAlreadyRegistered,
@@ -148,7 +150,11 @@ async def register(
     )
 
 
-@router.post("/login", response_model=UserOut)
+@router.post(
+    "/login",
+    response_model=UserOut,
+    responses={status.HTTP_202_ACCEPTED: {"model": SecondFactorRequiredOut}},
+)
 async def login(
     body: LoginRequest,
     request: Request,
@@ -167,6 +173,13 @@ async def login(
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "Invalid email or password."},
+        )
+    except SecondFactorRequired as required:
+        # The password was right; no session yet. The client finishes the sign-in
+        # at /auth/login/second-factor or /auth/login/passkey (F-AUTH-3).
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=SecondFactorRequiredOut.from_pending(required.pending).model_dump(mode="json"),
         )
     except LoginLocked as exc:
         raise HTTPException(
