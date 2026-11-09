@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Study progress: undo snapshots on review logs, study settings, plan baselines
 
-Revision ID: 0013
+Revision ID: 0014
 Revises: 0012
 Create Date: 2026-11-08
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0013"
+revision = "0014"
 down_revision = "0012"
 branch_labels = None
 depends_on = None
