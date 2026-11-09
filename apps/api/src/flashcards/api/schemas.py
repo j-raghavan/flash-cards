@@ -19,7 +19,7 @@ from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
 from flashcards.application.planner_service import PlanReport
 from flashcards.application.review_service import ReviewOutcome, UndoOutcome
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
-from flashcards.domain.anki import ImportReport
+from flashcards.domain.anki import ImportReport, UnsupportedKind
 from flashcards.domain.audit import AuditEvent
 from flashcards.domain.browser import BrowserRow, CardState
 from flashcards.domain.chat import ChatAnswer
@@ -717,10 +717,21 @@ class StudyPlanOut(BaseModel):
         )
 
 
+class UnsupportedConstructOut(BaseModel):
+    kind: UnsupportedKind
+    count: int
+    examples: list[str]
+
+
 class ImportReportOut(BaseModel):
     decks_created: int
     notes_imported: int
     notes_skipped: int
+    notes_not_selected: int
+    cards_scheduled: int
+    reviews_imported: int
+    dry_run: bool
+    unsupported: list[UnsupportedConstructOut]
 
     @classmethod
     def from_report(cls, report: ImportReport) -> ImportReportOut:
@@ -728,6 +739,16 @@ class ImportReportOut(BaseModel):
             decks_created=report.decks_created,
             notes_imported=report.notes_imported,
             notes_skipped=report.notes_skipped,
+            notes_not_selected=report.notes_not_selected,
+            cards_scheduled=report.cards_scheduled,
+            reviews_imported=report.reviews_imported,
+            dry_run=report.dry_run,
+            unsupported=[
+                UnsupportedConstructOut(
+                    kind=item.kind, count=item.count, examples=list(item.examples)
+                )
+                for item in report.unsupported
+            ],
         )
 
 
