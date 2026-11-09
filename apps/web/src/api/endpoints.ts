@@ -106,6 +106,9 @@ export const ai = {
     form.append("thoroughness", thoroughness);
     return request<Job>("/ai/generate", { method: "POST", form });
   },
+  /** The caller's generation jobs for a deck, newest first (the API caps limit at 50). */
+  jobs: (deckId: string, limit = 5) =>
+    request<Job[]>(`/ai/jobs?${new URLSearchParams({ deck_id: deckId, limit: String(limit) }).toString()}`),
   job: (jobId: string) => request<Job>(`/ai/jobs/${id(jobId)}`),
   cancel: (jobId: string) => request<Job>(`/ai/jobs/${id(jobId)}/cancel`, { method: "POST" }),
   retry: (jobId: string) => request<Job>(`/ai/jobs/${id(jobId)}/retry`, { method: "POST" }),

@@ -6,10 +6,18 @@ import { useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { ai } from "../api/endpoints";
-import type { Thoroughness } from "../api/types";
+import type { JobStatus, Thoroughness } from "../api/types";
 import { ErrorText } from "../components/ui";
-import { recentJobs, rememberJob } from "../lib/recentJobs";
+import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+
+const STATUS_LABELS: Record<JobStatus, string> = {
+  queued: "Waiting to start",
+  running: "In progress",
+  succeeded: "Finished",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const ACCEPTED = ["application/pdf", "image/png", "image/jpeg"];
@@ -26,7 +34,9 @@ export function GeneratePage() {
   const [file, setFile] = useState<File | null>(null);
   const [level, setLevel] = useState<Thoroughness>("standard");
   const submit = useSubmit();
-  const recent = recentJobs(deckId);
+  // Recent jobs come from the server, so they follow the user across devices.
+  // The list is a convenience: if it cannot load, the page works without it.
+  const recent = useResource(() => ai.jobs(deckId), `jobs:${deckId}`).data ?? [];
 
   const onSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
@@ -43,7 +53,6 @@ export function GeneratePage() {
     }
     void submit.run(async () => {
       const job = await ai.generate(deckId, file, level);
-      rememberJob({ jobId: job.id, deckId, fileName: file.name, startedAt: job.created_at });
       void navigate(`/jobs/${job.id}?deck=${encodeURIComponent(deckId)}`);
     });
   };
@@ -99,9 +108,11 @@ export function GeneratePage() {
           <h2>Recent generations</h2>
           <ul className="plain-list">
             {recent.map((job) => (
-              <li key={job.jobId}>
-                <Link to={`/jobs/${job.jobId}?deck=${encodeURIComponent(deckId)}`}>{job.fileName}</Link>{" "}
-                <span className="muted">{new Date(job.startedAt).toLocaleString()}</span>
+              <li key={job.id}>
+                <Link to={`/jobs/${encodeURIComponent(job.id)}?deck=${encodeURIComponent(deckId)}`}>
+                  {new Date(job.created_at).toLocaleString()}
+                </Link>{" "}
+                <span className="muted">{STATUS_LABELS[job.status]}</span>
               </li>
             ))}
           </ul>
