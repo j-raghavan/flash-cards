@@ -13,7 +13,8 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - A daily goal with a streak and a completion signal, counted in the user's own time zone
 - Exam goals with a daily study plan and a readiness forecast; the plan adapts to missed days and new cards and shows what changed and why
 - Self-evaluated and AI-evaluated study with undo of the last answer, deck summaries, timed mock exams with a per-topic breakdown, and chat with source documents with page citations
-- Anki `.apkg` import, full account export and account deletion
+- Anki `.apkg` import with review history and scheduling state, selective import by deck or tag with a dry-run report, and deck export as `.apkg`, CSV or JSON
+- Full account export and account deletion
 - Invite-only access by default, with emailed invites that can be resent; self-hosters can open public sign-up
 - Email verification, password reset, sign-in lockout, and a device list with sign-out per device or everywhere else
 - Administrator user management (suspend, role changes, deletion) with an append-only audit log
@@ -29,7 +30,6 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - Web client screens for exam goals and study plans, mock exams, document chat, deck sharing, Anki import and the admin console
 - Web editors for Image Occlusion masks and custom note types
 - Interface translations
-- Anki `.apkg` export
 - Automatic YouTube transcript retrieval
 
 ## Stack

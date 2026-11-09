@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from flashcards.adapters.apkg import ApkgReader
+from flashcards.adapters.deck_export import FileDeckExportWriter
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
@@ -61,6 +62,7 @@ from flashcards.application.bulk_card_service import BulkCardService
 from flashcards.application.card_browser_service import CardBrowserService
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.chat_service import ChatService
+from flashcards.application.deck_export_service import DeckExportService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
 from flashcards.application.evaluation_service import EvaluationService
@@ -89,6 +91,7 @@ from flashcards.domain.ports import (
     AuditRepository,
     CardRepository,
     Clock,
+    DeckExportWriter,
     DeckRepository,
     DocumentExtractor,
     DraftCardRepository,
@@ -181,6 +184,8 @@ class Repositories:
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES
     # Lets the generation worker commit progress as it goes (ADR 0012).
     unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
+    # Serializes deck exports (F-IMP-4); stateless, so every provider shares it.
+    deck_export_writer: DeckExportWriter = field(default_factory=FileDeckExportWriter)
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +210,7 @@ class Container:
     planner: PlannerService
     progress: ProgressService
     apkg_import: ApkgImportService
+    deck_export: DeckExportService
     account: AccountService
     media: MediaService
     evaluation: EvaluationService
@@ -305,7 +311,25 @@ def build_services(repos: Repositories) -> Container:
         progress,
         repos.clock,
     )
-    apkg_import = ApkgImportService(repos.package_reader, decks, notes)
+    apkg_import = ApkgImportService(
+        repos.package_reader,
+        decks,
+        notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+        repos.scheduler,
+        repos.clock,
+    )
+    deck_export = DeckExportService(
+        decks,
+        repos.notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+        repos.deck_export_writer,
+        repos.clock,
+    )
     account = AccountService(
         library,
         repos.decks,
@@ -421,6 +445,7 @@ def build_services(repos: Repositories) -> Container:
         planner=planner,
         progress=progress,
         apkg_import=apkg_import,
+        deck_export=deck_export,
         account=account,
         media=media,
         evaluation=evaluation,
