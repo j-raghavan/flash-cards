@@ -118,6 +118,19 @@ class SessionRepository(Protocol):
         """Revoke every active session for a user (password reset, suspension)."""
         ...
 
+    async def revoke_others(self, user_id: str, keep_session_id: str, now: datetime) -> int:
+        """Revoke every active session of the user except one; return how many."""
+        ...
+
+    async def touch(self, session_id: str, now: datetime) -> None:
+        """Record `now` as the session's last-seen time.
+
+        Best effort and never blocking: a SQL adapter skips the write when another
+        request holds the activity row, and keeps it apart from the session row so
+        a revocation never waits on a long request of that session.
+        """
+        ...
+
     async def delete_for_user(self, user_id: str) -> None:
         """Delete every session for a user (account deletion, F-IMP-5)."""
         ...

@@ -39,6 +39,7 @@ APP_TABLES = {
     "login_throttle",
     "user_tokens",
     "note_types",
+    "session_activity",
 }
 
 

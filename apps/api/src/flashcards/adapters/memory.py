@@ -141,6 +141,21 @@ class InMemorySessionRepository:
             if session.user_id == user_id and session.revoked_at is None:
                 self._by_id[session.id] = session.with_revoked(now)
 
+    async def revoke_others(self, user_id: str, keep_session_id: str, now: datetime) -> int:
+        others = [
+            s.id
+            for s in self._by_id.values()
+            if s.user_id == user_id and s.id != keep_session_id and s.revoked_at is None
+        ]
+        for session_id in others:
+            self._by_id[session_id] = self._by_id[session_id].with_revoked(now)
+        return len(others)
+
+    async def touch(self, session_id: str, now: datetime) -> None:
+        session = self._by_id.get(session_id)
+        if session is not None:
+            self._by_id[session_id] = session.with_seen(now)
+
     async def delete_for_user(self, user_id: str) -> None:
         for session_id in [s.id for s in self._by_id.values() if s.user_id == user_id]:
             del self._by_id[session_id]

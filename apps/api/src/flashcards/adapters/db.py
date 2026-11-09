@@ -44,7 +44,7 @@ from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.note_types import CardTemplate, CustomNoteType
 from flashcards.domain.notes import Card, Mask, Note, NoteType, Occlusion
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
-from flashcards.domain.sessions import Session
+from flashcards.domain.sessions import UNKNOWN_DEVICE, Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
@@ -91,6 +91,23 @@ class SessionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A label such as "Firefox on macOS", derived from the User-Agent at sign-in.
+    device: Mapped[str] = mapped_column(String, server_default=UNKNOWN_DEVICE)
+
+
+class SessionActivityRow(Base):
+    """A session's last-seen time, kept apart from the session row.
+
+    Recording activity then never locks the session row, so revoking a session
+    never waits for a long request (such as an AI call) of that session to end.
+    """
+
+    __tablename__ = "session_activity"
+
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 def invite_to_row(invite: Invite) -> InviteRow:
@@ -153,10 +170,11 @@ def session_to_row(session: Session) -> SessionRow:
         created_at=session.created_at,
         expires_at=session.expires_at,
         revoked_at=session.revoked_at,
+        device=session.device,
     )
 
 
-def session_from_row(row: SessionRow) -> Session:
+def session_from_row(row: SessionRow, last_seen_at: datetime | None) -> Session:
     return Session(
         id=row.id,
         user_id=row.user_id,
@@ -164,6 +182,8 @@ def session_from_row(row: SessionRow) -> Session:
         created_at=row.created_at,
         expires_at=row.expires_at,
         revoked_at=row.revoked_at,
+        last_seen_at=last_seen_at,
+        device=row.device,
     )
 
 

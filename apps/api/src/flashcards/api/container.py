@@ -68,6 +68,7 @@ from flashcards.application.note_type_service import NoteTypeService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
+from flashcards.application.session_service import SessionService
 from flashcards.application.sharing_service import SharingService
 from flashcards.application.sign_in_service import SignInService
 from flashcards.application.summary_service import SummaryService
@@ -186,6 +187,7 @@ class Container:
     admin: AdminService
     sign_in: SignInService
     account_email: AccountEmailService
+    sessions: SessionService
     mailer: Mailer
 
 
@@ -360,6 +362,7 @@ def build_services(repos: Repositories) -> Container:
         admin=admin,
         sign_in=sign_in,
         account_email=account_email,
+        sessions=SessionService(repos.sessions, audit, repos.clock),
         mailer=repos.mailer,
     )
 

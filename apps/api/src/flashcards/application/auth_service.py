@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from flashcards.domain.invites import hash_token, normalize_email
 from flashcards.domain.ports import Clock, PasswordHasher, SessionRepository, UserRepository
-from flashcards.domain.sessions import Session
+from flashcards.domain.sessions import UNKNOWN_DEVICE, Session
 from flashcards.domain.users import User, UserStatus
 
 DEFAULT_SESSION_TTL = timedelta(days=14)
@@ -58,7 +58,9 @@ class AuthService:
             secrets.token_urlsafe(TOKEN_BYTES)
         )
 
-    async def login(self, *, email: str, password: str) -> IssuedSession:
+    async def login(
+        self, *, email: str, password: str, device: str = UNKNOWN_DEVICE
+    ) -> IssuedSession:
         user = await self._users.get_by_email(normalize_email(email))
         if user is None:
             self._hasher.verify(self._dummy_hash, password)
@@ -67,10 +69,13 @@ class AuthService:
             raise InvalidCredentials()
         if user.status() is UserStatus.SUSPENDED:
             raise AccountSuspended()
-        return await self.start_session(user)
+        return await self.start_session(user, device=device)
 
-    async def start_session(self, user: User) -> IssuedSession:
-        """Issue a session for an already-authenticated user (e.g. just after signup)."""
+    async def start_session(self, user: User, *, device: str = UNKNOWN_DEVICE) -> IssuedSession:
+        """Issue a session for an already-authenticated user (e.g. just after signup).
+
+        `device` is a label from sessions.device_label, never the raw User-Agent.
+        """
         now = self._clock.now()
         raw_token = secrets.token_urlsafe(TOKEN_BYTES)
         session = Session(
@@ -79,15 +84,21 @@ class AuthService:
             token_hash=hash_token(raw_token),
             created_at=now,
             expires_at=now + self._ttl,
+            last_seen_at=now,
+            device=device,
         )
         await self._sessions.add(session)
         return IssuedSession(session=session, raw_token=raw_token)
 
     async def authenticate(self, raw_token: str) -> Session | None:
         """Return the live session for a cookie token, or None if absent/expired/revoked."""
+        now = self._clock.now()
         session = await self._sessions.get_by_token_hash(hash_token(raw_token))
-        if session is None or not session.is_valid(self._clock.now()):
+        if session is None or not session.is_valid(now):
             return None
+        if session.needs_touch(now):
+            await self._sessions.touch(session.id, now)
+            session = session.with_seen(now)
         return session
 
     async def logout(self, raw_token: str) -> bool:

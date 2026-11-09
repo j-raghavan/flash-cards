@@ -12,10 +12,23 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import CursorResult, Result, and_, case, delete, func, null, or_, select, update
+from sqlalchemy import (
+    CursorResult,
+    Result,
+    Select,
+    and_,
+    case,
+    delete,
+    func,
+    null,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from flashcards.adapters.db import (
     AiBlobRow,
@@ -35,6 +48,7 @@ from flashcards.adapters.db import (
     NoteTypeRow,
     PassageRow,
     ReviewLogRow,
+    SessionActivityRow,
     SessionRow,
     ShareLinkRow,
     UserRow,
@@ -225,23 +239,36 @@ class SqlSessionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    def _with_activity(self) -> Select[SessionRow, datetime]:
+        return select(SessionRow, SessionActivityRow.last_seen_at).outerjoin(
+            SessionActivityRow, SessionActivityRow.session_id == SessionRow.id
+        )
+
     async def add(self, session: Session) -> None:
         self._session.add(session_to_row(session))
         await self._session.flush()
+        self._session.add(
+            SessionActivityRow(
+                session_id=session.id, last_seen_at=session.last_seen_at or session.created_at
+            )
+        )
+        await self._session.flush()
 
     async def get_by_token_hash(self, token_hash: str) -> Session | None:
-        row = await self._session.scalar(
-            select(SessionRow).where(SessionRow.token_hash == token_hash)
-        )
-        return session_from_row(row) if row is not None else None
+        found = (
+            await self._session.execute(
+                self._with_activity().where(SessionRow.token_hash == token_hash)
+            )
+        ).first()
+        return session_from_row(found[0], found[1]) if found is not None else None
 
     async def list_for_user(self, user_id: str) -> list[Session]:
-        rows = await self._session.scalars(
-            select(SessionRow)
+        rows = await self._session.execute(
+            self._with_activity()
             .where(SessionRow.user_id == user_id)
             .order_by(SessionRow.created_at.desc())
         )
-        return [session_from_row(row) for row in rows]
+        return [session_from_row(row, last_seen) for row, last_seen in rows.tuples()]
 
     async def revoke(self, session_id: str, now: datetime) -> bool:
         result = await self._session.execute(
@@ -256,6 +283,38 @@ class SqlSessionRepository:
             update(SessionRow)
             .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
             .values(revoked_at=now)
+        )
+
+    async def revoke_others(self, user_id: str, keep_session_id: str, now: datetime) -> int:
+        revoked = await self._session.scalars(
+            update(SessionRow)
+            .where(
+                SessionRow.user_id == user_id,
+                SessionRow.id != keep_session_id,
+                SessionRow.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+            .returning(SessionRow.id)
+        )
+        return len(revoked.all())
+
+    async def touch(self, session_id: str, now: datetime) -> None:
+        # SKIP LOCKED: when a concurrent request of the same session is already
+        # recording activity, this one skips the write rather than waiting for that
+        # request's transaction to end.
+        # An alias, so the subquery keeps its own FROM instead of being correlated
+        # with the table the UPDATE targets.
+        activity = aliased(SessionActivityRow)
+        unlocked = (
+            select(activity.session_id)
+            .where(activity.session_id == session_id)
+            .with_for_update(skip_locked=True)
+            .scalar_subquery()
+        )
+        await self._session.execute(
+            update(SessionActivityRow)
+            .where(SessionActivityRow.session_id == unlocked)
+            .values(last_seen_at=now)
         )
 
     async def delete_for_user(self, user_id: str) -> None:
