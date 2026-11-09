@@ -212,6 +212,12 @@ export function DeckDetailPage() {
       <ErrorText message={stats.error} />
       {stats.loading ? <Loading label="Loading statistics…" /> : null}
       {stats.data === undefined ? null : <StatsPanel stats={stats.data} />}
+      {stats.data?.total === 0 ? (
+        <p className="empty">
+          This deck has no cards yet. Add one by hand, generate drafts from a file, or{" "}
+          <Link to="/import">import an Anki deck</Link>.
+        </p>
+      ) : null}
 
       <div className="row actions">
         <Link className="button primary" to={`/decks/${deckId}/study`}>

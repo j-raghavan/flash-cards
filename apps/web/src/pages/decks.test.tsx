@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Deck, DeckStats } from "../api/types";
 import { enqueue } from "../offline/reviewQueue";
+import { finishOnboarding } from "../onboarding/state";
 import { USER, mockApi, renderApp } from "../test/helpers";
 
 const deck = (id: string, name: string, parent: string | null = null): Deck => ({
@@ -38,8 +39,11 @@ describe("deck list", () => {
         return { status: 201, body: list[0] };
       },
     });
+    // This user finished the guided setup before, so the empty list is shown.
+    finishOnboarding(USER.id);
     renderApp("/");
     expect(await screen.findByText(/No decks yet/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "guided setup" })).toHaveAttribute("href", "/welcome");
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("New deck"), "  Biology  ");
     await user.click(screen.getByRole("button", { name: "Add deck" }));

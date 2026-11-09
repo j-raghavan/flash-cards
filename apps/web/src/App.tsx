@@ -23,6 +23,9 @@ const ProgressPage = lazy(() => import("./progress/ProgressPage").then((m) => ({
 const MockExamPage = lazy(() => import("./aiStudy/MockExamPage").then((m) => ({ default: m.MockExamPage })));
 const AdminPage = lazy(() => import("./admin/AdminPage").then((m) => ({ default: m.AdminPage })));
 const AccountPage = lazy(() => import("./account/AccountPage").then((m) => ({ default: m.AccountPage })));
+const OnboardingPage = lazy(() =>
+  import("./onboarding/OnboardingPage").then((m) => ({ default: m.OnboardingPage })),
+);
 const LegalPage = lazy(() => import("./legal/LegalPage").then((m) => ({ default: m.LegalPage })));
 const noteTypePages = () => import("./noteTypes/NoteTypesPage");
 const NoteTypesPage = lazy(() => noteTypePages().then((m) => ({ default: m.NoteTypesPage })));
@@ -66,6 +69,14 @@ export function AppRoutes() {
       ))}
       <Route element={<Layout />}>
         <Route index element={<DeckListPage />} />
+        <Route
+          path="/welcome"
+          element={
+            <Lazy>
+              <OnboardingPage />
+            </Lazy>
+          }
+        />
         <Route path="/decks/:deckId" element={<DeckDetailPage />} />
         <Route path="/decks/:deckId/study" element={<StudyPage />} />
         <Route path="/decks/:deckId/notes/new" element={<NewNotePage />} />
