@@ -179,7 +179,7 @@ docker compose up -d --wait
 - **Rate limiting.** Sign-in lockout is per email address (5 failures per 15 minutes). There is no per-IP limit in the API; add one at the proxy for `/api/auth/*` if the instance is reachable from the internet.
 - **Security headers.** `web` sends the Content-Security-Policy and the other headers listed under [The web app and routing](#the-web-app-and-routing) on every response, and HSTS for requests that arrived over HTTPS. A proxy in front should pass them through rather than add its own copies.
 - **Share links in logs.** Share-link tokens appear in request paths (`/api/shared/{token}`), so the API's access log (`docker compose logs api`) contains working links, as does any proxy access log that is enabled (neither bundled Caddyfile enables one). Restrict who can read those logs.
-- **Unhealthy containers are not restarted.** `restart: unless-stopped` restarts a container whose process exits. Compose does not restart a container that is running but failing its healthcheck; use external monitoring on `/healthz`.
+- **Unhealthy containers are not restarted.** `restart: unless-stopped` restarts a container whose process exits. Compose does not restart a container that is running but failing its healthcheck; use external monitoring on `/api/healthz` (from the host, `http://127.0.0.1:8000/api/healthz`).
 - **Secrets.** `.env` holds every secret (database password, AI key, SMTP password). Keep it `chmod 600` and out of version control (`.env` is git-ignored, and `.dockerignore` keeps it out of the image build context). The `api` and `migrate` containers receive the whole file as environment variables, including `POSTGRES_PASSWORD`, which they need for the database URL anyway.
 
 ## nginx example
@@ -198,7 +198,7 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;   # not the client's own header
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;   # above the SSE keep-alive interval
     }

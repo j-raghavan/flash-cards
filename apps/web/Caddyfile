@@ -38,7 +38,9 @@
 	}
 
 	# HSTS only when the request reached the TLS proxy over HTTPS; browsers
-	# ignore it over plain HTTP anyway.
+	# ignore it over plain HTTP anyway. The raw header is matched, so any peer
+	# could ask for it, but only loopback and private peers reach this port and
+	# an extra HSTS header is harmless.
 	@https header X-Forwarded-Proto https
 	header @https Strict-Transport-Security "max-age=31536000"
 
@@ -57,10 +59,12 @@
 	}
 
 	# Vite's content-hashed build output: safe to cache forever. A missing
-	# file is a 404, never index.html, so it cannot be cached as a script.
+	# file is a 404, never index.html, and gets no cache lifetime, so neither
+	# the app shell nor an error can be cached under an asset's name.
 	handle /assets/* {
 		root * /srv
-		header Cache-Control "public, max-age=31536000, immutable"
+		@asset file
+		header @asset Cache-Control "public, max-age=31536000, immutable"
 		encode zstd gzip
 		file_server
 	}

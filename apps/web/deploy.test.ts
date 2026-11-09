@@ -18,7 +18,8 @@ describe("production Caddyfile", () => {
   });
 
   it("long-caches only hashed assets and revalidates the shell and service worker", () => {
-    expect(caddyfile).toMatch(/handle \/assets\/\* \{[^}]*immutable/);
+    // Only files that exist get the long lifetime; a missing asset's 404 does not.
+    expect(caddyfile).toMatch(/handle \/assets\/\* \{[^}]*@asset file\s+header @asset Cache-Control "[^"]*immutable"/);
     expect(caddyfile).toMatch(/handle \{[^}]*Cache-Control "no-cache"[^}]*try_files \{path\} \/index\.html/);
   });
 
