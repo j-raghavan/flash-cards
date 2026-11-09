@@ -25,11 +25,19 @@ describe("document chat", () => {
         answer: "ATP is made in the **mitochondria**. <img src=x onerror=alert(1)> [Sign in](https://evil.example/login)",
         citations: [
           { file_id: "f-a", page: 3 },
-          { file_id: "f-b", page: 1 },
+          { file_id: "f-b", page: 1, file_name: null },
           { file_id: "f-a", page: 3 },
         ],
       },
-      { answer: "Osmosis moves water.", citations: [{ file_id: "f-b", page: 7 }, { file_id: "f-c", page: 2 }] },
+      {
+        answer: "Osmosis moves water.",
+        citations: [
+          { file_id: "f-b", page: 7 },
+          { file_id: "f-c", page: 2, file_name: "Cell biology <b>notes</b>.pdf" },
+          { file_id: "f-d", page: 4, file_name: `${"x".repeat(130)}.pdf` },
+          { file_id: "f-e", page: 1, file_name: "  " },
+        ],
+      },
       { answer: "I could not find that.", citations: [] },
     ];
     let reply = 0;
@@ -64,10 +72,14 @@ describe("document chat", () => {
     await user.click(within(region).getByRole("button", { name: "Ask" }));
     expect(await within(log).findByText("Osmosis moves water.")).toBeInTheDocument();
     const second = within(log).getAllByRole("list", { name: "Sources" })[1] as HTMLElement;
+    // A file's name is shown as text when the API knows it, cut to a bounded length.
     expect(within(second).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       "Document 2, page 7",
-      "Document 3, page 2",
+      "Cell biology <b>notes</b>.pdf, page 2",
+      `${"x".repeat(119)}\u2026, page 4`,
+      "Document 5, page 1",
     ]);
+    expect(second.querySelector("b")).toBeNull();
 
     await user.type(box, "Anything else?{Enter}");
     expect(await within(log).findByText("No pages cited.")).toBeInTheDocument();

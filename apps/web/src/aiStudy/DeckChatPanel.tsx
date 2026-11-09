@@ -12,6 +12,9 @@ import { CardContent } from "../components/ui";
 import { AiLabel } from "./shared";
 
 const MAX_QUESTION = 2000;
+// The API caps names at this length; the cap is kept here too, so a long name
+// cannot stretch the panel.
+const MAX_FILE_NAME = 120;
 
 interface Turn {
   id: number;
@@ -32,6 +35,18 @@ function distinctCitations(citations: Citation[]): Citation[] {
     seen.add(key);
     return true;
   });
+}
+
+/** A citation's label: the file's name when the API knows it, or its number in this conversation. */
+function citationLabel(citation: Citation, files: string[]): string {
+  const name = citation.file_name?.trim() ?? "";
+  const file =
+    name === ""
+      ? `Document ${String(files.indexOf(citation.file_id) + 1)}`
+      : name.length > MAX_FILE_NAME
+        ? `${name.slice(0, MAX_FILE_NAME - 1)}\u2026`
+        : name;
+  return `${file}, page ${String(citation.page)}`;
 }
 
 function NoSources({ deckId }: { deckId: string }) {
@@ -145,9 +160,7 @@ export function DeckChatPanel({ deckId }: { deckId: string }) {
                 {turn.citations !== undefined && turn.citations.length > 0 ? (
                   <ul className="citations" aria-label="Sources">
                     {distinctCitations(turn.citations).map((c) => (
-                      <li key={`${c.file_id}:${String(c.page)}`}>
-                        Document {files.indexOf(c.file_id) + 1}, page {c.page}
-                      </li>
+                      <li key={`${c.file_id}:${String(c.page)}`}>{citationLabel(c, files)}</li>
                     ))}
                   </ul>
                 ) : (

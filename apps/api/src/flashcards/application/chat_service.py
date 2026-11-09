@@ -10,6 +10,7 @@ as data documents, never concatenated into the instructions (NF-SEC-6).
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import uuid
 
@@ -23,6 +24,7 @@ from flashcards.domain.chat import (
     MAX_PASSAGES_PER_SOURCE,
     NOT_FOUND_ANSWER,
     ChatAnswer,
+    Citation,
     NoChatSources,
     Passage,
     numbered_context,
@@ -37,7 +39,12 @@ from flashcards.domain.ports import (
     ObjectStore,
     PassageRepository,
 )
-from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES, PageKind
+from flashcards.domain.sources import (
+    DEFAULT_MAX_UPLOAD_PAGES,
+    PageKind,
+    clean_source_name,
+    source_name_key,
+)
 from flashcards.domain.usage import AiFeature
 
 logger = logging.getLogger(__name__)
@@ -90,7 +97,23 @@ class ChatService:
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
         await self._budget.record(owner_id, AiFeature.CHAT, result)
-        return parse_chat_answer(result.data, top)
+        answer = parse_chat_answer(result.data, top)
+        return dataclasses.replace(
+            answer, citations=await self._named(owner_id, answer.citations)
+        )
+
+    async def _named(
+        self, owner_id: str, citations: tuple[Citation, ...]
+    ) -> tuple[Citation, ...]:
+        """Label each citation with its file's name, read only from the caller's own jobs."""
+        own = {job.source_id for job in await self._jobs.list_for_owner(owner_id)}
+        names: dict[str, str | None] = {}
+        for file_id in dict.fromkeys(c.file_id for c in citations):
+            raw = await self._store.get(source_name_key(file_id)) if file_id in own else None
+            names[file_id] = (
+                None if raw is None else clean_source_name(raw.decode("utf-8", "replace"))
+            )
+        return tuple(dataclasses.replace(c, file_name=names[c.file_id]) for c in citations)
 
     async def _index(self, owner_id: str, deck_ids: list[str]) -> None:
         # Each source is indexed under the deck its job generated into, so deleting

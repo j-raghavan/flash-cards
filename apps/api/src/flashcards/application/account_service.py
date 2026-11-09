@@ -45,6 +45,7 @@ from flashcards.domain.ports import (
 from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import CardSchedule, ReviewLog
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.sources import source_name_key
 from flashcards.domain.users import LastActiveAdmin, User
 
 
@@ -160,6 +161,7 @@ class AccountService:
         # AI jobs, their drafts (cascade) and their stored source files.
         for job in await self._ai_jobs.list_for_owner(owner_id):
             await self._object_store.delete(job.source_id)
+            await self._object_store.delete(source_name_key(job.source_id))
             await self._draft_cards.delete_for_job(job.id)
             await self._ai_jobs.delete(job.id)
         for goal in await self._goals.list_for_owner(owner_id):

@@ -62,6 +62,7 @@ class Passage:
 class Citation:
     file_id: str
     page: int
+    file_name: str | None = None  # the uploaded file's name, when it was kept
 
 
 @dataclass(frozen=True, slots=True)

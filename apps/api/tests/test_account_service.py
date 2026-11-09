@@ -45,6 +45,7 @@ from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.sources import source_name_key
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
@@ -139,6 +140,7 @@ class _Fixture:
         )
         await self.ai_jobs.add(job)
         await self.store.put(job.source_id, b"pdf", "application/pdf")
+        await self.store.put(source_name_key(job.source_id), b"notes.pdf", "text/plain")
         await self.draft_repo.add(
             DraftCardRecord(
                 id=str(uuid.uuid4()), job_id=job.id, owner_id=owner, note_type=NoteType.BASIC,
@@ -239,6 +241,8 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert await fx.ai_jobs.list_for_owner(ALICE.id) == []
     assert await fx.draft_repo.list_for_job(alice_job) == []
     assert await fx.store.get(alice_source) is None
+    assert await fx.store.get(source_name_key(alice_source)) is None
+    assert await fx.store.get(source_name_key("src-bob")) == b"notes.pdf"
     assert await fx.log_repo.list_for_owner(ALICE.id) == []
     assert await fx.media.list_for_owner(ALICE.id) == []
     assert await fx.mock_exams.get("exam-alice") is None
