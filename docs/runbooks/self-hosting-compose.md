@@ -12,14 +12,17 @@ Everything lives in `deploy/compose/`:
 | `.env.example` | Template for `.env`, documenting every setting in `apps/api/src/flashcards/config.py` |
 | `Caddyfile` | Configuration for the optional HTTPS proxy |
 
+The web service's own configuration is `apps/web/Caddyfile`, baked into its image by `apps/web/Dockerfile`.
+
 | Service | Role |
 |---|---|
 | `db` | Postgres 16 with the named volume `pgdata` and a `pg_isready` healthcheck. No host port is published. |
 | `migrate` | One-shot job running `alembic upgrade head`. It starts once `db` is healthy and must exit successfully before `api` starts. |
-| `api` | The API image built from `apps/api/Dockerfile`, running as a non-root user. It is published on `127.0.0.1:8000` only, with a `/healthz` healthcheck. |
-| `proxy` | Optional (profile `proxy`). Caddy, which obtains and renews a TLS certificate for `FLASHCARDS_DOMAIN` and forwards to `api`. |
+| `api` | The API image built from `apps/api/Dockerfile`, running as a non-root user, with a `/healthz` healthcheck. No host port is published; it is reached through `web`. |
+| `web` | The web app and the site's entry point: a Caddy image (`apps/web/Dockerfile`) that serves the built app and forwards `/api/*` to `api`. It is published on `127.0.0.1:8000` only, over plain HTTP, and runs unprivileged with a read-only root file system. |
+| `proxy` | Optional (profile `proxy`). Caddy, which obtains and renews a TLS certificate for `FLASHCARDS_DOMAIN` and forwards everything to `web`. |
 
-`db` and `migrate` sit on a `backend` network, which is internal (no route to the internet). `api` joins both `backend` and `frontend`, and `proxy` joins only `frontend`, so the proxy never reaches Postgres.
+`db` and `migrate` sit on a `backend` network, which is internal (no route to the internet). `api` joins both `backend` and `frontend`; `web` and `proxy` join only `frontend`, so neither reaches Postgres.
 
 All persistent data, including uploaded media and AI source documents, is stored in Postgres. The `pgdata` volume is the only state that needs backing up; the `caddy_data` volume holds certificates, which Caddy can obtain again.
 
@@ -38,7 +41,7 @@ Requirements: Docker Engine with the Compose v2 plugin (the stack is tested with
 2. Edit `.env`. The minimum is:
 
    - `POSTGRES_PASSWORD`: a long random value using URL-safe characters (`openssl rand -hex 32`). It is embedded in the database URL.
-   - `FLASHCARDS_PUBLIC_BASE_URL`: the public HTTPS origin, for example `https://flashcards.example.org`. Email links are built from it, and the API logs a warning at startup when it still contains `localhost`.
+   - `FLASHCARDS_PUBLIC_BASE_URL`: the public HTTPS origin of the site, for example `https://flashcards.example.org`, without `/api`. Email links point at the web app's pages under it (`/verify-email#token=...`, `/reset-password#token=...`), and the API logs a warning at startup when it still contains `localhost`.
    - `FLASHCARDS_DOMAIN`, if the Caddy proxy is used: the host name from the URL above.
    - An AI provider and SMTP server, if wanted (see the comments in `.env.example`).
 
@@ -47,7 +50,7 @@ Requirements: Docker Engine with the Compose v2 plugin (the stack is tested with
 3. Start the stack:
 
    ```sh
-   # API only, on 127.0.0.1:8000, behind a reverse proxy already running on the host:
+   # Site on 127.0.0.1:8000, behind a reverse proxy already running on the host:
    docker compose up -d --build --wait
 
    # Or with the bundled Caddy proxy on ports 80 and 443:
@@ -57,8 +60,9 @@ Requirements: Docker Engine with the Compose v2 plugin (the stack is tested with
 4. Check it:
 
    ```sh
-   docker compose ps -a                       # migrate "Exited (0)", db and api "healthy"
-   curl -s http://127.0.0.1:8000/healthz      # {"status":"ok","version":"..."}
+   docker compose ps -a                         # migrate "Exited (0)"; db, api and web "healthy"
+   curl -s http://127.0.0.1:8000/api/healthz    # {"status":"ok","version":"..."}
+   curl -sI http://127.0.0.1:8000/              # 200, the web app, with a Content-Security-Policy header
    ```
 
 ### The first admin account
@@ -71,25 +75,54 @@ docker compose exec api flashcards create-invite --role admin
 docker compose exec api flashcards create-invite --role admin --email admin@example.org
 ```
 
-The command prints one invite token, valid for 7 days and usable once. Only its SHA-256 hash is stored, so a lost token cannot be recovered; mint another. Redeem it with `POST /auth/signup` and a JSON body of `token`, `email` and `password` (at least 12 characters):
+The command prints one invite token, valid for 7 days and usable once. Only its SHA-256 hash is stored, so a lost token cannot be recovered; mint another. Redeem it in the web app by opening the sign-up page with the token in the URL fragment:
+
+```
+https://flashcards.example.org/signup#token=<token>
+```
+
+Or call the API directly with `POST /api/auth/signup` and a JSON body of `token`, `email` and `password` (at least 12 characters):
 
 ```sh
-curl -si https://flashcards.example.org/auth/signup \
+curl -si https://flashcards.example.org/api/auth/signup \
   -H 'Content-Type: application/json' \
   -d '{"token":"<token>","email":"admin@example.org","password":"<password>"}'
 ```
 
-The response is `201` with a session cookie. From then on the admin endpoints (`/admin/invites`, `/admin/users`, `/admin/audit`) mint invites and manage accounts. The token is printed to the terminal, so treat the terminal scrollback and any captured output as sensitive until the invite has been redeemed.
+The response is `201` with a session cookie. From then on the admin endpoints (`/api/admin/invites`, `/api/admin/users`, `/api/admin/audit`) mint invites and manage accounts. The token is printed to the terminal, so treat the terminal scrollback and any captured output as sensitive until the invite has been redeemed.
 
-## The web app
+## The web app and routing
 
-The React web app (`apps/web`) is in development and is not part of the stack yet. It will be served as static files from the same origin as the API, for two reasons: the API sends no CORS headers, and its session cookie is `SameSite=Lax`. The planned layout, already sketched in the `Caddyfile` and `compose.yaml` comments, is:
+The site is one origin, because the API sends no CORS headers and its session cookie is `SameSite=Lax`. The `web` service (`apps/web/Caddyfile`) routes requests as follows:
 
-- the web app's static build mounted into the proxy at `/srv/web` and served for every path not under `/api`, with `index.html` as the fallback for client-side routes;
-- the API under `/api/`, with the prefix stripped before forwarding, so API routes are unchanged;
-- `FLASHCARDS_PUBLIC_BASE_URL` set to the site origin, so email links reach the web app's `/verify-email` and `/reset-password` pages.
+| Path | Handling |
+|---|---|
+| `/api/*` | Forwarded to `api` with the `/api` prefix stripped (`/api/decks` reaches `/decks`). Responses are flushed as they arrive, so the Server-Sent Events of `/api/ai/jobs/{id}/events` are not buffered. |
+| `/api` | `404`, never the app. |
+| `/assets/*` | Vite's content-hashed build output, `Cache-Control: public, max-age=31536000, immutable`. A missing file is a `404`. |
+| anything else | The file if it exists (`index.html`, `sw.js`, `manifest.webmanifest`, icons), otherwise `index.html` for client-side routes such as `/decks/...` or `/verify-email`. Sent with `Cache-Control: no-cache`, so browsers revalidate and pick up a new release and service worker immediately. |
 
-Until then the proxy forwards the whole site to the API.
+Every response carries the app's Content-Security-Policy (including `frame-ancestors 'none'`, which only works as a header), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin` and a restrictive `Permissions-Policy`. `Strict-Transport-Security` is added when the request reached the TLS proxy over HTTPS (`X-Forwarded-Proto: https` from a proxy on a private network). The policy must match `CONTENT_SECURITY_POLICY` in `apps/web/vite.config.ts`; `apps/web/deploy.test.ts` fails if they differ.
+
+To run only the web image against an API elsewhere, set `FLASHCARDS_API_UPSTREAM` (default `api:8000`) on the container.
+
+### Local development
+
+The stack is not needed for development. Run the API and the Vite dev server side by side; Vite proxies `/api` to the API and strips the prefix, just as the `web` service does:
+
+```sh
+# Terminal 1: the API on http://localhost:8000 (in-memory unless FLASHCARDS_DATABASE_URL is set)
+cd apps/api
+FLASHCARDS_ENVIRONMENT=development FLASHCARDS_DEV_BOOTSTRAP_INVITE=true \
+  FLASHCARDS_SESSION_COOKIE_SECURE=false .venv/bin/uvicorn flashcards.api.app:app --reload
+
+# Terminal 2: the web app on http://localhost:5173
+cd apps/web
+npm ci
+npm run dev
+```
+
+In this in-memory development mode the API logs an admin invite token at startup (`DEV BOOTSTRAP ... admin invite token = ...`); open `http://localhost:5173/signup#token=<token>` to create an account. Set `FLASHCARDS_API_PROXY_TARGET` to point Vite at an API on another address. `FLASHCARDS_PUBLIC_BASE_URL` defaults to `http://localhost:5173`, so email links printed in development open the dev server.
 
 ## Upgrades
 
@@ -138,20 +171,20 @@ docker compose up -d --wait
 ## Security notes
 
 - **HTTPS is required.** The session cookie is `Secure` (`FLASHCARDS_SESSION_COOKIE_SECURE=true`, the default), so browsers send it only over HTTPS. Serve the instance through a TLS-terminating reverse proxy: the bundled Caddy profile, or an existing proxy on the host forwarding to `127.0.0.1:8000`. Set `FLASHCARDS_SESSION_COOKIE_SECURE=false` only for plain-HTTP testing on a private machine.
-- **Keep the API off the public network.** The API port is published on loopback only, and the API trusts `X-Forwarded-*` headers (`FORWARDED_ALLOW_IPS=*`) on that basis. Do not change the port binding to `0.0.0.0`.
+- **Keep the site port off the public network.** The `web` port is published on loopback only, and the API publishes none. `web` keeps `X-Forwarded-*` headers from proxies on private addresses, and the API trusts them from `web` (`FORWARDED_ALLOW_IPS=*`), on that basis. Do not change the port binding to `0.0.0.0` or publish the API port.
 - **`FLASHCARDS_PUBLIC_BASE_URL`** must be the public HTTPS origin. Email links carry their single-use token in the URL fragment, which browsers do not send to servers, so tokens stay out of proxy access logs.
 - **`FLASHCARDS_ENVIRONMENT=production`** (the image default) disables `/docs` and `/openapi.json` and keeps email bodies, which contain working reset links, out of the logs. Never run a reachable instance in `development`.
 - **Request size.** The API reads `.apkg` and AI uploads into memory before checking their size. The bundled Caddyfile caps request bodies at 50 MB; set an equivalent limit on any other proxy (`client_max_body_size 50m;` in nginx).
-- **Server-Sent Events.** `GET /ai/jobs/{id}/events` streams job progress. The API sends `X-Accel-Buffering: no`, which nginx honours; Caddy is configured with `flush_interval -1`. Other proxies must not buffer `text/event-stream` responses, and their read timeout must exceed the 15-second keep-alive interval (streams last at most 10 minutes).
-- **Rate limiting.** Sign-in lockout is per email address (5 failures per 15 minutes). There is no per-IP limit in the API; add one at the proxy for `/auth/*` if the instance is reachable from the internet.
-- **Security headers.** The bundled Caddyfile adds HSTS, `X-Content-Type-Options`, `Referrer-Policy: no-referrer` and `X-Frame-Options`. A Content-Security-Policy belongs with the web app and will be added with it.
-- **Share links in logs.** Share-link tokens appear in request paths (`/shared/{token}`), so the API's access log (`docker compose logs api`) contains working links, as does any proxy access log that is enabled (the bundled Caddyfile enables none). Restrict who can read those logs.
+- **Server-Sent Events.** `GET /api/ai/jobs/{id}/events` streams job progress. The API sends `X-Accel-Buffering: no`, which nginx honours; both bundled Caddy configurations use `flush_interval -1`, and `web` does not compress `/api` responses. Other proxies must not buffer `text/event-stream` responses, and their read timeout must exceed the 15-second keep-alive interval (streams last at most 10 minutes).
+- **Rate limiting.** Sign-in lockout is per email address (5 failures per 15 minutes). There is no per-IP limit in the API; add one at the proxy for `/api/auth/*` if the instance is reachable from the internet.
+- **Security headers.** `web` sends the Content-Security-Policy and the other headers listed under [The web app and routing](#the-web-app-and-routing) on every response, and HSTS for requests that arrived over HTTPS. A proxy in front should pass them through rather than add its own copies.
+- **Share links in logs.** Share-link tokens appear in request paths (`/api/shared/{token}`), so the API's access log (`docker compose logs api`) contains working links, as does any proxy access log that is enabled (neither bundled Caddyfile enables one). Restrict who can read those logs.
 - **Unhealthy containers are not restarted.** `restart: unless-stopped` restarts a container whose process exits. Compose does not restart a container that is running but failing its healthcheck; use external monitoring on `/healthz`.
 - **Secrets.** `.env` holds every secret (database password, AI key, SMTP password). Keep it `chmod 600` and out of version control (`.env` is git-ignored, and `.dockerignore` keeps it out of the image build context). The `api` and `migrate` containers receive the whole file as environment variables, including `POSTGRES_PASSWORD`, which they need for the database URL anyway.
 
 ## nginx example
 
-For hosts that already run nginx in front of `127.0.0.1:8000`:
+For hosts that already run nginx in front of `127.0.0.1:8000`. The security headers come from `web` (HSTS because of `X-Forwarded-Proto: https`), so nginx does not add them:
 
 ```nginx
 server {
@@ -161,10 +194,6 @@ server {
     # ssl_certificate and ssl_certificate_key as usual
 
     client_max_body_size 50m;
-    add_header Strict-Transport-Security "max-age=31536000" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer" always;
-    add_header X-Frame-Options "DENY" always;
 
     location / {
         proxy_pass http://127.0.0.1:8000;

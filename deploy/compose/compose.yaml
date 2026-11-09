@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 #
-# Production-style self-hosting stack: Postgres 16, a one-shot migration job and
-# the API. An optional Caddy reverse proxy (profile "proxy") terminates HTTPS.
+# Production-style self-hosting stack: Postgres 16, a one-shot migration job, the
+# API and the web app. The web service serves the app and forwards /api to the
+# API, so the whole site is one origin. An optional Caddy reverse proxy (profile
+# "proxy") terminates HTTPS in front of it.
 # Guide: docs/runbooks/self-hosting-compose.md
 #
 #   cd deploy/compose
 #   cp .env.example .env        # then edit .env
-#   docker compose up -d --build                    # API on 127.0.0.1:8000
+#   docker compose up -d --build                    # site on 127.0.0.1:8000
 #   docker compose --profile proxy up -d --build    # plus Caddy on :80/:443
 #
 # Secrets live only in .env (git-ignored). Nothing in this file is a secret.
@@ -63,8 +65,9 @@ services:
     env_file: .env
     environment:
       <<: *api-env
-      # Trust X-Forwarded-* from the reverse proxy. Safe only because the API port
-      # is published on loopback and otherwise reachable only on the frontend network.
+      # Trust X-Forwarded-* from the web service, which sets them. Safe only
+      # because the API publishes no port and is reachable only on the compose
+      # networks.
       FORWARDED_ALLOW_IPS: "*"
     # Migrations are the migrate service's job, so the API skips the image
     # entrypoint (which would run them again) and starts the server directly.
@@ -84,14 +87,36 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-    ports:
-      # Loopback only. Put an HTTPS reverse proxy in front (the proxy profile
-      # below, or one already running on the host).
-      - "127.0.0.1:${FLASHCARDS_HTTP_PORT:-8000}:8000"
+    # No published port: the web service forwards /api here.
     networks: [backend, frontend]
 
+  # The web app (static files) and the /api reverse proxy, in one Caddy image
+  # built from apps/web/Dockerfile (configuration: apps/web/Caddyfile). It sends
+  # the Content-Security-Policy and the other security headers.
+  web:
+    image: flash-cards-web:${FLASHCARDS_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # Loopback only, plain HTTP. Put an HTTPS reverse proxy in front (the
+      # proxy profile below, or one already running on the host).
+      - "127.0.0.1:${FLASHCARDS_HTTP_PORT:-8000}:8080"
+    networks: [frontend]
+
   # Optional HTTPS front end: docker compose --profile proxy up -d
-  # Caddy obtains and renews a certificate for FLASHCARDS_DOMAIN automatically.
+  # Caddy obtains and renews a certificate for FLASHCARDS_DOMAIN automatically
+  # and forwards everything to the web service.
   proxy:
     image: caddy:2-alpine
     profiles: ["proxy"]
@@ -109,11 +134,8 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-      # Web app slot: once apps/web produces a static build, mount it here and
-      # enable the matching block in the Caddyfile, for example:
-      # - ../../apps/web/dist:/srv/web:ro
     depends_on:
-      api:
+      web:
         condition: service_healthy
     networks: [frontend]
 
