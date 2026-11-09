@@ -173,6 +173,7 @@ def test_list_jobs_is_owner_scoped_paged_and_filtered(
     assert client.get("/ai/jobs", params={"limit": 0}).status_code == 422
     assert client.get("/ai/jobs", params={"limit": 51}).status_code == 422
     assert client.get("/ai/jobs", params={"offset": -1}).status_code == 422
+    assert client.get("/ai/jobs", params={"deck_id": "x" * 65}).status_code == 422
 
     other, _ = _signup(app, seed_invite, "other@example.com")
     assert other.get("/ai/jobs").json() == []

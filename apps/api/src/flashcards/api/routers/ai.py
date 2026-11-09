@@ -99,7 +99,9 @@ async def start_transcript_generation(
 
 @router.get("/jobs", response_model=list[JobOut])
 async def list_jobs(
-    deck_id: str | None = Query(default=None, description="Only jobs for this deck."),
+    deck_id: str | None = Query(
+        default=None, max_length=64, description="Only jobs for this deck."
+    ),
     limit: int = Query(default=DEFAULT_JOB_PAGE, ge=1, le=MAX_JOB_PAGE),
     offset: int = Query(default=0, ge=0),
     caller: CurrentUser = Depends(current_user),
