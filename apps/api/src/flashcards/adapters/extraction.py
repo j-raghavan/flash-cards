@@ -13,7 +13,7 @@ its pixmap under MAX_RASTER_PIXELS however large the page claims to be.
 from __future__ import annotations
 
 import math
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from functools import partial
 
 import puremagic
@@ -25,6 +25,7 @@ from flashcards.domain.sources import (
     PageKind,
     SourceRef,
     TooManyPages,
+    UnreadableDocument,
     UnsupportedMediaType,
 )
 
@@ -36,6 +37,9 @@ _POINTS_PER_INCH = 72
 # Upper bound on a rendered page's pixels (about 48 MB as RGB). A letter page at
 # 150 DPI is about 2.1 million; larger pages are rendered at a lower resolution.
 MAX_RASTER_PIXELS = 16_000_000
+# What PyMuPDF raises on a corrupt or hostile file: FileDataError (a RuntimeError)
+# when opening, MuPDF's own errors while extracting or rendering.
+_PDF_ERRORS = (RuntimeError, pymupdf.mupdf.FzErrorBase)
 
 
 class PyMuPDFExtractor:
@@ -51,7 +55,7 @@ class PyMuPDFExtractor:
     async def count_pages(self, data: bytes) -> int:
         if self.sniff(data) != "application/pdf":
             return 1
-        return await run_blocking(PARSING, lambda: _page_count(data))
+        return await _parse(lambda: _page_count(data))
 
     async def extract(
         self, data: bytes, *, file_id: str, max_pages: int
@@ -66,15 +70,23 @@ class PyMuPDFExtractor:
             )
             return
 
-        doc = await run_blocking(PARSING, lambda: pymupdf.open(stream=data, filetype="pdf"))
+        doc = await _parse(lambda: pymupdf.open(stream=data, filetype="pdf"))
         try:
             page_count = int(doc.page_count)
             if page_count > max_pages:
                 raise TooManyPages(f"{page_count} pages (max {max_pages})")
             for index in range(page_count):
-                yield await run_blocking(PARSING, partial(_render_page, doc, index, file_id))
+                yield await _parse(partial(_render_page, doc, index, file_id))
         finally:
             doc.close()
+
+
+async def _parse[T](work: Callable[[], T]) -> T:
+    """Run PyMuPDF work in a parsing thread; its failures become UnreadableDocument."""
+    try:
+        return await run_blocking(PARSING, work)
+    except _PDF_ERRORS as exc:
+        raise UnreadableDocument(type(exc).__name__) from exc
 
 
 def _page_count(data: bytes) -> int:

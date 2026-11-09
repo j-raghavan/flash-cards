@@ -10,17 +10,20 @@ cooperative: the flag is checked between pages.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from flashcards.application.ai_prompts import prompt_for
 from flashcards.domain.ai import (
     DRAFT_CARDS_SCHEMA,
     DraftCardRecord,
+    InvalidModelOutput,
     LlmDocument,
+    LlmError,
     StructuredRequest,
     parse_draft_cards,
 )
-from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.jobs import AiJob, JobFailure, JobStatus
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
@@ -30,9 +33,45 @@ from flashcards.domain.ports import (
     ObjectStore,
     UnitOfWork,
 )
-from flashcards.domain.sources import ExtractedPage, PageKind
+from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
+from flashcards.domain.sources import (
+    ExtractedPage,
+    PageKind,
+    TooManyPages,
+    UnreadableDocument,
+    UnsupportedMediaType,
+)
+from flashcards.domain.transcripts import InvalidTranscript
 
 MAX_OUTPUT_TOKENS = 4096
+
+logger = logging.getLogger("flashcards")
+
+_DOCUMENT_ERRORS = (UnreadableDocument, UnsupportedMediaType, TooManyPages, InvalidTranscript)
+_QUOTA_ERRORS = (QuotaExceeded, AiCallLimitReached)
+
+
+def classify_failure(exc: Exception) -> JobFailure:
+    """The user-facing category for a failure; the exception text itself is never shown."""
+    if isinstance(exc, InvalidModelOutput):
+        return JobFailure.BAD_MODEL_OUTPUT
+    if isinstance(exc, LlmError):
+        return JobFailure.PROVIDER_UNAVAILABLE
+    if isinstance(exc, _DOCUMENT_ERRORS):
+        return JobFailure.UNREADABLE_DOCUMENT
+    if isinstance(exc, _QUOTA_ERRORS):
+        return JobFailure.QUOTA_EXCEEDED
+    return JobFailure.INTERNAL
+
+
+def _log_failure(job_id: str, exc: Exception) -> None:
+    # The details stay in the server log: expected failures as warnings, anything
+    # else with its traceback as an error.
+    failure = classify_failure(exc)
+    if failure is JobFailure.INTERNAL:
+        logger.exception("generation job %s failed unexpectedly", job_id)
+    else:
+        logger.warning("generation job %s failed (%s): %s", job_id, failure.name, exc)
 
 
 class CardGenerationService:
@@ -67,6 +106,7 @@ class CardGenerationService:
         try:
             await self._process(job)
         except Exception as exc:  # any failure is captured on the job, never raised
+            _log_failure(job_id, exc)
             # Discard the failed page's partial work (its drafts were not counted),
             # then fail the latest committed state, so completed_units and
             # total_units survive and a retry resumes without duplicating drafts.
@@ -75,7 +115,7 @@ class CardGenerationService:
             current = await self._jobs.get(job_id)
             if current is None or current.status is not JobStatus.RUNNING:
                 return  # pragma: no cover - defensive: the claimed job is RUNNING here
-            await self._jobs.update(current.failed(str(exc), self._clock.now()))
+            await self._jobs.update(current.failed(classify_failure(exc), self._clock.now()))
 
     async def _process(self, job: AiJob) -> None:
         data = await self._store.get(job.source_id)
@@ -91,7 +131,7 @@ class CardGenerationService:
         if not pages:
             # An empty/garbage upload must not look like a done job stuck at 0%.
             await self._jobs.update(
-                job.failed("the document has no readable pages", self._clock.now())
+                job.failed(JobFailure.NO_READABLE_PAGES, self._clock.now())
             )
             return
 

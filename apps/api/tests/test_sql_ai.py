@@ -20,7 +20,7 @@ from flashcards.adapters.sql import (
     SqlQuotaRepository,
 )
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
-from flashcards.domain.jobs import AiJob, JobStatus, new_generation_job
+from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
 from flashcards.domain.notes import NoteType
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
@@ -184,7 +184,7 @@ async def test_try_retry_requeues_a_failed_job_once(engine: AsyncEngine) -> None
         running = await SqlAiJobRepository(s).try_claim(job.id, NOW)
         assert running is not None
         assert await SqlAiJobRepository(s).try_retry(job.id, NOW) is None  # still running
-        await SqlAiJobRepository(s).update(running.failed("boom", NOW))
+        await SqlAiJobRepository(s).update(running.failed(JobFailure.INTERNAL, NOW))
 
     async with sm() as s, s.begin():
         queued = await SqlAiJobRepository(s).try_retry(job.id, NOW)
@@ -248,7 +248,7 @@ async def test_jobs_reach_the_worker_only_after_their_unit_commits(
             await SqlAiJobRepository(s).add(job)
             running = await SqlAiJobRepository(s).try_claim(job.id, NOW)
             assert running is not None
-            await SqlAiJobRepository(s).update(running.failed("boom", NOW))
+            await SqlAiJobRepository(s).update(running.failed(JobFailure.INTERNAL, NOW))
 
     own_engine, provider, queue = sql_provider(pg_url)
     seen: list[str] = []

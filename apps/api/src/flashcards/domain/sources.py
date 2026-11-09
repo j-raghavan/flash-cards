@@ -24,6 +24,10 @@ class TooManyPages(Exception):
     """The document has more pages than the configured cap."""
 
 
+class UnreadableDocument(Exception):
+    """The document is of an allowed type but could not be parsed (corrupt or hostile)."""
+
+
 @dataclass(frozen=True, slots=True)
 class SourceRef:
     file_id: str

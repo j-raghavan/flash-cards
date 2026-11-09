@@ -1,24 +1,40 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
+
+import pytest
 
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
     InMemoryDraftCardRepository,
     InMemoryObjectStore,
 )
-from flashcards.application.card_generation_service import CardGenerationService
+from flashcards.application.card_generation_service import (
+    CardGenerationService,
+    classify_failure,
+)
 from flashcards.domain.ai import (
+    InvalidModelOutput,
     LlmError,
     StructuredRequest,
     StructuredResult,
     Thoroughness,
     TokenUsage,
 )
-from flashcards.domain.jobs import JobStatus, new_generation_job
-from flashcards.domain.sources import ExtractedPage, PageKind, SourceRef, TooManyPages
+from flashcards.domain.jobs import JobFailure, JobStatus, new_generation_job
+from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
+from flashcards.domain.sources import (
+    ExtractedPage,
+    PageKind,
+    SourceRef,
+    TooManyPages,
+    UnreadableDocument,
+    UnsupportedMediaType,
+)
+from flashcards.domain.transcripts import InvalidTranscript
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 ALICE = "alice"
@@ -199,7 +215,7 @@ async def test_llm_failure_marks_job_failed() -> None:
 
     job = await jobs.get(job_id)
     assert job is not None and job.status is JobStatus.FAILED
-    assert job.error == "boom"
+    assert job.error == JobFailure.PROVIDER_UNAVAILABLE.value
 
 
 async def test_missing_source_marks_job_failed() -> None:
@@ -219,7 +235,7 @@ async def test_missing_source_marks_job_failed() -> None:
 
     stored = await jobs.get(job.id)
     assert stored is not None and stored.status is JobStatus.FAILED
-    assert "not found" in (stored.error or "")
+    assert stored.error == JobFailure.INTERNAL.value  # the detail is logged, not shown
 
 
 async def test_extractor_failure_marks_job_failed() -> None:
@@ -237,6 +253,7 @@ async def test_extractor_failure_marks_job_failed() -> None:
 
     job = await jobs.get(job_id)
     assert job is not None and job.status is JobStatus.FAILED
+    assert job.error == JobFailure.UNREADABLE_DOCUMENT.value
 
 
 async def test_failure_midway_preserves_progress_and_resumes_on_retry() -> None:
@@ -280,7 +297,7 @@ async def test_zero_page_document_fails_rather_than_succeeding_at_zero() -> None
 
     job = await jobs.get(job_id)
     assert job is not None and job.status is JobStatus.FAILED
-    assert "no readable pages" in (job.error or "")
+    assert job.error == JobFailure.NO_READABLE_PAGES.value
     assert await drafts.list_for_job(job_id) == []
 
 
@@ -358,3 +375,63 @@ async def test_a_failed_page_is_rolled_back_before_the_job_fails() -> None:
     assert uow.log[-1] == "rollback running:1/2"  # page 2's partial work is discarded
     job = await jobs.get(job_id)
     assert job is not None and job.status is JobStatus.FAILED and job.completed_units == 1
+
+
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (LlmError("sk-secret rate limited by upstream"), JobFailure.PROVIDER_UNAVAILABLE),
+        (InvalidModelOutput("raw model text"), JobFailure.BAD_MODEL_OUTPUT),
+        (UnreadableDocument("FileDataError"), JobFailure.UNREADABLE_DOCUMENT),
+        (UnsupportedMediaType("image/gif"), JobFailure.UNREADABLE_DOCUMENT),
+        (TooManyPages("99 pages"), JobFailure.UNREADABLE_DOCUMENT),
+        (InvalidTranscript("bad"), JobFailure.UNREADABLE_DOCUMENT),
+        (QuotaExceeded("over"), JobFailure.QUOTA_EXCEEDED),
+        (AiCallLimitReached("over"), JobFailure.QUOTA_EXCEEDED),
+        (RuntimeError("postgres://user:pw@db/x is down"), JobFailure.INTERNAL),
+    ],
+)
+def test_failures_are_classified_into_safe_messages(
+    error: Exception, failure: JobFailure
+) -> None:
+    assert classify_failure(error) is failure
+
+
+async def test_failure_detail_is_logged_not_stored(caplog: pytest.LogCaptureFixture) -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    secret = "provider said: key sk-123 invalid"
+    service = _service(
+        jobs, drafts, store, FakeExtractor([_text_page(1)]), FakeLLM(error=LlmError(secret))
+    )
+    job_id = await _seed_job(jobs, store)
+
+    with caplog.at_level(logging.WARNING, logger="flashcards"):
+        await service.run(job_id)
+
+    job = await jobs.get(job_id)
+    assert job is not None and secret not in (job.error or "")
+    assert any(secret in record.getMessage() for record in caplog.records)
+
+
+async def test_unexpected_failure_is_logged_with_its_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    jobs, drafts = InMemoryAiJobRepository(), InMemoryDraftCardRepository()
+    service = _service(jobs, drafts, InMemoryObjectStore(), FakeExtractor([]), FakeLLM())
+    job = new_generation_job(
+        owner_id=ALICE,
+        source_id="missing",
+        draft_deck_id="deck",
+        thoroughness=Thoroughness.CONCISE,
+        now=NOW,
+    )
+    await jobs.add(job)
+
+    with caplog.at_level(logging.ERROR, logger="flashcards"):
+        await service.run(job.id)
+
+    assert [r.exc_info is not None for r in caplog.records] == [True]

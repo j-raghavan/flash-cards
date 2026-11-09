@@ -6,7 +6,13 @@ import pytest
 
 from flashcards.adapters import extraction
 from flashcards.adapters.extraction import MAX_RASTER_PIXELS, PyMuPDFExtractor, raster_zoom
-from flashcards.domain.sources import ExtractedPage, PageKind, TooManyPages, UnsupportedMediaType
+from flashcards.domain.sources import (
+    ExtractedPage,
+    PageKind,
+    TooManyPages,
+    UnreadableDocument,
+    UnsupportedMediaType,
+)
 
 # A valid 1x1 GIF: a real media type that is not on the allow-list.
 _GIF = (
@@ -117,3 +123,16 @@ async def test_a_huge_textless_page_renders_within_the_pixel_cap(
     pages = await _pages(data)
     image = pymupdf.Pixmap(pages[0].image or b"")
     assert image.width * image.height <= 40_000 + image.width + image.height + 1
+
+
+_CORRUPT_PDF = b"%PDF-1.4\n" + b"\x00garbage" * 64
+
+
+async def test_a_corrupt_pdf_is_unreadable_when_counting() -> None:
+    with pytest.raises(UnreadableDocument):
+        await PyMuPDFExtractor().count_pages(_CORRUPT_PDF)
+
+
+async def test_a_corrupt_pdf_is_unreadable_when_extracting() -> None:
+    with pytest.raises(UnreadableDocument):
+        await _pages(_CORRUPT_PDF)

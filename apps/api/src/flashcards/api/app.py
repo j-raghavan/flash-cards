@@ -65,7 +65,7 @@ from flashcards.domain.sharing import (
     CloneTooLarge,
     ShareNotFound,
 )
-from flashcards.domain.sources import TooManyPages, UnsupportedMediaType
+from flashcards.domain.sources import TooManyPages, UnreadableDocument, UnsupportedMediaType
 from flashcards.domain.summary import SummaryLocked
 from flashcards.domain.tags import InvalidTags
 from flashcards.domain.transcripts import (
@@ -128,6 +128,10 @@ def _register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=413, content={"detail": "The document has too many pages."}
         )
+
+    async def unreadable_document(_request: Request, exc: Exception) -> JSONResponse:
+        logger.warning("unreadable upload: %s", exc)
+        return JSONResponse(status_code=422, content={"detail": "The document could not be read."})
 
     async def invalid_goal(_request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
@@ -254,6 +258,7 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceeded, quota_exceeded)
     app.add_exception_handler(UnsupportedMediaType, unsupported_media)
     app.add_exception_handler(TooManyPages, too_large)
+    app.add_exception_handler(UnreadableDocument, unreadable_document)
     app.add_exception_handler(InvalidVideoUrl, invalid_video_url)
     app.add_exception_handler(TranscriptUnavailable, no_transcript)
     app.add_exception_handler(InvalidTranscript, invalid_transcript)

@@ -103,6 +103,14 @@ def test_generate_rejects_unsupported_media(member: tuple[TestClient, str]) -> N
     assert resp.status_code == 415
 
 
+def test_generate_rejects_a_corrupt_pdf(member: tuple[TestClient, str]) -> None:
+    client, _ = member
+    deck_id = _make_deck(client)
+    resp = _upload(client, deck_id, b"%PDF-1.4\n" + b"\x00garbage" * 64)
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "The document could not be read."}
+
+
 def test_generate_rejects_too_many_pages(member: tuple[TestClient, str]) -> None:
     client, _ = member
     deck_id = _make_deck(client)

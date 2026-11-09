@@ -42,6 +42,25 @@ class IllegalJobTransition(JobError):
     """A lifecycle transition was attempted from a state that does not allow it."""
 
 
+class JobFailure(enum.StrEnum):
+    """Why a job failed, as the user-facing message stored on the job.
+
+    A failed job's error is always one of these, never exception text: provider
+    SDK messages and internal errors can carry details the user must not see, so
+    the worker logs them and stores only the category's message.
+    """
+
+    PROVIDER_UNAVAILABLE = "The AI provider is unavailable right now. Try again later."
+    BAD_MODEL_OUTPUT = "The AI returned an unusable answer. Try again."
+    UNREADABLE_DOCUMENT = "The document could not be read."
+    NO_READABLE_PAGES = "The document has no readable pages."
+    QUOTA_EXCEEDED = "Your AI quota for this period is used up."
+    INTERNAL = "Something went wrong while generating cards. Try again."
+
+
+_PUBLIC_FAILURES = frozenset(failure.value for failure in JobFailure)
+
+
 @dataclass(frozen=True, slots=True)
 class AiJob:
     id: str
@@ -71,6 +90,17 @@ class AiJob:
         return self.status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED)
 
     @property
+    def public_error(self) -> str | None:
+        """The error safe to show the job's owner.
+
+        Anything that is not a JobFailure message (such as raw exception text stored
+        before failures were categorized) is shown as the generic internal failure.
+        """
+        if self.error is None or self.error in _PUBLIC_FAILURES:
+            return self.error
+        return JobFailure.INTERNAL.value
+
+    @property
     def can_retry(self) -> bool:
         return self.status is JobStatus.FAILED and self.attempt < self.max_attempts
 
@@ -94,9 +124,9 @@ class AiJob:
         self._require(self.status is JobStatus.RUNNING, "succeed")
         return replace(self, status=JobStatus.SUCCEEDED, updated_at=now)
 
-    def failed(self, error: str, now: datetime) -> AiJob:
+    def failed(self, failure: JobFailure, now: datetime) -> AiJob:
         self._require(self.status is JobStatus.RUNNING, "fail")
-        return replace(self, status=JobStatus.FAILED, error=error, updated_at=now)
+        return replace(self, status=JobStatus.FAILED, error=failure.value, updated_at=now)
 
     def cancelled(self, now: datetime) -> AiJob:
         self._require(not self.is_terminal, "cancel")
