@@ -22,6 +22,10 @@ MAX_PREVIEW_FIELD_CHARS = 500
 MAX_CLONE_DECKS = 500
 MAX_CLONE_NOTES = 20_000
 MAX_CLONE_CARDS = 20_000
+# Image occlusion images are copied to the recipient (ADR 0013), so they are capped too.
+MAX_CLONE_MEDIA_BYTES = 100 * 1024 * 1024
+# Each started MiB of copied images costs one card's worth of the daily clone allowance.
+CLONE_UNIT_BYTES = 1024 * 1024
 
 
 class ShareNotFound(Exception):

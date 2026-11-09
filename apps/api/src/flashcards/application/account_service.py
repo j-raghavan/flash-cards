@@ -18,6 +18,7 @@ from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
+from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.ports import (
     AiJobRepository,
@@ -29,6 +30,7 @@ from flashcards.domain.ports import (
     MediaRepository,
     MockExamRepository,
     NoteRepository,
+    NoteTypeRepository,
     ObjectStore,
     PassageRepository,
     QuotaRepository,
@@ -58,6 +60,7 @@ class AccountExport:
     media: tuple[MediaAsset, ...]
     mock_exams: tuple[MockExam, ...]
     share_links: tuple[ShareLink, ...]
+    note_types: tuple[CustomNoteType, ...] = ()
     study_settings: StudySettings | None = None
 
 
@@ -86,8 +89,10 @@ class AccountService:
         login_throttle: LoginThrottleRepository,
         user_tokens: UserTokenRepository,
         invites: InviteService,
+        note_types: NoteTypeRepository,
         study_settings: StudySettingsRepository,
     ) -> None:
+        self._note_types = note_types
         self._library = library
         self._decks = decks
         self._notes = notes
@@ -136,6 +141,7 @@ class AccountService:
             media=tuple(await self._media.list_for_owner(user.id)),
             mock_exams=tuple(await self._mock_exams.list_for_owner(user.id)),
             share_links=tuple(await self._share_links.list_for_owner(user.id)),
+            note_types=tuple(await self._note_types.list_for_owner(user.id)),
             study_settings=await self._study_settings.get(user.id),
         )
 
@@ -161,6 +167,8 @@ class AccountService:
         # Every deck (flat, so a dangling-parent deck is still removed), with its
         # notes, cards, schedules and review logs.
         await self._library.delete_owner_library(owner_id)
+        # Note types go once no note uses them.
+        await self._note_types.delete_for_owner(owner_id)
         # Any review logs not reached through a deck (export reads them per owner,
         # so deletion matches), the uploaded media, and the usage counters.
         await self._review_logs.delete_for_owner(owner_id)

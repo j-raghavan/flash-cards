@@ -42,7 +42,8 @@ from flashcards.domain.jobs import AiJob, JobStatus, JobType
 from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import ExamQuestion, MockExam
-from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.note_types import CardTemplate, CustomNoteType
+from flashcards.domain.notes import Card, Mask, Note, NoteType, Occlusion
 from flashcards.domain.planner import PlanBaseline, StudyPlan
 from flashcards.domain.progress import StudySettings
 from flashcards.domain.scheduling import (
@@ -198,6 +199,24 @@ class NoteRow(Base):
     fields: Mapped[dict[str, str]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # A custom note's type; a type in use cannot be deleted (ADR 0013).
+    note_type_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("note_types.id", ondelete="RESTRICT"), index=True, nullable=True
+    )
+    # An image occlusion note's image and masks: {"image_id": ..., "masks": [...]}.
+    occlusion: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+
+
+class NoteTypeRow(Base):
+    __tablename__ = "note_types"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String)
+    fields: Mapped[list[str]] = mapped_column(JSON)
+    # [{"ordinal": 0, "name": ..., "front": ..., "back": ...}, ...]
+    templates: Mapped[list[dict[str, object]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class CardRow(Base):
@@ -323,6 +342,8 @@ def note_to_row(note: Note) -> NoteRow:
         fields=dict(note.fields),
         created_at=note.created_at,
         tags=list(note.tags),
+        note_type_id=note.note_type_id,
+        occlusion=occlusion_to_json(note.occlusion) if note.occlusion is not None else None,
     )
 
 
@@ -335,6 +356,69 @@ def note_from_row(row: NoteRow) -> Note:
         fields=tuple(row.fields.items()),
         created_at=row.created_at,
         tags=tuple(row.tags or ()),
+        note_type_id=row.note_type_id,
+        occlusion=occlusion_from_json(row.occlusion) if row.occlusion is not None else None,
+    )
+
+
+def occlusion_to_json(occlusion: Occlusion) -> dict[str, object]:
+    return {
+        "image_id": occlusion.image_id,
+        "masks": [[m.id, m.left, m.top, m.width, m.height] for m in occlusion.masks],
+    }
+
+
+def _number(value: object) -> float:
+    # The column is only written by occlusion_to_json, so anything else is corruption.
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    raise ValueError("corrupt occlusion: expected a number")
+
+
+def _items(value: object) -> list[object]:
+    if isinstance(value, list):
+        return list(value)
+    raise ValueError("corrupt occlusion: expected a list")
+
+
+def occlusion_from_json(data: dict[str, object]) -> Occlusion:
+    masks: list[Mask] = []
+    for item in _items(data["masks"]):
+        mask_id, left, top, width, height = (_number(v) for v in _items(item))
+        masks.append(Mask(id=int(mask_id), left=left, top=top, width=width, height=height))
+    return Occlusion(image_id=str(data["image_id"]), masks=tuple(masks))
+
+
+def note_type_to_row(note_type: CustomNoteType) -> NoteTypeRow:
+    return NoteTypeRow(
+        id=note_type.id,
+        owner_id=note_type.owner_id,
+        name=note_type.name,
+        fields=list(note_type.fields),
+        templates=[
+            {"ordinal": t.ordinal, "name": t.name, "front": t.front, "back": t.back}
+            for t in note_type.templates
+        ],
+        created_at=note_type.created_at,
+    )
+
+
+def note_type_from_row(row: NoteTypeRow) -> CustomNoteType:
+    return CustomNoteType(
+        id=row.id,
+        owner_id=row.owner_id,
+        name=row.name,
+        fields=tuple(row.fields),
+        templates=tuple(
+            CardTemplate(
+                ordinal=int(_number(t["ordinal"])),
+                name=str(t["name"]),
+                front=str(t["front"]),
+                back=str(t["back"]),
+            )
+            for t in row.templates
+        ),
+        created_at=row.created_at,
     )
 
 

@@ -28,6 +28,7 @@ from flashcards.adapters.memory import (
     InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryObjectStore,
     InMemoryPassageRepository,
     InMemoryPlanBaselineRepository,
@@ -66,6 +67,7 @@ from flashcards.application.library_service import LibraryService
 from flashcards.application.media_service import MediaService
 from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
+from flashcards.application.note_type_service import NoteTypeService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.progress_service import ProgressService
 from flashcards.application.registration_service import RegistrationService
@@ -93,6 +95,7 @@ from flashcards.domain.ports import (
     MediaTypeSniffer,
     MockExamRepository,
     NoteRepository,
+    NoteTypeRepository,
     ObjectStore,
     PackageReader,
     PassageRepository,
@@ -125,6 +128,7 @@ class Repositories:
     sessions: SessionRepository
     decks: DeckRepository
     notes: NoteRepository
+    note_types: NoteTypeRepository
     cards: CardRepository
     schedules: ScheduleRepository
     review_logs: ReviewLogRepository
@@ -169,6 +173,7 @@ class Container:
     auth: AuthService
     decks: DeckService
     notes: NoteService
+    note_types: NoteTypeService
     reviews: ReviewService
     library: LibraryService
     card_browser: CardBrowserService
@@ -236,6 +241,9 @@ def build_services(repos: Repositories) -> Container:
         repos.clock,
         repos.unit_of_work,
     )
+    note_types = NoteTypeService(
+        repos.note_types, repos.notes, notes, library, repos.media, repos.clock
+    )
     goal_service = GoalService(decks, repos.goals, repos.clock)
     progress = ProgressService(decks, repos.study_settings, repos.study_stats, repos.clock)
     planner = PlannerService(
@@ -270,6 +278,7 @@ def build_services(repos: Repositories) -> Container:
         repos.login_throttle,
         repos.user_tokens,
         invites,
+        repos.note_types,
         repos.study_settings,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
@@ -312,6 +321,8 @@ def build_services(repos: Repositories) -> Container:
         repos.users,
         repos.clone_quota,
         repos.clock,
+        repos.note_types,
+        repos.media,
     )
     audit = AuditService(repos.audit_events, repos.clock)
     admin = AdminService(
@@ -344,6 +355,7 @@ def build_services(repos: Repositories) -> Container:
         auth=auth,
         decks=decks,
         notes=notes,
+        note_types=note_types,
         reviews=reviews,
         library=library,
         card_browser=CardBrowserService(
@@ -400,6 +412,7 @@ def build_container(
             sessions=InMemorySessionRepository(),
             decks=InMemoryDeckRepository(),
             notes=InMemoryNoteRepository(),
+            note_types=InMemoryNoteTypeRepository(),
             cards=cards,
             schedules=schedules,
             review_logs=review_logs,

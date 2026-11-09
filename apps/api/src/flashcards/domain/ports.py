@@ -19,6 +19,7 @@ from flashcards.domain.login_throttle import ThrottleState
 from flashcards.domain.mail import OutgoingEmail
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
+from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.planner import PlanBaseline
 from flashcards.domain.progress import ActivityBucket, DueBucket, StudySettings
@@ -198,10 +199,48 @@ class NoteRepository(Protocol):
         """How many notes the deck has, without loading them."""
         ...
 
+    async def list_for_note_type(self, note_type_id: str) -> list[Note]:
+        """Every note of a custom note type, oldest first."""
+        ...
+
+    async def count_for_note_type(self, note_type_id: str) -> int:
+        """How many notes use a custom note type, without loading them."""
+        ...
+
     async def delete(self, note_id: str) -> None: ...
 
     async def delete_for_deck(self, deck_id: str) -> None:
         """Delete every note in a deck."""
+        ...
+
+
+class NoteTypeRepository(Protocol):
+    async def add(self, note_type: CustomNoteType) -> None: ...
+
+    async def get(self, note_type_id: str) -> CustomNoteType | None: ...
+
+    async def lock(self, note_type_id: str) -> CustomNoteType | None:
+        """The note type, locked until the transaction ends (SELECT ... FOR UPDATE).
+
+        Taken before creating or editing notes of the type and before editing or
+        deleting the type, so a type edit never misses a note made meanwhile.
+        """
+        ...
+
+    async def list_for_owner(self, owner_id: str) -> list[CustomNoteType]:
+        """The owner's note types, oldest first."""
+        ...
+
+    async def count_for_owner(self, owner_id: str) -> int: ...
+
+    async def update(self, note_type: CustomNoteType) -> None:
+        """Persist a change to a note type's name, fields or templates."""
+        ...
+
+    async def delete(self, note_type_id: str) -> None: ...
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        """Delete every note type the user owns (account deletion, after their notes)."""
         ...
 
 

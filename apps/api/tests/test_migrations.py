@@ -38,6 +38,7 @@ APP_TABLES = {
     "audit_events",
     "login_throttle",
     "user_tokens",
+    "note_types",
     "study_settings",
     "review_last_answers",
     "plan_baselines",

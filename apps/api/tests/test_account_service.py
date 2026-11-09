@@ -15,6 +15,7 @@ from flashcards.adapters.memory import (
     InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryObjectStore,
     InMemoryPassageRepository,
     InMemoryQuotaRepository,
@@ -84,6 +85,7 @@ class _Fixture:
         self.user_tokens = InMemoryUserTokenRepository()
         self.study_settings = InMemoryStudySettingsRepository()
         self.invite_repo = InMemoryInviteRepository()
+        self.note_types = InMemoryNoteTypeRepository()
         self.invites = InviteService(self.invite_repo, clock)
         self.decks = DeckService(self.deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, clock)
@@ -98,7 +100,7 @@ class _Fixture:
             self.log_repo, self.goal_repo, self.ai_jobs, self.draft_repo, self.store,
             self.sessions, self.users, self.media, self.quotas, self.mock_exams,
             self.passages, self.ai_calls, self.share_links, self.clone_quota, self.throttle,
-            self.user_tokens, self.invites, self.study_settings,
+            self.user_tokens, self.invites, self.note_types, self.study_settings,
         )
 
     async def seed_full_account(self, owner: str) -> None:

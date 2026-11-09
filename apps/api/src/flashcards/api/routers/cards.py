@@ -44,12 +44,14 @@ async def create_note(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> list[CardOut]:
-    _note, cards = await container.notes.create_note(
+    _note, cards = await container.note_types.create_note(
         owner_id=caller.user.id,
         deck_id=deck_id,
         note_type=body.note_type,
         fields=body.fields,
         tags=body.tags,
+        note_type_id=body.note_type_id,
+        occlusion=body.occlusion.to_domain() if body.occlusion is not None else None,
     )
     return [CardOut.from_card(card) for card in cards]
 
@@ -142,7 +144,13 @@ async def get_card(
 ) -> CardDetailOut:
     card = await container.notes.get_card(owner_id=caller.user.id, card_id=card_id)
     note = await container.notes.get_note(owner_id=caller.user.id, note_id=card.note_id)
-    return CardDetailOut.from_card_and_note(card, note)
+    template = None
+    if note.note_type_id is not None:
+        note_type = await container.note_types.get(
+            owner_id=caller.user.id, note_type_id=note.note_type_id
+        )
+        template = note_type.template(card.ordinal)
+    return CardDetailOut.from_card_and_note(card, note, template)
 
 
 @router.post("/cards/{card_id}/suspend", response_model=CardOut)
@@ -184,8 +192,12 @@ async def update_note(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> NoteOut:
-    note, cards = await container.library.update_note(
-        owner_id=caller.user.id, note_id=note_id, fields=body.fields, tags=body.tags
+    note, cards = await container.note_types.update_note(
+        owner_id=caller.user.id,
+        note_id=note_id,
+        fields=body.fields,
+        tags=body.tags,
+        occlusion=body.occlusion.to_domain() if body.occlusion is not None else None,
     )
     return NoteOut.from_note(note, cards)
 

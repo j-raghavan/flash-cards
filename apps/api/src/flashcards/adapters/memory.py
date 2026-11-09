@@ -22,6 +22,7 @@ from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.login_throttle import ThrottleState, after_attempt
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
+from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.planner import PlanBaseline
 from flashcards.domain.progress import (
@@ -208,12 +209,51 @@ class InMemoryNoteRepository:
     async def count_for_deck(self, deck_id: str) -> int:
         return sum(1 for note in self._by_id.values() if note.deck_id == deck_id)
 
+    async def list_for_note_type(self, note_type_id: str) -> list[Note]:
+        notes = [n for n in self._by_id.values() if n.note_type_id == note_type_id]
+        return sorted(notes, key=lambda note: (note.created_at, note.id))
+
+    async def count_for_note_type(self, note_type_id: str) -> int:
+        return sum(1 for note in self._by_id.values() if note.note_type_id == note_type_id)
+
     async def delete(self, note_id: str) -> None:
         self._by_id.pop(note_id, None)
 
     async def delete_for_deck(self, deck_id: str) -> None:
         for note_id in [n.id for n in self._by_id.values() if n.deck_id == deck_id]:
             del self._by_id[note_id]
+
+
+class InMemoryNoteTypeRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[str, CustomNoteType] = {}
+
+    async def add(self, note_type: CustomNoteType) -> None:
+        self._by_id[note_type.id] = note_type
+
+    async def get(self, note_type_id: str) -> CustomNoteType | None:
+        return self._by_id.get(note_type_id)
+
+    async def lock(self, note_type_id: str) -> CustomNoteType | None:
+        return self._by_id.get(note_type_id)  # one event loop: nothing to lock against
+
+    async def list_for_owner(self, owner_id: str) -> list[CustomNoteType]:
+        owned = [t for t in self._by_id.values() if t.owner_id == owner_id]
+        return sorted(owned, key=lambda t: (t.created_at, t.id))
+
+    async def count_for_owner(self, owner_id: str) -> int:
+        return sum(1 for t in self._by_id.values() if t.owner_id == owner_id)
+
+    async def update(self, note_type: CustomNoteType) -> None:
+        if note_type.id in self._by_id:
+            self._by_id[note_type.id] = note_type
+
+    async def delete(self, note_type_id: str) -> None:
+        self._by_id.pop(note_type_id, None)
+
+    async def delete_for_owner(self, owner_id: str) -> None:
+        for note_type_id in [t.id for t in self._by_id.values() if t.owner_id == owner_id]:
+            del self._by_id[note_type_id]
 
 
 class InMemoryCardRepository:

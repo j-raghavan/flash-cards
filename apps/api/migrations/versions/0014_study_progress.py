@@ -2,7 +2,7 @@
 """Study progress: undo snapshots on review logs, study settings, plan baselines
 
 Revision ID: 0014
-Revises: 0012
+Revises: 0013
 Create Date: 2026-11-08
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0014"
-down_revision = "0012"
+down_revision = "0013"
 branch_labels = None
 depends_on = None
 

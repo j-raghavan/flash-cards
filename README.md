@@ -7,7 +7,7 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 ## Features
 
 - AI card generation from PDF, PNG and JPEG files or a lecture transcript, with live progress, retry and cancel, every card reviewed before it is scheduled, and a source reference on each one
-- Basic and Cloze cards with image and audio attachments
+- Basic, Cloze, Image Occlusion and custom note types (user-defined fields and card templates), with image and audio attachments
 - Card browser with search and filters by state, tag, flag and proficiency, plus bulk move, delete, tag, suspend, bury and flag
 - FSRS-based adaptive scheduling, with deck statistics and proficiency, a review heatmap, a retention curve and a forecast of upcoming reviews, per deck and overall
 - A daily goal with a streak and a completion signal, counted in the user's own time zone
@@ -22,7 +22,6 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 ## Roadmap
 
 - Web client: installable PWA with offline review
-- Image Occlusion and custom note types
 - Anki `.apkg` export
 - Automatic YouTube transcript retrieval
 
@@ -35,6 +34,8 @@ FastAPI, SQLAlchemy 2, PostgreSQL (including the job queue), React, TypeScript, 
 - [Product requirements](docs/PRD.md)
 - [Engineering principles](docs/ENGINEERING.md) (Reuse first, KISS, DRY, SOLID, DDD, 97% coverage)
 - [Architecture decisions](docs/adr/)
+- [Self-hosting with Docker Compose](docs/runbooks/self-hosting-compose.md)
+- [Threat model](docs/security/threat-model.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 

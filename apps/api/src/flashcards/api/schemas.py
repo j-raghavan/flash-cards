@@ -13,6 +13,7 @@ from typing import Annotated
 
 from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, model_validator
 
+from flashcards.api.note_type_schemas import CardTemplateOut, NoteTypeOut, OcclusionModel
 from flashcards.application.account_service import AccountExport
 from flashcards.application.bulk_card_service import MAX_BULK_CARDS, BulkAction
 from flashcards.application.planner_service import PlanReport
@@ -28,7 +29,8 @@ from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.mock_exam import ExamResult, MockExam
-from flashcards.domain.notes import MAX_FLAG, Card, Note, NoteType
+from flashcards.domain.note_types import CardTemplate
+from flashcards.domain.notes import MAX_FLAG, MAX_MEDIA_ID_LEN, Card, Note, NoteType
 from flashcards.domain.planner import ChangeReason, PlanChange, StudyPlan
 from flashcards.domain.progress import (
     MAX_TIME_ZONE_LENGTH,
@@ -165,13 +167,16 @@ class NoteCreateRequest(BaseModel):
     note_type: NoteType
     fields: dict[str, str]
     tags: list[TagIn] = Field(default_factory=list, max_length=MAX_TAGS_PER_NOTE)
+    note_type_id: str | None = Field(default=None, max_length=MAX_MEDIA_ID_LEN)  # custom
+    occlusion: OcclusionModel | None = None  # image occlusion
 
 
 class NoteUpdateRequest(BaseModel):
-    """Either or both; the note type cannot change."""
+    """Any of these; the note type cannot change. Masks apply to image occlusion notes."""
 
     fields: dict[str, str] | None = None
     tags: list[TagIn] | None = Field(default=None, max_length=MAX_TAGS_PER_NOTE)
+    occlusion: OcclusionModel | None = None
 
 
 class CardOut(BaseModel):
@@ -197,17 +202,31 @@ class CardOut(BaseModel):
 
 
 class CardDetailOut(CardOut):
+    """A card with what a client needs to render it (ADR 0013).
+
+    A custom card carries its template; an image occlusion card carries the
+    image and every mask, and its own masks are those whose id is its ordinal.
+    """
+
     note_type: NoteType
     fields: dict[str, str]
     tags: list[str]
+    note_type_id: str | None = None
+    template: CardTemplateOut | None = None
+    occlusion: OcclusionModel | None = None
 
     @classmethod
-    def from_card_and_note(cls, card: Card, note: Note) -> CardDetailOut:
+    def from_card_and_note(
+        cls, card: Card, note: Note, template: CardTemplate | None = None
+    ) -> CardDetailOut:
         return cls(
             **CardOut.from_card(card).model_dump(),
             note_type=note.note_type,
             fields=dict(note.fields),
             tags=list(note.tags),
+            note_type_id=note.note_type_id,
+            template=CardTemplateOut.from_template(template) if template is not None else None,
+            occlusion=OcclusionModel.from_domain(note.occlusion),
         )
 
 
@@ -282,6 +301,8 @@ class NoteOut(BaseModel):
     tags: list[str]
     created_at: datetime
     cards: list[CardOut]
+    note_type_id: str | None = None
+    occlusion: OcclusionModel | None = None
 
     @classmethod
     def from_note(cls, note: Note, cards: list[Card]) -> NoteOut:
@@ -293,6 +314,8 @@ class NoteOut(BaseModel):
             tags=list(note.tags),
             created_at=note.created_at,
             cards=[CardOut.from_card(card) for card in cards],
+            note_type_id=note.note_type_id,
+            occlusion=OcclusionModel.from_domain(note.occlusion),
         )
 
 
@@ -729,6 +752,8 @@ class NoteExportOut(BaseModel):
     fields: dict[str, str]
     tags: list[str]
     created_at: datetime
+    note_type_id: str | None = None
+    occlusion: OcclusionModel | None = None
 
 
 class CardExportOut(BaseModel):
@@ -798,6 +823,7 @@ class AccountExportOut(BaseModel):
     media: list[MediaExportOut]
     mock_exams: list[MockExamExportOut]
     share_links: list[ShareLinkOut]
+    note_types: list[NoteTypeOut] = Field(default_factory=list)
     study_settings: StudySettingsOut | None = None
 
     @classmethod
@@ -823,6 +849,8 @@ class AccountExportOut(BaseModel):
                     fields=dict(n.fields),
                     tags=list(n.tags),
                     created_at=n.created_at,
+                    note_type_id=n.note_type_id,
+                    occlusion=OcclusionModel.from_domain(n.occlusion),
                 )
                 for n in export.notes
             ],
@@ -887,6 +915,7 @@ class AccountExportOut(BaseModel):
                 for e in export.mock_exams
             ],
             share_links=[ShareLinkOut.from_link(link) for link in export.share_links],
+            note_types=[NoteTypeOut.from_note_type(t) for t in export.note_types],
             study_settings=(
                 StudySettingsOut.from_settings(export.study_settings)
                 if export.study_settings is not None
