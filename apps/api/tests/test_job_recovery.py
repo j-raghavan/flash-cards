@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -18,12 +18,14 @@ from flashcards.adapters.memory import (
     InMemoryObjectStore,
     InMemoryQuotaRepository,
 )
+from flashcards.api import app as app_module
 from flashcards.api.app import create_app
 from flashcards.application.deck_service import DeckService
 from flashcards.application.generation_request_service import GenerationRequestService
 from flashcards.config import Settings
 from flashcards.domain.ai import Thoroughness
 from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
+from flashcards.domain.ports import AiJobRepository
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 
@@ -69,7 +71,7 @@ def _service(
     )
 
 
-async def _add(jobs: InMemoryAiJobRepository, status: JobStatus) -> AiJob:
+async def _add(jobs: AiJobRepository, status: JobStatus) -> AiJob:
     job = _job()
     await jobs.add(job)
     if status is JobStatus.QUEUED:
@@ -168,3 +170,61 @@ def test_a_recovery_failure_does_not_stop_startup(
     with caplog.at_level(logging.ERROR, logger="flashcards"), TestClient(app) as client:
         assert client.get("/healthz").status_code == 200
     assert "could not recover interrupted generation jobs" in caplog.text
+
+
+async def test_the_sweep_skips_jobs_touched_recently() -> None:
+    jobs, queue = InMemoryAiJobRepository(), InMemoryJobQueue()
+    await _add(jobs, JobStatus.QUEUED)
+    running = await _add(jobs, JobStatus.RUNNING)
+    service = _service(jobs, queue)
+
+    # Both were touched at NOW, which is "now" for the service: neither is idle.
+    idle = timedelta(minutes=1)
+    assert await service.recover_interrupted(queued_idle=idle, running_idle=idle) == 0
+    assert queue.enqueued == []
+    still = await jobs.get(running.id)
+    assert still is not None and still.status is JobStatus.RUNNING
+
+
+async def test_a_job_out_of_attempts_is_failed_not_enqueued() -> None:
+    from dataclasses import replace
+
+    jobs, queue = InMemoryAiJobRepository(), InMemoryJobQueue()
+    job = replace(_job(), max_attempts=1)
+    await jobs.add(job)
+    assert await jobs.try_claim(job.id, NOW) is not None
+
+    assert await _service(jobs, queue).recover_interrupted() == 0
+
+    assert queue.enqueued == []
+    failed = await jobs.get(job.id)
+    assert failed is not None and failed.status is JobStatus.FAILED
+    assert failed.error == JobFailure.INTERNAL.value
+
+
+def test_the_periodic_sweep_picks_up_left_behind_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(app_module, "JOB_SWEEP_SECONDS", 0.01)
+    monkeypatch.setattr(app_module, "QUEUED_IDLE", timedelta(0))
+    app = _app()
+    generation: GenerationRequestService = app.state.container.generation
+    jobs = generation._jobs
+    calls: list[tuple[timedelta, timedelta]] = []
+    real = generation.recover_interrupted
+
+    async def spy(*, queued_idle: timedelta, running_idle: timedelta) -> int:
+        calls.append((queued_idle, running_idle))
+        return await real(queued_idle=queued_idle, running_idle=running_idle)
+
+    monkeypatch.setattr(generation, "recover_interrupted", spy)
+    with TestClient(app):
+        # A job left QUEUED after startup, as an old instance hands it back.
+        queued = asyncio.run(_add(jobs, JobStatus.QUEUED))
+        for _ in range(300):
+            job = asyncio.run(jobs.get(queued.id))
+            if job is not None and job.is_terminal:
+                break
+            asyncio.run(asyncio.sleep(0.01))
+
+    assert job is not None and job.is_terminal  # the sweep handed it to the worker
+    assert calls[0] == (timedelta(0), timedelta(0))  # startup: everything
+    assert calls[1] == (timedelta(0), app_module.RUNNING_IDLE)  # the sweep

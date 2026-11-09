@@ -403,13 +403,13 @@ class AiJobRepository(Protocol):
     async def try_requeue_interrupted(
         self, job_id: str, attempt: int, now: datetime
     ) -> AiJob | None:
-        """Atomically re-queue a RUNNING job still at this attempt.
+        """Atomically recover a RUNNING job still at this attempt.
 
-        Mirrors AiJob.requeued_after_interruption.
-
-        Returns the queued job, or None when the job has moved on (finished, or
-        already requeued), so a job that completed meanwhile is never run again.
-        A SQL adapter uses one conditional UPDATE.
+        Mirrors AiJob.requeued_after_interruption: the job is QUEUED again as the
+        next attempt, or FAILED when its attempts are spent. Returns the new state,
+        or None when the job has moved on (finished, or already recovered), so a job
+        that completed meanwhile is never run again. A SQL adapter uses one
+        conditional UPDATE.
         """
         ...
 

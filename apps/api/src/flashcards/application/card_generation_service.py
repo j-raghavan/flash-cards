@@ -10,6 +10,7 @@ cooperative: the flag is checked between pages.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -117,6 +118,11 @@ class CardGenerationService:
         await self._uow.commit()
         try:
             await self._process(job)
+        except asyncio.CancelledError:
+            # The worker is stopping (shutdown or deploy): hand the job back so the
+            # next worker resumes it instead of leaving it RUNNING with nobody on it.
+            await self._release(job)
+            raise
         except _Superseded:
             # The job was requeued after this run was presumed interrupted (ADR 0017):
             # the new run owns it now. Drop this page's work and write nothing.
@@ -132,6 +138,15 @@ class CardGenerationService:
             if current is None:
                 return  # finished, cancelled or superseded meanwhile: not ours to fail
             await self._jobs.update(current.failed(classify_failure(exc), self._clock.now()))
+
+    async def _release(self, job: AiJob) -> None:
+        try:
+            await self._uow.rollback()  # the in-flight page is regenerated next time
+            await self._jobs.try_requeue_interrupted(job.id, job.attempt, self._clock.now())
+            await self._uow.commit()
+        except Exception:
+            # Startup recovery picks the job up later; never mask the cancellation.
+            logger.exception("could not release generation job %s on shutdown", job.id)
 
     async def _current(self, job: AiJob) -> AiJob:
         """Re-read the job, or raise _Superseded if this run no longer owns it."""

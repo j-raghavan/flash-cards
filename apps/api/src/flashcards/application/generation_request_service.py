@@ -4,10 +4,17 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.ai import Thoroughness
-from flashcards.domain.jobs import AiJob, IllegalJobTransition, JobNotFound, new_generation_job
+from flashcards.domain.jobs import (
+    AiJob,
+    IllegalJobTransition,
+    JobNotFound,
+    JobStatus,
+    new_generation_job,
+)
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
@@ -126,20 +133,39 @@ class GenerationRequestService:
         await self._queue.enqueue(job.id)
         return queued
 
-    async def recover_interrupted(self) -> int:
-        """Hand jobs left behind by a stopped process to the worker; return how many.
+    async def recover_interrupted(
+        self,
+        *,
+        queued_idle: timedelta = timedelta(0),
+        running_idle: timedelta = timedelta(0),
+    ) -> int:
+        """Hand jobs nobody is working on to this worker; return how many (ADR 0017).
 
-        Run once at startup, before the worker starts. QUEUED jobs are simply
-        enqueued again (the queue lives in memory). RUNNING jobs are requeued as a
-        new attempt and resume from completed_units, so pages already generated are
-        neither regenerated nor charged again, and the requeue is conditional, so a
-        job that finished meanwhile is left alone. A runner in another process that
-        still holds the old attempt stops at its next progress check.
+        Only jobs untouched for at least the given idle time are considered: at
+        startup both are zero (anything queued or running belongs to a process that
+        is gone); a periodic sweep uses longer times. The worker refreshes a job's
+        updated_at with every page, so a RUNNING job idle that long has lost its
+        runner.
+
+        QUEUED jobs are enqueued again (the queue lives in memory, and claiming is
+        conditional, so a duplicate is harmless). RUNNING jobs are recovered as the
+        next attempt and resume from completed_units, so pages already generated are
+        neither regenerated nor charged again; a job whose attempts are spent fails
+        instead, so a job that crashes the process cannot loop forever. Recovery is
+        conditional, so a job that finished meanwhile is left alone, and a runner
+        elsewhere that still holds the old attempt stops at its next progress check.
         """
         now = self._clock.now()
-        recovered = [job.id for job in await self._jobs.list_queued()]
+        recovered = [
+            job.id
+            for job in await self._jobs.list_queued()
+            if job.updated_at <= now - queued_idle
+        ]
         for job in await self._jobs.list_running():
-            if await self._jobs.try_requeue_interrupted(job.id, job.attempt, now) is not None:
+            if job.updated_at > now - running_idle:
+                continue
+            after = await self._jobs.try_requeue_interrupted(job.id, job.attempt, now)
+            if after is not None and after.status is JobStatus.QUEUED:
                 recovered.append(job.id)
         for job_id in recovered:
             await self._queue.enqueue(job_id)

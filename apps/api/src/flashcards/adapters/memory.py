@@ -388,9 +388,9 @@ class InMemoryAiJobRepository:
         job = self._by_id.get(job_id)
         if job is None or job.status is not JobStatus.RUNNING or job.attempt != attempt:
             return None
-        queued = job.requeued_after_interruption(now)
-        self._by_id[job_id] = queued
-        return queued
+        recovered = job.requeued_after_interruption(now)
+        self._by_id[job_id] = recovered
+        return recovered
 
     async def list_for_owner(self, owner_id: str) -> list[AiJob]:
         return [j for j in self._by_id.values() if j.owner_id == owner_id]

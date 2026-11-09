@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Protocol, runtime_checkable
 
 from fastapi import FastAPI, Request
@@ -312,7 +314,12 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
 
         await _recover_jobs(provider)
         job_queue.start(process)
+        sweeper = asyncio.create_task(_sweep_jobs(provider))
         yield
+        sweeper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sweeper
+        # Stopping the worker hands its running job back as QUEUED (ADR 0017).
         await job_queue.stop()
         if isinstance(configured_llm, Closeable):
             await configured_llm.aclose()
@@ -359,22 +366,50 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     return app
 
 
-async def _recover_jobs(provider: ServicesProvider) -> None:
-    """Requeue the jobs a previous process left queued or running (ADR 0017).
+# How often the worker looks for jobs nobody is working on, and how long a job
+# must sit untouched first. The worker refreshes a running job with every page;
+# one page's provider call can take many minutes (with SDK retries), so a running
+# job is presumed abandoned only well after that (ADR 0017).
+JOB_SWEEP_SECONDS = 60.0
+QUEUED_IDLE = timedelta(minutes=1)
+RUNNING_IDLE = timedelta(minutes=45)
 
-    In SQL mode this is its own unit of work: the requeue commits, then the jobs
-    reach the worker. A failure is logged rather than raised, so a database that
-    is briefly unavailable does not stop the API from starting.
+
+async def _recover_jobs(
+    provider: ServicesProvider,
+    *,
+    queued_idle: timedelta = timedelta(0),
+    running_idle: timedelta = timedelta(0),
+) -> None:
+    """Requeue jobs left queued or running with nobody working on them (ADR 0017).
+
+    At startup every such job belongs to a process that is gone. In SQL mode this
+    is its own unit of work: the recovery commits, then the jobs reach the worker.
+    A failure is logged rather than raised, so a database that is briefly
+    unavailable does not stop the API from starting or the sweep from running.
     """
     recovered = 0
     try:
         async for container in provider():
-            recovered = await container.generation.recover_interrupted()
+            recovered = await container.generation.recover_interrupted(
+                queued_idle=queued_idle, running_idle=running_idle
+            )
     except Exception:
-        logger.exception("could not recover interrupted generation jobs at startup")
+        logger.exception("could not recover interrupted generation jobs")
         return
     if recovered:
         logger.info("requeued %d interrupted generation job(s)", recovered)
+
+
+async def _sweep_jobs(provider: ServicesProvider) -> None:
+    """Periodically pick up jobs another process left behind while this one runs.
+
+    For example, during an overlapping deploy the old instance hands its running
+    job back as QUEUED after this one has started.
+    """
+    while True:
+        await asyncio.sleep(JOB_SWEEP_SECONDS)
+        await _recover_jobs(provider, queued_idle=QUEUED_IDLE, running_idle=RUNNING_IDLE)
 
 
 def _llm_from_settings(settings: Settings) -> LLMProvider:

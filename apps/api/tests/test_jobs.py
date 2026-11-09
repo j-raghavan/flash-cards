@@ -158,11 +158,20 @@ def test_public_error_never_exposes_raw_text() -> None:
     assert legacy.public_error == JobFailure.INTERNAL.value
 
 
-def test_requeue_after_interruption_is_a_free_new_attempt() -> None:
+def test_requeue_after_interruption_spends_an_attempt() -> None:
     running = _job(max_attempts=2).started(NOW).with_total(4, NOW).advanced(NOW)
     queued = running.requeued_after_interruption(NOW)
     assert queued.status is JobStatus.QUEUED
-    assert (queued.attempt, queued.max_attempts) == (2, 3)
+    assert (queued.attempt, queued.max_attempts) == (2, 2)
     assert queued.completed_units == 1  # resumes where it stopped
     with pytest.raises(IllegalJobTransition):
         queued.requeued_after_interruption(NOW)
+
+
+def test_an_interrupted_job_with_no_attempts_left_fails() -> None:
+    # A job that crashes the process every time it runs must not loop forever.
+    running = _job(max_attempts=1).started(NOW)
+    failed = running.requeued_after_interruption(NOW)
+    assert failed.status is JobStatus.FAILED
+    assert failed.error == JobFailure.INTERNAL.value
+    assert not failed.can_retry

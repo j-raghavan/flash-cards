@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
@@ -24,7 +25,7 @@ from flashcards.domain.ai import (
     Thoroughness,
     TokenUsage,
 )
-from flashcards.domain.jobs import JobFailure, JobStatus, new_generation_job
+from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sources import (
     ExtractedPage,
@@ -510,3 +511,49 @@ async def test_a_job_deleted_mid_run_stops_quietly() -> None:
     service = _service(jobs, drafts, store, FakeExtractor([_text_page(1)]), llm)
     await service.run(job_id)
     assert await jobs.get(job_id) is None
+
+
+async def _stop_the_worker() -> None:
+    raise asyncio.CancelledError()  # what InProcessJobQueue.stop() delivers
+
+
+async def test_stopping_the_worker_hands_the_running_job_back() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    job_id = await _seed_job(jobs, store)
+    uow = RecordingUnitOfWork(jobs)
+    llm = FakeLLM(after_call=_stop_the_worker)
+    service = _service(jobs, drafts, store, FakeExtractor([_text_page(1)]), llm, uow)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.run(job_id)
+
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.QUEUED and job.attempt == 2
+    assert uow.log[-2:] == ["rollback running:0/1", "commit queued:0/1"]
+
+
+class _BrokenRequeue(InMemoryAiJobRepository):
+    async def try_requeue_interrupted(
+        self, job_id: str, attempt: int, now: datetime
+    ) -> AiJob | None:
+        raise ConnectionError("database gone")
+
+
+async def test_a_failed_hand_back_never_hides_the_cancellation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    jobs, drafts, store = _BrokenRequeue(), InMemoryDraftCardRepository(), InMemoryObjectStore()
+    job_id = await _seed_job(jobs, store)
+    llm = FakeLLM(after_call=_stop_the_worker)
+    service = _service(jobs, drafts, store, FakeExtractor([_text_page(1)]), llm)
+
+    with caplog.at_level(logging.ERROR, logger="flashcards"), pytest.raises(
+        asyncio.CancelledError
+    ):
+        await service.run(job_id)
+
+    assert "could not release generation job" in caplog.text

@@ -82,7 +82,7 @@ from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, Role
-from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.jobs import AiJob, JobFailure, JobStatus
 from flashcards.domain.login_throttle import (
     FAILURE_WINDOW,
     LOCKOUT,
@@ -623,7 +623,10 @@ class SqlAiJobRepository:
         self, job_id: str, attempt: int, now: datetime
     ) -> AiJob | None:
         # Mirrors AiJob.requeued_after_interruption in one conditional UPDATE: a job
-        # that finished, or was requeued by another process, is left alone.
+        # that finished, or was recovered by another process, is left alone. Every
+        # SET expression sees the row as it was, so all of them test the same
+        # attempts_left.
+        attempts_left = AiJobRow.attempt < AiJobRow.max_attempts
         row = await self._session.scalar(
             update(AiJobRow)
             .where(
@@ -632,10 +635,11 @@ class SqlAiJobRepository:
                 AiJobRow.attempt == attempt,
             )
             .values(
-                status=JobStatus.QUEUED.value,
-                attempt=AiJobRow.attempt + 1,
-                max_attempts=AiJobRow.max_attempts + 1,
-                error=None,
+                status=case(
+                    (attempts_left, JobStatus.QUEUED.value), else_=JobStatus.FAILED.value
+                ),
+                attempt=case((attempts_left, AiJobRow.attempt + 1), else_=AiJobRow.attempt),
+                error=case((attempts_left, null()), else_=JobFailure.INTERNAL.value),
                 updated_at=now,
             )
             .returning(AiJobRow)

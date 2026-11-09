@@ -299,7 +299,7 @@ async def test_list_queued_and_try_requeue_interrupted(engine: AsyncEngine) -> N
         assert requeued is not None and requeued.status is JobStatus.QUEUED
         assert (requeued.attempt, requeued.max_attempts) == (
             claimed.attempt + 1,
-            claimed.max_attempts + 1,
+            claimed.max_attempts,
         )
         # Only once: the job is no longer RUNNING at that attempt.
         assert await repo.try_requeue_interrupted(running.id, claimed.attempt, NOW) is None
@@ -330,3 +330,24 @@ async def test_get_sees_changes_committed_by_another_session(engine: AsyncEngine
         seen = await repo.get(job.id)
         assert seen is not None and seen.cancel_requested is True
         await worker.commit()
+
+
+async def test_try_requeue_interrupted_fails_a_job_with_no_attempts_left(
+    engine: AsyncEngine,
+) -> None:
+    from dataclasses import replace
+
+    sm = create_sessionmaker(engine)
+    job = replace(_job(), max_attempts=1)
+    async with sm() as s, s.begin():
+        repo = SqlAiJobRepository(s)
+        await repo.add(job)
+        claimed = await repo.try_claim(job.id, NOW)
+        assert claimed is not None
+    async with sm() as s, s.begin():
+        failed = await SqlAiJobRepository(s).try_requeue_interrupted(job.id, 1, NOW)
+        assert failed is not None and failed.status is JobStatus.FAILED
+        assert failed.attempt == 1 and failed.error == JobFailure.INTERNAL.value
+    async with sm() as s:
+        stored = await SqlAiJobRepository(s).get(job.id)
+        assert stored is not None and stored.status is JobStatus.FAILED
