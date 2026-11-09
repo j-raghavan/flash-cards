@@ -50,7 +50,8 @@ export function Layout() {
     return <Loading />;
   }
   if (user === null) {
-    const next = `${location.pathname}${location.search}`;
+    // The fragment is kept too: a shared-deck link carries its token there.
+    const next = `${location.pathname}${location.search}${location.hash}`;
     return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   }
 

@@ -734,6 +734,24 @@ progress {
   font-variant-numeric: tabular-nums;
 }
 
+.small {
+  font-size: 0.85rem;
+  margin: 0 0 4px;
+}
+
+.shared-fields {
+  margin: 0;
+}
+
+.shared-fields dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.shared-fields dd {
+  margin: 0 0 8px;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;

@@ -11,6 +11,7 @@ import { DeckDetailPage } from "./pages/DeckDetailPage";
 import { DeckListPage } from "./pages/DeckListPage";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GoalPage, GoalsPage } from "./pages/GoalsPage";
+import { SharedDeckPage, SharePage } from "./pages/SharePage";
 import { JobPage } from "./pages/JobPage";
 import { EditNotePage, NewNotePage } from "./pages/NoteEditorPage";
 import { useDocumentTitle } from "./lib/useDocumentTitle";
@@ -52,6 +53,8 @@ export function AppRoutes() {
         <Route path="/notes/:noteId/edit" element={<EditNotePage />} />
         <Route path="/cards" element={<BrowserPage />} />
         <Route path="/jobs/:jobId" element={<JobPage />} />
+        <Route path="/decks/:deckId/share" element={<SharePage />} />
+        <Route path="/shared" element={<SharedDeckPage />} />
         <Route path="/goals" element={<GoalsPage />} />
         <Route path="/goals/:goalId" element={<GoalPage />} />
         <Route

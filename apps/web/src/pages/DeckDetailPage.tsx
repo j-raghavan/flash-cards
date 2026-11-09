@@ -174,6 +174,9 @@ export function DeckDetailPage() {
         <Link className="button" to={`/cards?deck=${deckId}`}>
           Browse cards
         </Link>
+        <Link className="button" to={`/decks/${deckId}/share`}>
+          Share
+        </Link>
       </div>
 
       {children.length > 0 ? (
