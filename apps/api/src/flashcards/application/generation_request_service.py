@@ -7,7 +7,7 @@ import uuid
 
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.ai import Thoroughness
-from flashcards.domain.jobs import AiJob, JobNotFound, new_generation_job
+from flashcards.domain.jobs import AiJob, IllegalJobTransition, JobNotFound, new_generation_job
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
@@ -120,8 +120,9 @@ class GenerationRequestService:
         generated nor charged again.
         """
         job = await self.get(owner_id=owner_id, job_id=job_id)
-        queued = job.retried(self._clock.now())
-        await self._jobs.update(queued)
+        queued = await self._jobs.try_retry(job.id, self._clock.now())
+        if queued is None:
+            raise IllegalJobTransition(f"cannot retry from {job.status}")
         await self._queue.enqueue(job.id)
         return queued
 

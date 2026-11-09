@@ -321,6 +321,14 @@ class InMemoryAiJobRepository:
         self._by_id[job_id] = claimed
         return claimed
 
+    async def try_retry(self, job_id: str, now: datetime) -> AiJob | None:
+        job = self._by_id.get(job_id)
+        if job is None or not job.can_retry:
+            return None
+        queued = job.retried(now)
+        self._by_id[job_id] = queued
+        return queued
+
     async def request_cancel(self, job_id: str, now: datetime) -> bool:
         job = self._by_id.get(job_id)
         if job is None or job.is_terminal or job.cancel_requested:
@@ -579,3 +587,13 @@ class InMemoryUserTokenRepository:
     async def delete_for_user(self, user_id: str) -> None:
         for token_id in [t.id for t in self._by_id.values() if t.user_id == user_id]:
             del self._by_id[token_id]
+
+
+class NullUnitOfWork:
+    """In memory every write is visible at once, so there is nothing to commit."""
+
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        return None

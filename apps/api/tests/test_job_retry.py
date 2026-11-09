@@ -89,3 +89,30 @@ def test_a_failed_job_resumes_where_it_stopped() -> None:
         assert again.json()["detail"] == "The job cannot do that in its current state."
         assert client.post("/ai/jobs/missing/retry").status_code == 404
         assert TestClient(app).post(f"/ai/jobs/{job_id}/retry").status_code == 401
+
+
+async def test_jobs_are_held_until_the_unit_of_work_commits() -> None:
+    from flashcards.adapters.job_queue import InProcessJobQueue
+    from flashcards.api.provider import _AfterCommitQueue
+
+    seen: list[str] = []
+
+    async def record(job_id: str) -> None:
+        seen.append(job_id)
+
+    queue = InProcessJobQueue()
+    queue.start(record)
+    held = _AfterCommitQueue(queue)
+    try:
+        await held.enqueue("a")
+        await held.enqueue("b")
+        await queue.join()
+        assert seen == []  # nothing reaches the worker before the commit
+        await held.release()
+        await queue.join()
+        assert seen == ["a", "b"]
+        await held.release()  # releasing again sends nothing twice
+        await queue.join()
+        assert seen == ["a", "b"]
+    finally:
+        await queue.stop()

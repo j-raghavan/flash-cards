@@ -8,8 +8,19 @@ and approve the draft cards it produced into a real deck.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.sse import EventSourceResponse
 
 from flashcards.api import job_events as events
@@ -112,6 +123,7 @@ async def cancel_job(
             "description": "progress and done events",
             "content": {"text/event-stream": {}},
         },
+        204: {"description": "The job has already finished; read GET /ai/jobs/{id}"},
         404: {"description": "No such job"},
         429: {"description": "Too many open event streams"},
     },
@@ -121,7 +133,7 @@ async def job_progress_events(
     request: Request,
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
-) -> EventSourceResponse:
+) -> Response:
     """Stream the job's progress (ADR 0012).
 
     Ownership is checked here, in this request's own short transaction, which
@@ -129,7 +141,11 @@ async def job_progress_events(
     of work on every poll, so no database connection is held while it runs.
     """
     owner_id = caller.user.id
-    await container.generation.get(owner_id=owner_id, job_id=job_id)  # JobNotFound: 404
+    job = await container.generation.get(owner_id=owner_id, job_id=job_id)  # JobNotFound: 404
+    if job.is_terminal:
+        # Nothing more will happen. 204 also tells EventSource not to reconnect,
+        # which it otherwise does every few seconds after a stream ends.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     slots: events.StreamSlots = request.app.state.event_stream_slots
     token = slots.acquire(owner_id)
     if token is None:
@@ -138,11 +154,14 @@ async def job_progress_events(
 
     async def load() -> AiJob | None:
         found: AiJob | None = None
-        async for unit in provider():
-            try:
-                found = await unit.generation.get(owner_id=owner_id, job_id=job_id)
-            except JobNotFound:
-                found = None
+        # aclosing: the unit of work is closed (and its session released) even when
+        # the client disconnects in the middle of a poll.
+        async with aclosing(provider()) as units:
+            async for unit in units:
+                try:
+                    found = await unit.generation.get(owner_id=owner_id, job_id=job_id)
+                except JobNotFound:
+                    found = None
         return found
 
     async def stream() -> AsyncIterator[bytes]:
@@ -157,7 +176,10 @@ async def job_progress_events(
         finally:
             slots.release(owner_id, token)
 
-    return EventSourceResponse(stream(), headers={"Cache-Control": "no-cache"})
+    # X-Accel-Buffering: no stops nginx-style proxies from batching the frames.
+    return EventSourceResponse(
+        stream(), headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @router.post("/jobs/{job_id}/retry", response_model=JobOut)

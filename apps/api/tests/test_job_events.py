@@ -170,6 +170,8 @@ def _read_stream(client: TestClient, job_id: str) -> list[dict[str, str]]:
     with client.stream("GET", f"/ai/jobs/{job_id}/events") as response:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.headers["x-accel-buffering"] == "no"
+        assert response.headers["cache-control"] == "no-cache"
         body = b"".join(response.iter_bytes())
     return _parse([part + b"\n\n" for part in body.split(b"\n\n") if part.strip()])
 
@@ -193,14 +195,21 @@ def test_progress_streams_over_http_until_the_job_finishes(fast_polling: None) -
     assert len({f["id"] for f in frames}) == len(frames)  # one event per distinct state
 
 
-def test_no_unit_of_work_stays_open_while_streaming(fast_polling: None) -> None:
-    app = create_app(Settings(environment="test", session_cookie_secure=False), llm=_SlowLLM())
+def test_no_unit_of_work_stays_open_while_streaming(
+    fast_polling: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No worker runs here (no lifespan), so every unit of work belongs either to the
+    # request or to one of the stream's polls; at most one may ever be open.
+    monkeypatch.setattr(events, "MAX_STREAM_SECONDS", 0.1)
+    app = create_app(Settings(environment="test", session_cookie_secure=False))
+    client = TestClient(app)
+    job_id = _start(client, _signed_in(app, client), pages=1)
     real = app.state.services_provider
-    open_units: list[int] = [0]
-    most_open: list[int] = [0]
+    open_units, most_open, opened = [0], [0], [0]
 
     async def counting() -> AsyncIterator[Container]:
         open_units[0] += 1
+        opened[0] += 1
         most_open[0] = max(most_open[0], open_units[0])
         try:
             async for container in real():
@@ -209,14 +218,11 @@ def test_no_unit_of_work_stays_open_while_streaming(fast_polling: None) -> None:
             open_units[0] -= 1
 
     app.state.services_provider = counting
-    with TestClient(app) as client:
-        job_id = _start(client, _signed_in(app, client), pages=2)
-        frames = _read_stream(client, job_id)
+    frames = _read_stream(client, job_id)
 
-    assert frames[-1]["event"] == "done"
-    # The request's own unit closed before the stream's first poll opened, and
-    # polls never overlap: one unit at a time besides the worker's.
-    assert open_units[0] == 0 and most_open[0] <= 2
+    assert [f["event"] for f in frames] == ["progress"]  # still queued when the cap hit
+    assert opened[0] >= 3  # the request, then several polls
+    assert most_open[0] == 1 and open_units[0] == 0
 
 
 def test_event_stream_access_rules(app: FastAPI, fast_polling: None) -> None:
@@ -249,7 +255,7 @@ class _BrokenLLM:
         raise ConnectionError("provider unavailable")
 
 
-def test_a_finished_job_streams_a_single_done_event(fast_polling: None) -> None:
+def test_a_finished_job_answers_204_so_eventsource_stops(fast_polling: None) -> None:
     app = create_app(
         Settings(environment="test", session_cookie_secure=False), llm=_BrokenLLM()
     )
@@ -259,9 +265,8 @@ def test_a_finished_job_streams_a_single_done_event(fast_polling: None) -> None:
             if client.get(f"/ai/jobs/{job_id}").json()["status"] == "failed":
                 break
             asyncio.run(asyncio.sleep(0.01))
-        frames = _read_stream(client, job_id)
-    assert [f["event"] for f in frames] == ["done"]
-    assert json.loads(frames[0]["data"])["status"] == "failed"
+        finished = client.get(f"/ai/jobs/{job_id}/events")
+    assert finished.status_code == 204 and finished.content == b"" 
 
 
 def test_a_job_deleted_while_watched_ends_the_stream(
