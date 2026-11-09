@@ -81,6 +81,7 @@ class UserUsage:
     input_tokens: int
     output_tokens: int
     cost_micro_usd: int
+    pages: int = 0  # AI generation pages reserved against the monthly quota
 
 
 @dataclass(frozen=True, slots=True)
