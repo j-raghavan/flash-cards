@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 from flashcards import __version__
 from flashcards.api.container import Container
+from flashcards.api.csrf import CsrfOriginMiddleware
 from flashcards.api.job_events import StreamSlots
 from flashcards.api.provider import in_memory_provider, sql_provider
 from flashcards.api.routers import (
@@ -323,6 +324,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.state.event_stream_slots = StreamSlots()
     app.state.bootstrap_invite_token = _maybe_bootstrap_invite(settings, container)
 
+    # Refuses unsafe requests that do not come from a trusted origin (ADR 0017).
+    app.add_middleware(CsrfOriginMiddleware, public_base_url=settings.public_base_url)
     _register_error_handlers(app)
     app.include_router(auth.router)
     app.include_router(admin.router)
