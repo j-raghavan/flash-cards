@@ -17,6 +17,7 @@ from datetime import datetime
 from flashcards.domain.notes import Fields, InvalidNote, NoteType, card_ordinals
 
 MAX_DRAFT_CARDS = 200
+_DRAFT_TYPES = [NoteType.BASIC.value, NoteType.CLOZE.value]
 
 
 class LlmError(Exception):
@@ -102,7 +103,8 @@ DRAFT_CARDS_SCHEMA: Mapping[str, object] = {
                 "additionalProperties": False,
                 "required": ["type", "fields"],
                 "properties": {
-                    "type": {"type": "string", "enum": [t.value for t in NoteType]},
+                    # Drafts are Basic or Cloze only (ADR 0013).
+                    "type": {"type": "string", "enum": _DRAFT_TYPES},
                     "fields": {
                         "type": "object",
                         "additionalProperties": {"type": "string"},
