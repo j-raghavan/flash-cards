@@ -32,6 +32,9 @@ export function DeckSummaryPanel({ deckId }: { deckId: string }) {
     setLocked(null);
     summarizeDeck(deckId, current.signal).then(
       (found) => {
+        if (current.signal.aborted) {
+          return;
+        }
         setSummary(found);
         setBusy(false);
       },
@@ -77,7 +80,16 @@ export function DeckSummaryPanel({ deckId }: { deckId: string }) {
       {locked === null ? null : <UnlockNotice feature="Deck summaries" unlock={locked} deckId={deckId} />}
       <ErrorText message={error} />
       <div className="row">
-        <button type="button" className="button" disabled={busy} onClick={summarize}>
+        <button
+          type="button"
+          className="button"
+          aria-disabled={busy}
+          onClick={() => {
+            if (!busy) {
+              summarize();
+            }
+          }}
+        >
           {summary === null ? "Summarize this deck" : "Summarize again"}
         </button>
         <span className="muted" role="status">

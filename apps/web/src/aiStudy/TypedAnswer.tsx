@@ -68,6 +68,10 @@ export function TypedAnswer({ cardId, revealed, onEvaluated, onReveal }: TypedAn
     boxRef.current?.focus();
     evaluateAnswer(cardId, text, current.signal).then(
       (evaluation) => {
+        // The body was already read when the card moved on: drop it.
+        if (current.signal.aborted) {
+          return;
+        }
         setPhase({ name: "graded", evaluation });
         onEvaluatedRef.current(suggestedRating(evaluation));
       },
@@ -145,7 +149,7 @@ export function TypedAnswer({ cardId, revealed, onEvaluated, onReveal }: TypedAn
           </div>
         </form>
       ) : null}
-      {phase.name === "graded" || (phase.name === "checking" && revealed) ? (
+      {phase.name === "graded" || (revealed && answer.trim() !== "") ? (
         <div className="stack">
           <p className="muted">Your answer:</p>
           <p className="typed-answer">{answer.trim()}</p>

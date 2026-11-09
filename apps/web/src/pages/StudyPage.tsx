@@ -52,9 +52,15 @@ const RATINGS: { rating: Rating; label: string }[] = [
   { rating: 4, label: "Easy" },
 ];
 
+/** A choice control (the answer-mode radios) takes no text, so shortcuts still apply. */
+function isChoice(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement && (target.type === "radio" || target.type === "checkbox");
+}
+
 function isTyping(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
+    !isChoice(target) &&
     (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
   );
 }
@@ -374,7 +380,9 @@ export function StudyPage() {
         return;
       }
       // Space and Enter on a link or button keep their own meaning.
-      const onControl = event.target instanceof HTMLElement && ["A", "BUTTON"].includes(event.target.tagName);
+      const onControl =
+        isChoice(event.target) ||
+        (event.target instanceof HTMLElement && ["A", "BUTTON"].includes(event.target.tagName));
       if ((event.key === " " || event.key === "Enter") && !onControl && !revealed && detail !== null) {
         event.preventDefault();
         setRevealedAt(position);

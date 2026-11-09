@@ -36,7 +36,7 @@ function distinctCitations(citations: Citation[]): Citation[] {
 
 function NoSources({ deckId }: { deckId: string }) {
   return (
-    <div className="empty" role="status">
+    <div className="empty" role="alert">
       <p>This deck has no source documents to chat with yet.</p>
       <p>
         Chat answers from the PDFs and images you generate cards from.{" "}
@@ -56,6 +56,7 @@ export function DeckChatPanel({ deckId }: { deckId: string }) {
   // keeps its number for the whole conversation.
   const [files, setFiles] = useState<string[]>([]);
   const controller = useRef<AbortController | null>(null);
+  const boxRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(
     () => () => {
@@ -74,9 +75,14 @@ export function DeckChatPanel({ deckId }: { deckId: string }) {
     controller.current = current;
     setAsking(true);
     setQuestion("");
+    // A click on Ask returns the cursor to the box for the next question.
+    boxRef.current?.focus();
     setTurns((all) => [...all, { id, question: text }]);
     deckChat.ask(deckId, text, current.signal).then(
       (reply) => {
+        if (current.signal.aborted) {
+          return;
+        }
         setAsking(false);
         setNoSources(false);
         setFiles((known) => [
@@ -160,6 +166,7 @@ export function DeckChatPanel({ deckId }: { deckId: string }) {
         <label className="field">
           <span>Your question</span>
           <textarea
+            ref={boxRef}
             rows={2}
             maxLength={MAX_QUESTION}
             value={question}

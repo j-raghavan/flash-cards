@@ -127,6 +127,7 @@ describe("document chat", () => {
     await user.type(box, "One?{Enter}");
     expect(await within(region).findByText("Looking through your documents…")).toBeInTheDocument();
     expect(within(region).getByRole("button", { name: "Asking…" })).toBeDisabled();
+    expect(within(region).getByLabelText("Your question")).toHaveFocus();
     await user.type(box, "Two?{Enter}"); // ignored while an answer is on its way
     expect(box).toHaveValue("Two?");
     (release as unknown as () => void)();
@@ -139,7 +140,30 @@ describe("document chat", () => {
     expect(await within(region).findByText(/Could not reach the server/)).toBeInTheDocument();
   });
 
-  it("ignores an answer cancelled by leaving the page", async () => {
+  it("drops an answer that arrives after leaving the page", async () => {
+    let release: (() => void) | null = null;
+    mockApi({
+      ...page,
+      "POST /decks/d1/chat": () =>
+        new Promise((resolve) => {
+          release = () => {
+            resolve({ body: { answer: "Late.", citations: [] } });
+          };
+        }),
+      "GET /decks/d1/review": { body: [] },
+    });
+    renderApp("/decks/d1");
+    const region = await panel();
+    const user = userEvent.setup();
+    await user.type(within(region).getByLabelText("Your question"), "Q{Enter}");
+    await user.click(screen.getByRole("link", { name: "Study now" }));
+    expect(await screen.findByText("Nothing is due in this deck right now.")).toBeInTheDocument();
+    (release as unknown as () => void)();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText("Late.")).not.toBeInTheDocument();
+  });
+
+  it("ignores a request that was aborted", async () => {
     mockApi({
       ...page,
       "POST /decks/d1/chat": () => {

@@ -14,7 +14,7 @@ export function AiLabel({ children = "AI-generated. Check it against your own ma
 export function UnlockNotice({ feature, unlock, deckId }: { feature: string; unlock: Unlock; deckId: string }) {
   const missing = Math.max(0, unlock.required - unlock.have);
   return (
-    <div className="empty" role="status">
+    <div className="empty" role="alert">
       <p>
         {feature} unlock once a deck has {unlock.required} cards. This deck has {unlock.have}
         {missing > 0 ? `, so add ${String(missing)} more` : ""}.

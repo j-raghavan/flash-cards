@@ -122,6 +122,29 @@ describe("mock exam", () => {
     });
   });
 
+  it("composes once however often Start is pressed, keeping focus on the button", async () => {
+    let release: (() => void) | null = null;
+    const calls = mockApi({
+      ...me,
+      "POST /decks/d1/mock-exam": () =>
+        new Promise((resolve) => {
+          release = () => {
+            resolve({ status: 201, body: exam() });
+          };
+        }),
+    });
+    renderApp("/decks/d1/exam");
+    const user = userEvent.setup();
+    await startExam(user);
+    const busy = screen.getByRole("button", { name: "Composing your exam…" });
+    expect(busy).toHaveFocus();
+    expect(screen.getByText("Composing questions. This can take up to a minute.")).toBeInTheDocument();
+    await user.click(busy);
+    expect(calls.filter((c) => c.path === "/decks/d1/mock-exam")).toHaveLength(1);
+    (release as unknown as () => void)();
+    expect(await screen.findByRole("heading", { name: "2 questions" })).toBeInTheDocument();
+  });
+
   it("shows how far the deck is from unlocking mock exams", async () => {
     mockApi({
       ...me,
@@ -189,10 +212,12 @@ describe("mock exam", () => {
     expect(screen.getByLabelText("Answer to question 1")).toHaveValue("kept");
     await user.click(screen.getByRole("button", { name: "Submit for grading" }));
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("this exam was already submitted");
+      expect(screen.getByRole("alert")).toHaveTextContent("This exam can no longer be submitted");
     });
     expect(screen.queryByRole("button", { name: "Submit for grading" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Answer to question 1")).toBeDisabled();
+    expect(screen.getByLabelText("Answer to question 1")).toHaveAttribute("readonly");
+    await user.click(screen.getByRole("button", { name: "Take another exam" }));
+    expect(screen.getByRole("button", { name: "Start the exam" })).toBeInTheDocument();
   });
 
   it("shows a calm timer and sends the answers when time runs out", async () => {

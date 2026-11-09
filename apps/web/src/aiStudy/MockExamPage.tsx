@@ -67,7 +67,7 @@ function ExamTimer({ endsAt, onExpire }: { endsAt: number; onExpire: () => void 
 
   const announcement =
     left <= 0
-      ? "Time is up. Your answers are being sent."
+      ? "Time is up."
       : left <= MINUTE
         ? "One minute left."
         : left <= 5 * MINUTE
@@ -103,6 +103,9 @@ function SetupForm({ deckId, onReady }: { deckId: string; onReady: (exam: MockEx
 
   const onSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
+    if (busy) {
+      return;
+    }
     setBusy(true);
     setError(null);
     setLocked(null);
@@ -170,7 +173,7 @@ function SetupForm({ deckId, onReady }: { deckId: string; onReady: (exam: MockEx
       {locked === null ? null : <UnlockNotice feature="Mock exams" unlock={locked} deckId={deckId} />}
       <ErrorText message={error} />
       <div>
-        <button type="submit" className="button primary" disabled={!valid || busy}>
+        <button type="submit" className="button primary" disabled={!valid} aria-disabled={busy}>
           {busy ? "Composing your exam…" : "Start the exam"}
         </button>
       </div>
@@ -186,9 +189,11 @@ function SetupForm({ deckId, onReady }: { deckId: string; onReady: (exam: MockEx
 function ExamForm({
   exam,
   onGraded,
+  onAgain,
 }: {
   exam: MockExam;
   onGraded: (exam: MockExam, result: ExamResult, answers: Record<string, string>) => void;
+  onAgain: () => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -232,9 +237,14 @@ function ExamForm({
       (failure: unknown) => {
         sending.current = false;
         setBusy(false);
-        setError(aiErrorMessage(failure));
         // 409: already submitted, or past the time limit. Nothing more to send.
-        setClosed(failure instanceof ApiError && failure.status === 409);
+        const isClosed = failure instanceof ApiError && failure.status === 409;
+        setClosed(isClosed);
+        setError(
+          isClosed
+            ? "This exam can no longer be submitted: it was already submitted or its time ran out."
+            : aiErrorMessage(failure),
+        );
       },
     );
   }, [exam, onGraded]);
@@ -266,7 +276,7 @@ function ExamForm({
               <textarea
                 rows={3}
                 maxLength={20_000}
-                disabled={busy || closed}
+                readOnly={busy || closed}
                 value={answers[question.id] ?? ""}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -278,9 +288,15 @@ function ExamForm({
         ))}
       </ol>
       <ErrorText message={error} />
-      {closed ? null : (
+      {closed ? (
+        <div>
+          <button type="button" className="button primary" onClick={onAgain}>
+            Take another exam
+          </button>
+        </div>
+      ) : (
         <div className="row">
-          <button type="submit" className="button primary" disabled={busy}>
+          <button type="submit" className="button primary" aria-disabled={busy}>
             {busy ? "Grading…" : "Submit for grading"}
           </button>
           <span className="muted" role="status">
@@ -399,7 +415,13 @@ export function MockExamPage() {
           }}
         />
       ) : stage.name === "exam" ? (
-        <ExamForm exam={stage.exam} onGraded={onGraded} />
+        <ExamForm
+          exam={stage.exam}
+          onGraded={onGraded}
+          onAgain={() => {
+            setStage({ name: "setup" });
+          }}
+        />
       ) : (
         <ExamResultView
           exam={stage.exam}

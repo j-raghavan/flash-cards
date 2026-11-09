@@ -70,7 +70,35 @@ describe("deck summary", () => {
     expect(within(region).queryByText(/unlock once/)).not.toBeInTheDocument();
   });
 
-  it("drops a summary whose request was cancelled", async () => {
+  it("drops a summary that arrives after leaving the page, and ignores clicks while busy", async () => {
+    let release: (() => void) | null = null;
+    const calls = mockApi({
+      ...page,
+      "POST /decks/d1/summary": () =>
+        new Promise((resolve) => {
+          release = () => {
+            resolve({ body: { summary: "Late.", key_points: [] } });
+          };
+        }),
+      "GET /decks/d1/review": { body: [] },
+    });
+    renderApp("/decks/d1");
+    const region = await panel();
+    const user = userEvent.setup();
+    const button = within(region).getByRole("button", { name: "Summarize this deck" });
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveFocus();
+    await user.click(button);
+    expect(calls.filter((c) => c.path === "/decks/d1/summary")).toHaveLength(1);
+    await user.click(screen.getByRole("link", { name: "Study now" }));
+    expect(await screen.findByText("Nothing is due in this deck right now.")).toBeInTheDocument();
+    (release as unknown as () => void)();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText("Late.")).not.toBeInTheDocument();
+  });
+
+  it("ignores a request that was aborted", async () => {
     mockApi({
       ...page,
       "POST /decks/d1/summary": () => {

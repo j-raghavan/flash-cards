@@ -210,6 +210,20 @@ describe("AI-evaluation study mode", () => {
     expect(localStorage.getItem("flashcards.studyMode")).toBe("self");
   });
 
+  it("keeps the rating keys working while the mode radios have focus", async () => {
+    const calls = mockApi(session);
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("What is ATP?");
+    await user.keyboard(" ");
+    await screen.findByText("The energy currency");
+    await user.click(screen.getByLabelText("Revealing it"));
+    expect(screen.getByLabelText("Revealing it")).toHaveFocus();
+    await user.keyboard("4");
+    await screen.findByText("What is osmosis?");
+    expect(reviews(calls)).toEqual([{ rating: 4, idempotency_key: expect.any(String) as string }]);
+  });
+
   it("works when storage is blocked", async () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked");
@@ -225,7 +239,43 @@ describe("AI-evaluation study mode", () => {
     expect(await screen.findByLabelText("Your answer")).toBeInTheDocument();
   });
 
-  it("drops an evaluation cancelled by moving on", async () => {
+  it("keeps the typed answer on screen when the answer is shown without checking", async () => {
+    mockApi(session);
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    const box = await useAiMode(user);
+    await user.type(box, "My guess{Escape}");
+    await user.keyboard(" ");
+    expect(await screen.findByText("The energy currency")).toBeInTheDocument();
+    expect(screen.getByText("My guess")).toBeInTheDocument();
+  });
+
+  it("drops an evaluation that answers after the session moved on", async () => {
+    let release: (() => void) | null = null;
+    mockApi({
+      ...session,
+      "POST /cards/c1/evaluate": () =>
+        new Promise((resolve) => {
+          release = () => {
+            resolve({ body: graded() });
+          };
+        }),
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    const box = await useAiMode(user);
+    await user.type(box, "Energy{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Show answer now" }));
+    await user.keyboard("3");
+    expect(await screen.findByText("What is osmosis?")).toBeInTheDocument();
+    (release as unknown as () => void)();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText("(suggested)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Water moving across a membrane")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Your answer")).toHaveValue("");
+  });
+
+  it("ignores a request that was aborted", async () => {
     mockApi({
       ...session,
       "POST /cards/c1/evaluate": () => {
