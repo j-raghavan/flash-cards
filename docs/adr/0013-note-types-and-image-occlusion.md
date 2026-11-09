@@ -35,7 +35,7 @@ Until now a note was Basic (one card) or Cloze (one card per deletion), and a ca
   - Nothing else may appear in double braces: no conditionals, filters, `type:` or `cloze:`. A stray `{{` or `}}` is refused.
   - Every front uses at least one field, and every placeholder must name a field of the type.
 - Each template has a stable ordinal, which is the ordinal of its cards:
-  - New templates get ordinals above any the type has used, so an ordinal is never reused for a different template.
+  - New templates get ordinals above every current template, so a new template never takes over another template's cards. An ordinal freed by a template removed in an earlier edit may be given out again; its cards were purged with that template.
   - On edit, a template sent with its `ordinal` keeps it, and with it its cards.
 - A custom note's fields are the type's fields, in the type's order. Unknown fields are refused, and missing ones are stored empty.
 - A note gets a card for each template whose front uses at least one non-empty field, as Anki skips empty fronts. A note that would get no card is refused.
@@ -43,7 +43,8 @@ Until now a note was Basic (one card) or Cloze (one card per deletion), and a ca
 ### Editing a type
 
 - `PATCH /note-types/{id}` changes the name, fields or templates. Omitted parts stay.
-- `renamed` maps old field names to new ones, and notes keep their values under the new name. A field left out of the new list is dropped from every note, and a new field starts empty.
+- `renamed` maps old field names to new ones, and notes keep their values under the new name. It needs the new field list in the same request. A field cannot be renamed onto another field that keeps its values (two fields may swap names). A field left out of the new list is dropped from every note, and a new field starts empty.
+- A name-only edit leaves notes and cards untouched.
 - Templates that are not resent are checked again against the new fields, so renaming a field the templates use needs the updated templates in the same request.
 - An edit of fields or templates re-derives the cards of every note of the type, as a note edit does (ADR 0011):
   - A card whose template survives keeps its schedule and history.
@@ -75,7 +76,7 @@ Until now a note was Basic (one card) or Cloze (one card per deletion), and a ca
 | Feature | Custom notes | Image occlusion notes |
 | --- | --- | --- |
 | Share preview | Shown with their fields; the template is not part of the preview. | Shown with their text fields only. The image is never exposed through a share link. |
-| Share clone | The note types the notes use are copied to the recipient, once per clone, and count toward the recipient's note type limit. | The images are copied to the recipient, once per image, and capped at 100 MiB per clone (413 beyond). |
+| Share clone | The note types the notes use are copied to the recipient, once per clone, and count toward the recipient's note type limit. | The images are copied to the recipient, once per image, and capped at 100 MiB per clone (413 beyond). Each started MiB copied costs one card's worth of the daily clone allowance. |
 | `.apkg` import | Unchanged: Anki notes still map to Basic or Cloze. Mapping Anki models to custom types is future work. | Unchanged. Anki's own Image Occlusion notes are a cloze type, so they still import as Cloze text. |
 | `.apkg` export (future) | Map to an Anki model with the same fields and templates; the ordinals give the card order. | Map to Anki's Image Occlusion note type, or skip with a report entry. |
 | AI drafts | Not produced: drafts stay Basic or Cloze, and the output schema allows only those. | Not produced. |
@@ -100,5 +101,6 @@ Until now a note was Basic (one card) or Cloze (one card per deletion), and a ca
 - A type edit re-derives every note of the type in one request, so its cost grows with the number of notes. That is acceptable at the sizes the clone and import limits allow (20,000 notes), but a type with very many notes makes a slow edit.
 - Checking an occlusion image loads the media row with its bytes. A metadata-only lookup can replace it if image notes become frequent.
 - The template subset is smaller than Anki's. Anki types that use conditionals or filters cannot be recreated exactly yet, and importing them as custom types needs those features first.
-- Cloned images are copies, so a clone uses storage in proportion to the images it copies, bounded per clone and by the daily clone allowance.
+- Cloned images are copies, so a clone uses storage in proportion to the images it copies. That is bounded per clone and by the daily clone allowance, which counts the copied bytes. There is no per-owner storage quota yet.
+- Locking a note re-reads its row, so an edit never writes back a copy read before the lock was taken.
 - Notes reference images by id without a foreign key. Media is never deleted on its own, only with the whole account, so a reference cannot dangle today. A media delete endpoint would need to refuse images that notes still use.

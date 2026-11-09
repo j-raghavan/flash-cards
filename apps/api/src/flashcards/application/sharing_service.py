@@ -36,6 +36,7 @@ from flashcards.domain.ports import (
 )
 from flashcards.domain.quotas import clone_period
 from flashcards.domain.sharing import (
+    CLONE_UNIT_BYTES,
     MAX_CLONE_CARDS,
     MAX_CLONE_DECKS,
     MAX_CLONE_MEDIA_BYTES,
@@ -189,8 +190,11 @@ class SharingService:
         owned_types = await self._note_types.count_for_owner(owner_id)
         if used_types and owned_types + len(used_types) > MAX_NOTE_TYPES_PER_OWNER:
             raise TooManyNoteTypes(owner_id)
+        # Copied images cost allowance too: one unit per started MiB (ADR 0013).
+        image_bytes = sum(len(asset.data) for asset in images)
+        charge = card_total + -(-image_bytes // CLONE_UNIT_BYTES)
         period = clone_period(self._clock.now())
-        if not await self._clone_quota.try_reserve_pages(owner_id, card_total, period):
+        if not await self._clone_quota.try_reserve_pages(owner_id, charge, period):
             raise CloneLimitReached(owner_id)
         now = self._clock.now()
         type_copies: dict[str, CustomNoteType] = {}

@@ -356,3 +356,36 @@ def test_a_clone_respects_the_note_type_limit(
     resp = bob.post(f"/shared/{_share(alice, deck_id)}/clone")
     assert resp.status_code == 409
     assert resp.json()["detail"] == "The note type limit has been reached."
+
+
+def test_copied_images_count_against_the_clone_allowance(
+    alice: TestClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    big = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 240  # about 60 KB
+    image_id = alice.post("/media", files={"file": ("x.png", big, "image/png")}).json()["id"]
+    deck_id = _deck(alice)
+    alice.post(
+        f"/decks/{deck_id}/notes",
+        json={
+            "note_type": "image_occlusion",
+            "fields": {},
+            "occlusion": {"image_id": image_id, "masks": MASKS[:1]},
+        },
+    )
+    # One unit per byte: 60 KB of image is more than the 50,000-card daily allowance.
+    monkeypatch.setattr(sharing_service, "CLONE_UNIT_BYTES", 1)
+    bob = _member(app, "bob@example.com")
+    assert bob.post(f"/shared/{_share(alice, deck_id)}/clone").status_code == 429
+
+
+def test_a_name_only_type_edit_leaves_cards_alone(alice: TestClient) -> None:
+    type_id = alice.post("/note-types", json=VOCAB).json()["id"]
+    cards = alice.post(
+        f"/decks/{_deck(alice)}/notes",
+        json={"note_type": "custom", "note_type_id": type_id, "fields": {"Word": "chat"}},
+    ).json()
+    assert alice.patch(f"/note-types/{type_id}", json={"name": "Words"}).status_code == 200
+    detail = alice.get(f"/cards/{cards[0]['id']}").json()
+    assert detail["fields"] == {"Word": "chat", "Meaning": ""}
+    renamed = alice.patch(f"/note-types/{type_id}", json={"renamed": {"Word": "Meaning"}})
+    assert renamed.status_code == 422
