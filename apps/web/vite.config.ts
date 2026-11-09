@@ -82,7 +82,7 @@ export default defineConfig(({ mode }) => {
           // The app shell is precached; client-side routes fall back to it.
           globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
           navigateFallback: "/index.html",
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/^\/api(\/|$)/],
           cleanupOutdatedCaches: true,
           runtimeCaching: [
             {

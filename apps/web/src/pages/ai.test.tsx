@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Draft, Job } from "../api/types";
-import { rememberJob } from "../lib/recentJobs";
 import { FakeEventSource, USER, mockApi, renderApp } from "../test/helpers";
 
 const me = { "GET /auth/me": { body: USER } };
@@ -93,11 +92,22 @@ describe("generate page", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("AI page quota exceeded");
   });
 
-  it("ignores a submit without a file and lists recent generations", async () => {
-    rememberJob({ jobId: "j9", deckId: "d1", fileName: "week1.pdf", startedAt: "2026-01-01T10:00:00Z" });
-    mockApi(me);
+  it("ignores a submit without a file and lists recent generations from the server", async () => {
+    const started = "2026-01-01T10:00:00Z";
+    const calls = mockApi({
+      ...me,
+      "GET /ai/jobs?deck_id=d1&limit=5": {
+        body: [job({ id: "j9", status: "succeeded", created_at: started }), job({ id: "j8", status: "failed" })],
+      },
+    });
     renderApp("/decks/d1/generate");
-    expect(await screen.findByRole("link", { name: "week1.pdf" })).toHaveAttribute("href", "/jobs/j9?deck=d1");
+    const when = new Date(started).toLocaleString();
+    const links = await screen.findAllByRole("link", { name: when });
+    expect(links[0]).toHaveAttribute("href", "/jobs/j9?deck=d1");
+    expect(links[1]).toHaveAttribute("href", "/jobs/j8?deck=d1");
+    expect(screen.getByText("Finished")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(calls.some((c) => c.path === "/ai/jobs?deck_id=d1&limit=5")).toBe(true);
     const form = screen.getByRole("button", { name: "Generate drafts" }).closest("form");
     act(() => {
       form?.requestSubmit();

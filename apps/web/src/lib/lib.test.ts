@@ -5,7 +5,7 @@ import type { Deck } from "../api/types";
 import { cardSides } from "./cardSides";
 import { clozeNumbers, clozeRevealAll, clozeSide, nextClozeNumber } from "./cloze";
 import { buildDeckTree, deckOptions, deckPath, descendantCount, flattenTree } from "./deckTree";
-import { forgetAllJobs, recentJobs, rememberJob } from "./recentJobs";
+import { forgetAllJobs } from "./recentJobs";
 import { newIdempotencyKey, parseTags, safeNextPath, tokenFromLocation } from "./text";
 
 const deck = (id: string, name: string, parent: string | null = null): Deck => ({
@@ -144,44 +144,17 @@ describe("text helpers", () => {
   });
 });
 
-describe("recentJobs", () => {
-  const job = (n: number, deckId = "d1") => ({
-    jobId: `j${n}`,
-    deckId,
-    fileName: `f${n}.pdf`,
-    startedAt: "2026-01-01T00:00:00Z",
-  });
-
-  it("keeps the latest five jobs per deck, newest first", () => {
-    for (let n = 1; n <= 7; n += 1) {
-      rememberJob(job(n));
-    }
-    rememberJob(job(9, "d2"));
-    rememberJob(job(7));
-    expect(recentJobs("d1").map((j) => j.jobId)).toEqual(["j7", "j6", "j5", "j4", "j3"]);
-    expect(recentJobs("d2").map((j) => j.jobId)).toEqual(["j9"]);
+describe("forgetAllJobs", () => {
+  it("removes the job list an earlier build stored, even without storage", () => {
+    localStorage.setItem("flashcards.recentJobs", '[{"jobId":"j1","fileName":"week1.pdf"}]');
     forgetAllJobs();
-    expect(recentJobs("d1")).toEqual([]);
-  });
-
-  it("survives bad or unavailable storage", () => {
-    localStorage.setItem("flashcards.recentJobs", "{not json");
-    expect(recentJobs("d1")).toEqual([]);
-    localStorage.setItem("flashcards.recentJobs", '{"a":1}');
-    expect(recentJobs("d1")).toEqual([]);
-    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
-    });
+    expect(localStorage.getItem("flashcards.recentJobs")).toBeNull();
     const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
       throw new Error("blocked");
     });
     expect(() => {
-      rememberJob(job(1));
-    }).not.toThrow();
-    expect(() => {
       forgetAllJobs();
     }).not.toThrow();
-    set.mockRestore();
     remove.mockRestore();
   });
 });

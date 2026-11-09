@@ -47,6 +47,8 @@ describe("endpoints", () => {
       ai.retry("j1"),
       ai.drafts("j1"),
       ai.approve("j1", ["x"]),
+      ai.jobs("d&1"),
+      ai.jobs("d1", 50),
     ];
     await Promise.allSettled(all);
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
@@ -79,6 +81,8 @@ describe("endpoints", () => {
       "POST /ai/jobs/j1/retry",
       "GET /ai/jobs/j1/drafts",
       "POST /ai/jobs/j1/approve",
+      "GET /ai/jobs?deck_id=d%261&limit=5",
+      "GET /ai/jobs?deck_id=d1&limit=50",
     ]);
     expect(calls[16]?.body).toEqual({ rating: 3, idempotency_key: "k1" });
     expect(calls[23]?.body).toMatchObject({ deck_id: "d1", thoroughness: "concise" });

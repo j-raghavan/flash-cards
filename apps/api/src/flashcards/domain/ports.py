@@ -472,6 +472,15 @@ class AiJobRepository(Protocol):
         """The owner's jobs (for account deletion, F-IMP-5)."""
         ...
 
+    async def list_recent(
+        self, owner_id: str, *, deck_id: str | None, limit: int, offset: int
+    ) -> list[AiJob]:
+        """A page of the owner's jobs, newest first (created_at, then id, descending).
+
+        With deck_id, only the jobs whose drafts target that deck.
+        """
+        ...
+
     async def delete(self, job_id: str) -> None:
         """Delete a job (its drafts cascade); used by account deletion."""
         ...
