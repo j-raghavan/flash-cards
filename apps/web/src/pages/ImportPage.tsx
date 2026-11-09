@@ -101,11 +101,17 @@ export function ImportPage() {
   const [step, setStep] = useState<Step>({ kind: "choose" });
   const submit = useSubmit();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const restarted = useRef(false);
 
-  // Each step announces itself: focus moves to its heading.
+  // Each step announces itself: focus moves to its heading, and back to the
+  // page title when the wizard starts over.
   useEffect(() => {
     if (step.kind !== "choose") {
       headingRef.current?.focus();
+    } else if (restarted.current) {
+      restarted.current = false;
+      titleRef.current?.focus();
     }
   }, [step]);
 
@@ -144,6 +150,7 @@ export function ImportPage() {
   };
 
   const restart = (): void => {
+    restarted.current = true;
     setStep({ kind: "choose" });
     setFile(null);
     submit.setError(null);
@@ -170,7 +177,9 @@ export function ImportPage() {
 
   return (
     <section>
-      <h1>Import from Anki</h1>
+      <h1 tabIndex={-1} ref={titleRef}>
+        Import from Anki
+      </h1>
       <ol className="steps" aria-label="Steps">
         <li aria-current={step.kind === "choose" ? "step" : undefined}>Choose a file</li>
         <li aria-current={step.kind === "preview" ? "step" : undefined}>Check the preview</li>

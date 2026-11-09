@@ -93,10 +93,28 @@ describe("occlusion editor", () => {
 
     const second = screen.getByRole("group", { name: "Mask 2" });
     const card = within(second).getByLabelText("Card");
-    fireEvent.change(card, { target: { value: "1" } });
+    // Typing is kept as typed until the field is left or Enter is pressed.
+    await user.clear(card);
+    expect(card).toHaveValue(null);
+    await user.type(card, "15");
+    expect(value().masks[1]?.id).toBe(2);
+    await user.keyboard("{Enter}");
+    expect(value().masks[1]?.id).toBe(15);
+    await user.clear(card);
+    await user.type(card, "1");
+    await user.tab();
     expect(screen.getByText("1 card from 2 masks.")).toBeInTheDocument();
-    fireEvent.change(within(second).getByLabelText("Width (%)"), { target: { value: "25" } });
+    const width = within(second).getByLabelText("Width (%)");
+    await user.clear(width);
+    await user.tab(); // an empty field changes nothing
+    expect(width).toHaveValue(50);
+    await user.clear(width);
+    await user.type(width, "25{Enter}");
     expect(value().masks[1]).toMatchObject({ id: 1, width: 0.25, left: 0.5 });
+    await user.type(width, "{Backspace}{Backspace}30");
+    await user.keyboard("a"); // other keys type as usual
+    await user.tab();
+    expect(value().masks[1]?.width).toBeCloseTo(0.3);
     within(second).getByLabelText("Left (%)").focus();
     expect(second.closest("li")).toHaveClass("selected");
 

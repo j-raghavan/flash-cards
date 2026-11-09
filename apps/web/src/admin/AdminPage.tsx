@@ -174,10 +174,10 @@ function UsersPanel({ selfId }: { selfId: string }) {
               account={account}
               self={account.id === selfId}
               onChanged={(changed) => {
-                users.setData(list.map((u) => (u.id === changed.id ? changed : u)));
+                users.setData((current = []) => current.map((u) => (u.id === changed.id ? changed : u)));
               }}
               onRemoved={(userId) => {
-                users.setData(list.filter((u) => u.id !== userId));
+                users.setData((current = []) => current.filter((u) => u.id !== userId));
               }}
             />
           ))}
@@ -464,7 +464,7 @@ export function AdminPage() {
             role="tab"
             id={`tab-${t.id}`}
             aria-selected={tab === t.id}
-            aria-controls={`panel-${t.id}`}
+            aria-controls={tab === t.id ? `panel-${t.id}` : undefined}
             tabIndex={tab === t.id ? 0 : -1}
             ref={(node) => {
               if (node !== null) {
@@ -479,7 +479,7 @@ export function AdminPage() {
           </button>
         ))}
       </div>
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="tab-panel">
+      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="tab-panel" tabIndex={0}>
         {tab === "users" ? <UsersPanel selfId={user.id} /> : null}
         {tab === "invites" ? <InvitesPanel /> : null}
         {tab === "audit" ? <AuditPanel /> : null}

@@ -115,7 +115,13 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     ref.current?.focus();
     return () => {
-      previous?.focus();
+      // What opened the dialog can be gone (an edit removed the card): then
+      // focus goes to the page's main region rather than nowhere.
+      if (previous?.isConnected === true) {
+        previous.focus();
+      } else {
+        document.getElementById("main")?.focus();
+      }
     };
   }, []);
 
@@ -185,14 +191,18 @@ export function CopyField({ label, value }: { label: string; value: string }) {
           type="button"
           className="button"
           onClick={() => {
-            navigator.clipboard.writeText(value).then(
-              () => {
-                setCopied("copied");
-              },
-              () => {
-                setCopied("failed");
-              },
-            );
+            // navigator.clipboard is missing on insecure origins: that throws
+            // inside the promise and shows the fallback message.
+            Promise.resolve()
+              .then(() => navigator.clipboard.writeText(value))
+              .then(
+                () => {
+                  setCopied("copied");
+                },
+                () => {
+                  setCopied("failed");
+                },
+              );
           }}
         >
           Copy

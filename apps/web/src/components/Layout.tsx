@@ -50,9 +50,10 @@ export function Layout() {
     return <Loading />;
   }
   if (user === null) {
-    // The fragment is kept too: a shared-deck link carries its token there.
-    const next = `${location.pathname}${location.search}${location.hash}`;
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+    // A page whose fragment carries a token (a shared-deck link) passes it on
+    // in the login page's fragment too, which is never sent to a server.
+    const next = encodeURIComponent(`${location.pathname}${location.search}${location.hash}`);
+    return <Navigate to={location.hash === "" ? `/login?next=${next}` : `/login#next=${next}`} replace />;
   }
 
   return (

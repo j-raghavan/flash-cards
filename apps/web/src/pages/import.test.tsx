@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -57,7 +57,9 @@ describe("import wizard", () => {
     renderApp("/import");
     const user = userEvent.setup();
     expect(await screen.findByRole("heading", { name: "Import from Anki" })).toBeInTheDocument();
-    expect(document.title).toBe("Import from Anki · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Import from Anki · Flash-Cards");
+    });
     const preview = screen.getByRole("button", { name: "Preview import" });
     expect(preview).toBeDisabled();
     await user.upload(screen.getByLabelText(/Anki package/), apkg());
@@ -67,7 +69,9 @@ describe("import wizard", () => {
     await user.click(preview);
 
     const heading = await screen.findByRole("heading", { name: "Preview of spanish.apkg" });
-    expect(heading).toHaveFocus();
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
     expect(screen.getByText("Check the preview")).toHaveAttribute("aria-current", "step");
     expect(screen.getByText("Notes to import").nextSibling).toHaveTextContent("40");
     expect(screen.getByText("Past reviews to import")).toBeInTheDocument();
@@ -76,11 +80,15 @@ describe("import wizard", () => {
     expect(calls[calls.length - 1]?.body).toMatchObject({ dry_run: "true", deck: "Languages::Spanish", tag: "verbs" });
 
     await user.click(screen.getByRole("button", { name: "Import" }));
-    expect(await screen.findByRole("heading", { name: "Import finished" })).toHaveFocus();
+    const finished = await screen.findByRole("heading", { name: "Import finished" });
+    await waitFor(() => {
+      expect(finished).toHaveFocus();
+    });
     expect(screen.getByText("Notes imported").nextSibling).toHaveTextContent("40");
     expect(calls[calls.length - 1]?.body).toMatchObject({ dry_run: "false" });
     await user.click(screen.getByRole("button", { name: "Import another file" }));
     expect(screen.getByRole("button", { name: "Preview import" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "Import from Anki" })).toHaveFocus();
   });
 
   it("treats an answer without a dry run as a finished import", async () => {
@@ -133,6 +141,7 @@ describe("import wizard", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This package needs a newer reader.");
     await user.click(screen.getByRole("button", { name: "Start over" }));
     expect(screen.getByRole("button", { name: "Preview import" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "Import from Anki" })).toHaveFocus();
     fireEvent.submit(screen.getByRole("form", { name: "Choose a package" }));
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -145,11 +154,54 @@ describe("import wizard", () => {
     const { unmount } = renderApp("/");
     expect(await screen.findByRole("link", { name: "Import decks from Anki" })).toHaveAttribute("href", "/import");
     unmount();
+  });
+
+  it("exports a deck as a download, saying what was left out or why it failed", async () => {
+    const deck = { id: "d1", name: "Bio", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+    mockApi({ ...me, "GET /decks": { body: [deck] }, "GET /decks/d1/stats": { status: 500 } });
+    const api = globalThis.fetch;
+    const replies: (Response | Error)[] = [
+      new Response("apkg-bytes", {
+        status: 200,
+        headers: { "Content-Disposition": 'attachment; filename="Bio.apkg"', "X-Omitted-Notes": "2" },
+      }),
+      new Response("{}", { status: 200 }),
+      new Response(JSON.stringify({ detail: "A deck export holds at most 200000 cards." }), { status: 413 }),
+      new Response("not json", { status: 502 }),
+      new TypeError("offline"),
+    ];
+    const exportCalls: string[] = [];
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (!url.includes("/export")) {
+        return api(input, init);
+      }
+      exportCalls.push(url);
+      const reply = replies.shift() as Response | Error;
+      return reply instanceof Error ? Promise.reject(reply) : Promise.resolve(reply);
+    });
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+    URL.createObjectURL = vi.fn(() => "blob:export");
+    URL.revokeObjectURL = vi.fn();
     renderApp("/decks/d1");
-    expect(await screen.findByRole("link", { name: "Anki package" })).toHaveAttribute(
-      "href",
-      "/api/decks/d1/export?format=apkg",
-    );
-    expect(screen.getByRole("link", { name: "JSON" })).toHaveAttribute("download");
+    const user = userEvent.setup();
+    const group = await screen.findByRole("group", { name: "Export this deck" });
+    await user.click(within(group).getByRole("button", { name: "Anki package" }));
+    expect(await screen.findByText(/2 custom or image occlusion notes were left out; JSON keeps them/)).toBeInTheDocument();
+    await user.click(within(group).getByRole("button", { name: "JSON" }));
+    expect(await screen.findByText("Downloaded.")).toBeInTheDocument();
+    expect(saved).toEqual(["Bio.apkg", "deck.json"]);
+    await user.click(within(group).getByRole("button", { name: "CSV" }));
+    expect(await screen.findByText("A deck export holds at most 200000 cards.")).toBeInTheDocument();
+    await user.click(within(group).getByRole("button", { name: "CSV" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("Something went wrong on the server. Try again.")).toHaveLength(2); // with the statistics
+    });
+    await user.click(within(group).getByRole("button", { name: "CSV" }));
+    expect(await screen.findByText(/Could not reach the server/)).toBeInTheDocument();
+    expect(exportCalls[0]).toBe("/api/decks/d1/export?format=apkg");
   });
 });

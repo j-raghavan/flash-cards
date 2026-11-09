@@ -104,7 +104,9 @@ describe("progress page", () => {
     expect(screen.getByRole("progressbar", { name: "12 of 20 cards" })).toHaveAttribute("value", "12");
     expect(screen.queryByText("Daily goal reached. Well done.")).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Reviews per day" })).toBeInTheDocument();
-    expect(document.title).toBe("Progress · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Progress · Flash-Cards");
+    });
     await user.selectOptions(await screen.findByLabelText("Deck"), "d1");
     await user.selectOptions(screen.getByLabelText("Range"), "365");
     await screen.findByRole("heading", { name: "Reviews coming due" });

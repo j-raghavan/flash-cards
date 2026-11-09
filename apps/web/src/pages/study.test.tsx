@@ -299,7 +299,9 @@ describe("study session", () => {
     mockApi({ ...me, "GET /decks/d1/review": { body: [] } });
     renderApp("/decks/d1/study");
     await screen.findByText("Nothing is due in this deck right now.");
-    expect(document.title).toBe("Study · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Study · Flash-Cards");
+    });
   });
 });
 
@@ -437,7 +439,9 @@ describe("undo, daily goal and editing in a session", () => {
     await screen.findByText("Old question");
     await user.keyboard("e");
     const dialog = await screen.findByRole("dialog", { name: "Edit card" });
-    expect(dialog).toHaveFocus();
+    await waitFor(() => {
+      expect(dialog).toHaveFocus();
+    });
     const field = await within(dialog).findByLabelText("Front");
     await user.keyboard(" "); // keys in the dialog do not drive the session
     expect(screen.queryByRole("button", { name: /Again/ })).not.toBeInTheDocument();
@@ -446,7 +450,9 @@ describe("undo, daily goal and editing in a session", () => {
     await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("New question")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "Card 1 of 1" })).toHaveFocus(); // where focus was before
+    await waitFor(() => {
+      expect(screen.getByRole("article", { name: "Card 1 of 1" })).toHaveFocus(); // where focus was before
+    });
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
       fields: { front: "New question", back: "Answer" },
       tags: [],
@@ -509,5 +515,40 @@ describe("undo, daily goal and editing in a session", () => {
     expect(await within(await screen.findByRole("dialog")).findByRole("alert")).toHaveTextContent(
       "Something went wrong on the server",
     );
+  });
+
+  it("holds answers while an undo is on its way, and keeps the undo after a failure in transit", async () => {
+    let answerUndo: (reply: { body: unknown }) => void = () => undefined;
+    let undoCalls = 0;
+    const calls = mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1"), card("c2")] },
+      "GET /cards/c1": { body: basic("c1", "Q1", "A1") },
+      "GET /cards/c2": { body: basic("c2", "Q2", "A2") },
+      "POST /cards/c1/review": { body: { review_id: "r1" } },
+      "POST /reviews/r1/undo": () => {
+        undoCalls += 1;
+        return undoCalls === 1
+          ? { status: 503 }
+          : new Promise((resolve) => {
+              answerUndo = resolve;
+            });
+      },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    await screen.findByText("Q1");
+    await user.keyboard(" 3");
+    await screen.findByText("Q2");
+    await user.click(await screen.findByRole("button", { name: /Undo last answer/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong on the server");
+    await user.keyboard(" ");
+    await user.click(await screen.findByRole("button", { name: /Undo last answer/ }));
+    expect(screen.getByRole("button", { name: /Good/ })).toBeDisabled();
+    await user.keyboard("3");
+    expect(calls.filter((c) => c.path === "/cards/c2/review")).toHaveLength(0);
+    answerUndo({ body: { review_id: "r1", card_id: "c1", schedule: null, daily_goal: goal(0) } });
+    expect(await screen.findByText("Q1")).toBeInTheDocument();
+    expect(screen.getByText("Card 1 of 2")).toBeInTheDocument();
   });
 });

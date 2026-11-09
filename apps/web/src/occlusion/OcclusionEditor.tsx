@@ -51,6 +51,55 @@ const POSITION_FIELDS = [
   { key: "height", label: "Height" },
 ] as const;
 
+/**
+ * A number field that keeps what is typed until it is left or Enter is
+ * pressed, so clearing it to type a new value does not snap to a limit first.
+ */
+function NumberInput({
+  value,
+  min,
+  max,
+  step,
+  onCommit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onCommit: (value: number) => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const commit = (): void => {
+    if (text !== null) {
+      const parsed = Number(text);
+      if (text.trim() !== "" && Number.isFinite(parsed)) {
+        onCommit(parsed);
+      }
+      setText(null);
+    }
+  };
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={text ?? String(value)}
+      onChange={(event) => {
+        setText(event.target.value);
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        // Enter applies the value instead of submitting the note.
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        }
+      }}
+    />
+  );
+}
+
 interface Draft {
   x: number;
   y: number;
@@ -172,27 +221,26 @@ function Masks({ occlusion, onChange }: { occlusion: Occlusion; onChange: (occlu
               <legend>Mask {index + 1}</legend>
               <label className="field">
                 <span>Card</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={1}
                   max={MAX_MASK_ID}
+                  step={1}
                   value={mask.id}
-                  onChange={(event) => {
-                    update(index, { id: Number(event.target.value) });
+                  onCommit={(value) => {
+                    update(index, { id: value });
                   }}
                 />
               </label>
               {POSITION_FIELDS.map(({ key, label }) => (
                 <label className="field" key={key}>
                   <span>{label} (%)</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={100}
                     step={0.5}
                     value={percent(mask[key])}
-                    onChange={(event) => {
-                      update(index, { [key]: Number(event.target.value) / 100 });
+                    onCommit={(value) => {
+                      update(index, { [key]: value / 100 });
                     }}
                   />
                 </label>

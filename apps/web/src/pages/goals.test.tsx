@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { PlanReport } from "../api/studyProgress";
 import type { Deck, Goal } from "../api/types";
 import { USER, mockApi, renderApp } from "../test/helpers";
-import { gradeFromRetention, localDate } from "./GoalsPage";
+import { goalChanges, gradeFromRetention, localDate, tomorrow } from "./GoalsPage";
 
 const me = { "GET /auth/me": { body: USER } };
 
@@ -39,6 +39,15 @@ describe("goal helpers", () => {
     expect(gradeFromRetention(0.5)).toBe(0);
     expect(gradeFromRetention(1)).toBe(100);
     expect(localDate(new Date(2026, 0, 5, 12).toISOString())).toBe("2026-01-05");
+    expect(tomorrow(new Date(2026, 11, 31, 23, 30))).toBe("2027-01-01");
+  });
+
+  it("sends only what an edit changed", () => {
+    const same = { name: GOAL.name, deck_ids: ["d1"], exam_date: GOAL.exam_date, desired_grade: 0.5 };
+    expect(goalChanges(GOAL, same)).toEqual({});
+    expect(
+      goalChanges(GOAL, { name: "X", deck_ids: ["d2", "d1"], exam_date: "2027-03-01T12:00:00Z", desired_grade: 0.9 }),
+    ).toEqual({ name: "X", deck_ids: ["d2", "d1"], exam_date: "2027-03-01T12:00:00Z", desired_grade: 0.9 });
   });
 });
 
@@ -55,7 +64,9 @@ describe("goals", () => {
     renderApp("/goals");
     const user = userEvent.setup();
     expect(await screen.findByRole("link", { name: "Biology final" })).toHaveAttribute("href", "/goals/g1");
-    expect(document.title).toBe("Goals · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Goals · Flash-Cards");
+    });
     const create = await screen.findByRole("button", { name: "Create goal" });
     expect(create).toBeDisabled();
     await user.type(screen.getByLabelText("Goal name"), " Chem ");
@@ -148,7 +159,9 @@ describe("goals", () => {
     });
     expect(await screen.findByText(/On track/)).toBeInTheDocument();
     expect(calls.filter((c) => c.path === "/goals/g1/plan/accept")).toHaveLength(1);
-    expect(document.title).toBe("Biology final · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Biology final · Flash-Cards");
+    });
   });
 
   it("works with a plan that carries no changes, and reports an accept that fails", async () => {
@@ -201,7 +214,12 @@ describe("goals", () => {
     await user.type(name, "Bio exam");
     await user.click(screen.getByRole("button", { name: "Save goal" }));
     expect(await screen.findByRole("heading", { name: "Bio exam" })).toBeInTheDocument();
-    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ name: "Bio exam", deck_ids: ["d1"] });
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ name: "Bio exam" });
+    // Saving without a change sends nothing.
+    await user.click(screen.getByRole("button", { name: "Edit goal" }));
+    await user.click(screen.getByRole("button", { name: "Save goal" }));
+    expect(await screen.findByRole("button", { name: "Edit goal" })).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Delete goal" }));
     await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete goal" }));
     expect(await screen.findByText("No goals yet.")).toBeInTheDocument();

@@ -38,6 +38,29 @@ export function localDate(iso: string): string {
   return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/** Tomorrow as a local calendar date: an exam must lie in the future. */
+export function tomorrow(now = new Date()): string {
+  return localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12).toISOString());
+}
+
+/** Only what an edit changed, so renaming a goal on its exam day does not resend the date. */
+export function goalChanges(goal: Goal, input: GoalInput): Partial<GoalInput> {
+  const changes: Partial<GoalInput> = {};
+  if (input.name !== goal.name) {
+    changes.name = input.name;
+  }
+  if ([...input.deck_ids].sort().join(" ") !== [...goal.deck_ids].sort().join(" ")) {
+    changes.deck_ids = input.deck_ids;
+  }
+  if (localDate(input.exam_date) !== localDate(goal.exam_date)) {
+    changes.exam_date = input.exam_date;
+  }
+  if (Math.round(input.desired_grade * 100) !== gradeFromRetention(goal.target_retention)) {
+    changes.desired_grade = input.desired_grade;
+  }
+  return changes;
+}
+
 function longDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
 }
@@ -119,6 +142,7 @@ function GoalForm({
         <input
           type="date"
           required
+          min={initial === undefined ? tomorrow() : undefined}
           value={examDate}
           onChange={(event) => {
             setExamDate(event.target.value);
@@ -304,9 +328,12 @@ export function GoalPage() {
             setEditing(false);
           }}
           onSubmit={async (input) => {
-            goal.setData(await goals.update(goalId, input));
+            const changes = goalChanges(current, input);
+            if (Object.keys(changes).length > 0) {
+              goal.setData(await goals.update(goalId, changes));
+              plan.reload();
+            }
             setEditing(false);
-            plan.reload();
           }}
         />
       ) : (

@@ -3,7 +3,7 @@
 // report fields are optional: a server without them imports the whole package
 // and ignores the dry-run flag, which the import screen detects.
 
-import { apiUrl, request } from "./client";
+import { ApiError, apiUrl, errorMessage, NetworkError, request } from "./client";
 import type { ImportReport } from "./types";
 
 export type UnsupportedKind =
@@ -59,7 +59,51 @@ export function importApkg(file: File, options: ImportOptions): Promise<FullImpo
 
 export type ExportFormat = "apkg" | "csv" | "json";
 
-/** A same-origin download link; the session cookie goes with it. */
 export function exportUrl(deckId: string, format: ExportFormat): string {
   return apiUrl(`/decks/${encodeURIComponent(deckId)}/export?format=${format}`);
+}
+
+export interface ExportedDeck {
+  blob: Blob;
+  filename: string;
+  /** Custom and image occlusion notes left out (they travel in JSON only). */
+  omittedNotes: number;
+}
+
+/**
+ * Fetch a deck export. Fetched rather than linked, so a refusal (too large, a
+ * lapsed session) shows as a message instead of downloading the error body.
+ */
+export async function exportDeck(deckId: string, format: ExportFormat): Promise<ExportedDeck> {
+  let response: Response;
+  try {
+    response = await fetch(exportUrl(deckId, format), {
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "fetch" },
+    });
+  } catch {
+    throw new NetworkError();
+  }
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    throw new ApiError(response.status, errorMessage(response.status, body));
+  }
+  const disposition = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "");
+  return {
+    blob: await response.blob(),
+    filename: disposition?.[1] ?? `deck.${format}`,
+    omittedNotes: Number(response.headers.get("X-Omitted-Notes") ?? "0") || 0,
+  };
+}
+
+/** Hand a file to the browser's downloads. */
+export function saveFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }

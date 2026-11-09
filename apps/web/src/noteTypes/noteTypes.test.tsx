@@ -28,7 +28,7 @@ describe("toInput", () => {
           { key: 3, original: null, name: "Example" },
         ],
         [
-          { key: 4, ordinal: 0, name: "A", front: "{{Term}}", back: "" },
+          { key: 4, ordinal: 0, name: "A", front: "{{Word}} {{Other}}", back: "{{FrontSide}} {{Word}}" },
           { key: 5, name: "B", front: "{{Meaning}}", back: "" },
         ],
       ),
@@ -36,7 +36,7 @@ describe("toInput", () => {
       name: "Vocab",
       fields: ["Term", "Meaning", "Example"],
       templates: [
-        { ordinal: 0, name: "A", front: "{{Term}}", back: "" },
+        { ordinal: 0, name: "A", front: "{{Term}} {{Other}}", back: "{{FrontSide}} {{Term}}" },
         { name: "B", front: "{{Meaning}}", back: "" },
       ],
       renamed: { Word: "Term" },
@@ -57,7 +57,9 @@ describe("note types", () => {
     expect(await screen.findByRole("link", { name: "Vocab" })).toHaveAttribute("href", "/note-types/nt1");
     expect(screen.getByText("2 fields, 1 card per note")).toBeInTheDocument();
     expect(screen.getByText("1 field, 2 cards per note")).toBeInTheDocument();
-    expect(document.title).toBe("Note types · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Note types · Flash-Cards");
+    });
     await user.click(screen.getByRole("link", { name: "New note type" }));
 
     const create = await screen.findByRole("button", { name: "Create note type" });
@@ -108,16 +110,19 @@ describe("note types", () => {
     renderApp("/note-types/nt1");
     const user = userEvent.setup();
     const word = await screen.findByLabelText("Field 1");
-    expect(document.title).toBe("Vocab · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Vocab · Flash-Cards");
+    });
     expect(screen.getByText(/Renaming a field keeps its contents/)).toBeInTheDocument();
     await user.clear(word);
     await user.type(word, "Term");
+    expect(within(screen.getByRole("complementary", { name: "Preview" })).getAllByText("Term")[0]?.tagName).toBe("EM");
     await user.click(screen.getByRole("button", { name: "Save note type" }));
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
       name: "Vocab",
       fields: ["Term", "Meaning"],
-      templates: [{ ordinal: 0, name: "Recognize", front: "{{Word}}", back: "{{FrontSide}} = {{Meaning}}" }],
+      templates: [{ ordinal: 0, name: "Recognize", front: "{{Term}}", back: "{{FrontSide}} = {{Meaning}}" }],
       renamed: { Word: "Term" },
     });
     // The form starts again from what was saved: no rename is sent twice.
@@ -155,6 +160,19 @@ describe("note types", () => {
     mockApi({ ...me, "GET /note-types": { status: 500 } });
     renderApp("/note-types");
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
+  });
+
+  it("stops at the server's limits on fields and cards", async () => {
+    const many = {
+      ...VOCAB,
+      fields: Array.from({ length: 64 }, (_, i) => `F${String(i)}`),
+      templates: Array.from({ length: 16 }, (_, i) => ({ ordinal: i, name: `C${String(i)}`, front: "{{F0}}", back: "" })),
+    };
+    mockApi({ ...me, "GET /note-types/nt1": { body: many } });
+    renderApp("/note-types/nt1");
+    expect(await screen.findByRole("button", { name: "Add a field" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add a card" })).toBeDisabled();
+    expect(screen.getByLabelText("Field 1")).toHaveAttribute("maxlength", "64");
   });
 
   it("is reached from the deck list", async () => {

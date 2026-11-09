@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
-import { describeError } from "../api/client";
+import { ApiError, describeError } from "../api/client";
 import { cards, decks, notes } from "../api/endpoints";
 import { reviews, type DailyGoal } from "../api/studyProgress";
 import type { Card, CardDetail, Rating } from "../api/types";
@@ -206,7 +206,8 @@ export function StudyPage() {
 
   const rate = useCallback(
     (rating: Rating) => {
-      if (card === undefined) {
+      // No answer while an undo is on its way: the undo moves the session back.
+      if (card === undefined || undoing) {
         return;
       }
       setSubmitError(null);
@@ -242,8 +243,14 @@ export function StudyPage() {
       setReviewed((n) => n + 1);
       advance();
     },
-    [card, userId, deckId, advance, round, index],
+    [card, userId, deckId, advance, round, index, undoing],
   );
+
+  // The session's position when an undo answers, which may differ from when it was sent.
+  const where = useRef({ round, index, queue });
+  useEffect(() => {
+    where.current = { round, index, queue };
+  });
 
   // The answer an undo would take back: one the server recorded, while the
   // session is showing cards and no other undo is on its way.
@@ -261,32 +268,40 @@ export function StudyPage() {
       const { last, reviewId } = target;
       setUndoing(true);
       setSubmitError(null);
-      reviews
-        .undo(reviewId)
-        .then(
-          (result) => {
-            setGoal(result.daily_goal);
-            answered.current.delete(last.card.id);
-            setReviewed((n) => n - 1);
-            setRevealedAt(null);
-            if (last.round === round) {
-              setIndex(last.index);
-            } else {
-              // A new round began after the answer: put the card first in it.
-              setQueue([last.card, ...target.queue.slice(index).filter((c) => c.id !== last.card.id)]);
-              setIndex(0);
-            }
-          },
-          (failure: unknown) => {
-            setSubmitError(describeError(failure));
-          },
-        )
-        .finally(() => {
-          setLastAnswer((current) => (current === last ? null : current));
-          setUndoing(false);
-        });
+      const request = reviews.undo(reviewId).then(
+        (result) => {
+          const now = where.current;
+          setGoal(result.daily_goal);
+          answered.current.delete(last.card.id);
+          setReviewed((n) => n - 1);
+          setRevealedAt(null);
+          setLastAnswer(null);
+          if (last.round === now.round) {
+            setIndex(last.index);
+          } else {
+            // A new round began after the answer: put the card first in it.
+            const rest = (now.queue ?? target.queue).slice(now.index).filter((c) => c.id !== last.card.id);
+            setQueue([last.card, ...rest]);
+            setIndex(0);
+          }
+        },
+        (failure: unknown) => {
+          setSubmitError(describeError(failure));
+          // The server refused (too late, already undone): nothing left to undo.
+          // A lost connection or a server error leaves the undo to try again.
+          if (failure instanceof ApiError && failure.status < 500) {
+            setLastAnswer(null);
+          }
+        },
+      );
+      // A new round waits for the undo too, so its queue includes the card.
+      inFlight.current.add(request);
+      void request.finally(() => {
+        inFlight.current.delete(request);
+        setUndoing(false);
+      });
     },
-    [round, index],
+    [],
   );
 
   // After an edit, show the card as it is now; an edit can remove it (a cloze
@@ -471,6 +486,7 @@ export function StudyPage() {
               type="button"
               className={rating === 3 ? "button primary" : "button"}
               aria-keyshortcuts={String(rating)}
+              disabled={undoing}
               onClick={() => {
                 rate(rating);
               }}

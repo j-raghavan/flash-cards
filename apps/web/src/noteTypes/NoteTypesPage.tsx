@@ -34,20 +34,46 @@ interface TemplateRow {
 let nextKey = 1;
 const key = (): number => nextKey++;
 
-/** The update request: names, templates, and which saved fields were renamed. */
-export function toInput(name: string, fields: FieldRow[], templates: TemplateRow[]): NoteTypeInput & { renamed: Record<string, string> } {
+// The server's limits (domain/note_types.py, domain/notes.py).
+export const MAX_NAME = 100;
+export const MAX_FIELD_NAME = 64;
+export const MAX_FIELDS = 64;
+export const MAX_TEMPLATE_NAME = 64;
+export const MAX_TEMPLATES = 16;
+
+/** Saved fields given a new name, as old name to new name. */
+function renames(fields: FieldRow[]): Record<string, string> {
   const renamed: Record<string, string> = {};
   for (const field of fields) {
     if (field.original !== null && field.original !== field.name.trim()) {
       renamed[field.original] = field.name.trim();
     }
   }
+  return renamed;
+}
+
+/** A template with each renamed field's {{placeholder}} following the new name. */
+function renamePlaceholders(template: string, renamed: Record<string, string>): string {
+  return template.replace(/\{\{(.*?)\}\}/gs, (match, field: string) => {
+    const next = renamed[field];
+    return next === undefined ? match : `{{${next}}}`;
+  });
+}
+
+/** The update request: names, templates, and which saved fields were renamed. */
+export function toInput(
+  name: string,
+  fields: FieldRow[],
+  templates: TemplateRow[],
+): NoteTypeInput & { renamed: Record<string, string> } {
+  const renamed = renames(fields);
   return {
     name: name.trim(),
     fields: fields.map((f) => f.name.trim()),
-    templates: templates.map(({ ordinal, name: templateName, front, back }) =>
-      ordinal === undefined ? { name: templateName, front, back } : { ordinal, name: templateName, front, back },
-    ),
+    templates: templates.map(({ ordinal, name: templateName, front, back }) => {
+      const sides = { name: templateName, front: renamePlaceholders(front, renamed), back: renamePlaceholders(back, renamed) };
+      return ordinal === undefined ? sides : { ordinal, ...sides };
+    }),
     renamed,
   };
 }
@@ -117,7 +143,13 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
   const sample = Object.fromEntries(names.map((n) => [n, `*${n}*`]));
   // Never empty: the last template cannot be removed.
   const first = templates[0] as TemplateRow;
-  const preview = cardSides("custom", sample, 0, { ...first, ordinal: 0 });
+  const renamed = renames(fields);
+  const preview = cardSides("custom", sample, 0, {
+    ordinal: 0,
+    name: first.name,
+    front: renamePlaceholders(first.front, renamed),
+    back: renamePlaceholders(first.back, renamed),
+  });
 
   const setField = (index: number, value: string): void => {
     setFields(fields.map((f, i) => (i === index ? { ...f, name: value } : f)));
@@ -145,7 +177,7 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
           <span>Name</span>
           <input
             required
-            maxLength={200}
+            maxLength={MAX_NAME}
             value={name}
             onChange={(event) => {
               setName(event.target.value);
@@ -161,7 +193,7 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
                   <span>Field {index + 1}</span>
                   <input
                     value={field.name}
-                    maxLength={100}
+                    maxLength={MAX_FIELD_NAME}
                     onChange={(event) => {
                       setField(index, event.target.value);
                     }}
@@ -185,6 +217,7 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
           <button
             type="button"
             className="button"
+            disabled={fields.length >= MAX_FIELDS}
             onClick={() => {
               setFields([...fields, { key: key(), original: null, name: "" }]);
             }}
@@ -192,7 +225,7 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
             Add a field
           </button>
           {initial === undefined ? null : (
-            <p className="muted">Renaming a field keeps its contents. Removing one deletes its contents from every note.</p>
+            <p className="muted">Renaming a field keeps its contents and updates the card templates. Removing one deletes its contents from every note.</p>
           )}
         </fieldset>
         <fieldset>
@@ -208,7 +241,7 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
                 <span>Card name</span>
                 <input
                   value={template.name}
-                  maxLength={100}
+                  maxLength={MAX_TEMPLATE_NAME}
                   onChange={(event) => {
                     setTemplate(index, { name: event.target.value });
                   }}
@@ -251,6 +284,7 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
           <button
             type="button"
             className="button"
+            disabled={templates.length >= MAX_TEMPLATES}
             onClick={() => {
               setTemplates([
                 ...templates,

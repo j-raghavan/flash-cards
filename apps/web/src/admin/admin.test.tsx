@@ -67,7 +67,9 @@ describe("admin console", () => {
     renderApp("/admin");
     const user = userEvent.setup();
     expect(await screen.findByRole("link", { name: "Admin" })).toBeInTheDocument();
-    expect(document.title).toBe("Admin · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Admin · Flash-Cards");
+    });
     const own = (await screen.findByText("root@example.com")).closest("tr") as HTMLElement;
     expect(within(own).getByText("(you)")).toBeInTheDocument();
     expect(within(own).getByRole("combobox")).toBeDisabled();

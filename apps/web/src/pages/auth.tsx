@@ -98,7 +98,8 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const submit = useSubmit();
-  const next = safeNextPath(params.get("next"));
+  const location = useLocation();
+  const next = safeNextPath(params.get("next") ?? new URLSearchParams(location.hash.replace(/^#/, "")).get("next"));
 
   if (user !== null) {
     return <Navigate to={next} replace />;

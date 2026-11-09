@@ -31,7 +31,9 @@ describe("share links", () => {
     renderApp("/decks/d1/share");
     const user = userEvent.setup();
     expect(await screen.findByRole("heading", { name: "Share “Biology”" })).toBeInTheDocument();
-    expect(document.title).toBe("Share Biology · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Share Biology · Flash-Cards");
+    });
     const rows = await screen.findAllByRole("row");
     expect(rows).toHaveLength(3);
     expect(within(rows[2] as HTMLElement).getByText(/^Revoked/)).toBeInTheDocument();
@@ -151,7 +153,9 @@ describe("shared deck page", () => {
     const { container } = renderApp("/shared#token=abc");
     const user = userEvent.setup();
     expect(await screen.findByRole("heading", { name: "Spanish" })).toBeInTheDocument();
-    expect(document.title).toBe("Spanish · Flash-Cards");
+    await waitFor(() => {
+      expect(document.title).toBe("Spanish · Flash-Cards");
+    });
     expect(screen.getByText("10 notes in 2 decks.")).toBeInTheDocument();
     expect(screen.getByText("Showing the first 4 of 10.")).toBeInTheDocument();
     expect(screen.getByText("hola").tagName).toBe("STRONG");

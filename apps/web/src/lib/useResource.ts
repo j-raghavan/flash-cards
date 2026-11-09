@@ -8,7 +8,8 @@ export interface Resource<T> {
   error: string | null;
   loading: boolean;
   reload: () => void;
-  setData: (data: T) => void;
+  /** Replace the data, or derive it from the latest data (safe when updates overlap). */
+  setData: (data: T | ((current: T | undefined) => T)) => void;
 }
 
 interface Loaded<T> {
@@ -60,8 +61,11 @@ export function useResource<T>(load: () => Promise<T>, key: string): Resource<T>
     setGeneration((n) => n + 1);
   }, []);
 
-  const setData = useCallback((data: T) => {
-    setLoaded((previous) => ({ ...previous, data }));
+  const setData = useCallback((data: T | ((current: T | undefined) => T)) => {
+    setLoaded((previous) => ({
+      ...previous,
+      data: typeof data === "function" ? (data as (current: T | undefined) => T)(previous.data) : data,
+    }));
   }, []);
 
   const loading = loaded.request !== request;

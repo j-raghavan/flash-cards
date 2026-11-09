@@ -4,7 +4,9 @@
 // shared deck and, when allowed, copies it into the reader's decks.
 //
 // A link carries its token in the URL fragment (/shared#token=...), which the
-// browser never sends to a server, so tokens stay out of access logs.
+// browser never sends when it loads the page, so the token stays out of the web
+// server's logs and Referer headers. The API itself reads the token from the
+// path of GET /shared/{token} (the API contract).
 
 import { useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
@@ -96,7 +98,7 @@ export function SharePage() {
   useDocumentTitle(deck.data === undefined ? "Share deck" : `Share ${deck.data.name}`);
 
   const replace = (changed: ShareLink): void => {
-    links.setData((links.data ?? []).map((l) => (l.id === changed.id ? changed : l)));
+    links.setData((current = []) => current.map((l) => (l.id === changed.id ? changed : l)));
   };
 
   return (
@@ -132,7 +134,7 @@ export function SharePage() {
               void create.run(async () => {
                 const link = await shares.create(deckId, allowClone);
                 setCreated(link);
-                links.setData([link, ...(links.data ?? [])]);
+                links.setData((current = []) => [link, ...current]);
               });
             }}
           >
@@ -208,20 +210,29 @@ function SharedNotePreview({ note }: { note: SharedNote }) {
 
 export function SharedDeckPage() {
   const location = useLocation();
-  const navigate = useNavigate();
   const token = new URLSearchParams(location.hash.replace(/^#/, "")).get("token") ?? "";
+  if (token === "") {
+    return <IncompleteLink />;
+  }
+  return <SharedDeckPreview token={token} />;
+}
+
+function IncompleteLink() {
+  useDocumentTitle("Shared deck");
+  return (
+    <section>
+      <h1>Shared deck</h1>
+      <p>This link is incomplete. Ask the person who shared it for the full link.</p>
+    </section>
+  );
+}
+
+function SharedDeckPreview({ token }: { token: string }) {
+  const navigate = useNavigate();
   const preview = useResource(() => shares.preview(token), `shared:${token}`);
   const clone = useSubmit();
   useDocumentTitle(preview.data?.name ?? "Shared deck");
 
-  if (token === "") {
-    return (
-      <section>
-        <h1>Shared deck</h1>
-        <p>This link is incomplete. Ask the person who shared it for the full link.</p>
-      </section>
-    );
-  }
   if (preview.error !== null) {
     return (
       <section>
