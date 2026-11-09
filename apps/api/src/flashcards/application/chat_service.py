@@ -38,6 +38,7 @@ from flashcards.domain.ports import (
     PassageRepository,
 )
 from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES, PageKind
+from flashcards.domain.usage import AiFeature
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ class ChatService:
         )
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.CHAT, result)
         return parse_chat_answer(result.data, top)
 
     async def _index(self, owner_id: str, deck_ids: list[str]) -> None:

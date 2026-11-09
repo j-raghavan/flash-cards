@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_prompts import exam_grading_prompt, exam_prompt
 from flashcards.application.deck_service import DeckService
-from flashcards.domain.ai import LlmDocument, StructuredRequest
+from flashcards.domain.ai import InvalidModelOutput, LlmDocument, StructuredRequest
 from flashcards.domain.mock_exam import (
     EXAM_MAX_OUTPUT_TOKENS,
     EXAM_SCHEMA,
@@ -45,6 +45,7 @@ from flashcards.domain.ports import (
     MockExamRepository,
     NoteRepository,
 )
+from flashcards.domain.usage import AiFeature
 
 
 class MockExamService:
@@ -94,6 +95,7 @@ class MockExamService:
         )
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
         questions = tuple(
             ExamQuestion(id=str(uuid.uuid4()), prompt=prompt, reference=answer, topic=topic)
             for prompt, answer, topic in parse_exam_questions(result.data, limit=limit)
@@ -147,7 +149,16 @@ class MockExamService:
         )
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
-        return grade_exam(exam, scores_for_answered(exam, answered, parse_grades(result.data)))
+        try:
+            grades = parse_grades(result.data)
+        except InvalidModelOutput:
+            # Recording commits, so reopen first: the user can submit again, while
+            # the call they were billed for still counts.
+            await self._exams.reopen(exam.id)
+            await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
+            raise
+        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
+        return grade_exam(exam, scores_for_answered(exam, answered, grades))
 
 
 def _collect_source(notes: list[Note]) -> str:

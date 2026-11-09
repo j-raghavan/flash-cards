@@ -13,19 +13,28 @@ from fastapi.testclient import TestClient
 
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
+    InMemoryAuditRepository,
     InMemoryDeckRepository,
     InMemoryJobQueue,
     InMemoryObjectStore,
     InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
+    InMemoryUsageRepository,
+    InMemoryUserRepository,
 )
 from flashcards.api import app as app_module
 from flashcards.api.app import create_app
+from flashcards.application.ai_spend import AiSpend
+from flashcards.application.audit_service import AuditService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.generation_request_service import GenerationRequestService
+from flashcards.application.quota_service import QuotaService
 from flashcards.config import Settings
 from flashcards.domain.ai import Thoroughness
 from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
 from flashcards.domain.ports import AiJobRepository
+from flashcards.domain.quotas import InstanceQuotas
+from flashcards.domain.usage import TokenPrices
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 
@@ -60,6 +69,7 @@ def _service(
     jobs: InMemoryAiJobRepository, queue: InMemoryJobQueue
 ) -> GenerationRequestService:
     clock = _Clock()
+    usage = InMemoryUsageRepository()
     return GenerationRequestService(
         DeckService(InMemoryDeckRepository(), clock),
         _NoExtractor(),  # type: ignore[arg-type]
@@ -68,6 +78,23 @@ def _service(
         jobs,
         queue,
         clock,
+        QuotaService(
+            InMemoryQuotaSettingsRepository(),
+            InMemoryQuotaRepository(),
+            usage,
+            InMemoryUserRepository(),
+            AuditService(InMemoryAuditRepository(), clock),
+            clock,
+            defaults=InstanceQuotas(),
+        ),
+        AiSpend(
+            usage,
+            InMemoryQuotaSettingsRepository(),
+            clock,
+            provider="test",
+            prices=TokenPrices(),
+            defaults=InstanceQuotas(),
+        ),
     )
 
 

@@ -52,6 +52,19 @@ class SignupRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    """Public sign-up (F-AUTH-7), offered only when INVITE_ONLY is false."""
+
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=1024)
+
+
+class InstanceInfoOut(BaseModel):
+    """Public facts a client needs before sign-in."""
+
+    invite_only: bool
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -118,9 +131,13 @@ class InviteOut(BaseModel):
 
 
 class SessionOut(BaseModel):
+    """A device-list entry. Never carries the session token or its hash."""
+
     id: str
     created_at: datetime
     expires_at: datetime
+    last_seen_at: datetime | None
+    device: str
     current: bool
 
     @classmethod
@@ -129,8 +146,14 @@ class SessionOut(BaseModel):
             id=session.id,
             created_at=session.created_at,
             expires_at=session.expires_at,
+            last_seen_at=session.last_seen_at,
+            device=session.device,
             current=current,
         )
+
+
+class SessionsRevokedOut(BaseModel):
+    revoked: int
 
 
 # --- M1: decks, cards, review, stats ---

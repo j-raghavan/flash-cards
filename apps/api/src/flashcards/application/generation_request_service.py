@@ -6,7 +6,9 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
+from flashcards.application.ai_spend import AiSpend
 from flashcards.application.deck_service import DeckService
+from flashcards.application.quota_service import QuotaService
 from flashcards.domain.ai import Thoroughness
 from flashcards.domain.jobs import (
     AiJob,
@@ -46,6 +48,8 @@ class GenerationRequestService:
         jobs: AiJobRepository,
         queue: JobQueue,
         clock: Clock,
+        limits: QuotaService,
+        spend: AiSpend,
         max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     ) -> None:
         self._decks = decks
@@ -55,6 +59,8 @@ class GenerationRequestService:
         self._jobs = jobs
         self._queue = queue
         self._clock = clock
+        self._limits = limits
+        self._spend = spend
         self._max_pages = max_pages
 
     async def start(
@@ -100,8 +106,12 @@ class GenerationRequestService:
         if pages > self._max_pages:
             raise TooManyPages(f"{pages} pages (max {self._max_pages})")
 
+        await self._spend.ensure_available()  # raises SpendCapReached
         now = self._clock.now()
-        if not await self._quotas.try_reserve_pages(owner_id, pages, billing_period(now)):
+        limit = await self._limits.page_limit(owner_id)
+        if not await self._quotas.try_reserve_pages(
+            owner_id, pages, billing_period(now), limit=limit
+        ):
             raise QuotaExceeded(f"{pages} pages exceeds the remaining quota")
 
         source_id = str(uuid.uuid4())
@@ -146,6 +156,7 @@ class GenerationRequestService:
         generated nor charged again.
         """
         job = await self.get(owner_id=owner_id, job_id=job_id)
+        await self._spend.ensure_available()  # a retry is new AI work
         queued = await self._jobs.try_retry(job.id, self._clock.now())
         if queued is None:
             raise IllegalJobTransition(f"cannot retry from {job.status}")

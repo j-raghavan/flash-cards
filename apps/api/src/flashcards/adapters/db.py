@@ -54,8 +54,9 @@ from flashcards.domain.scheduling import (
     ScheduleState,
     UndoSnapshot,
 )
-from flashcards.domain.sessions import Session
+from flashcards.domain.sessions import UNKNOWN_DEVICE, Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.usage import AiUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
@@ -101,6 +102,23 @@ class SessionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A label such as "Firefox on macOS", derived from the User-Agent at sign-in.
+    device: Mapped[str] = mapped_column(String, server_default=UNKNOWN_DEVICE)
+
+
+class SessionActivityRow(Base):
+    """A session's last-seen time, kept apart from the session row.
+
+    Recording activity then never locks the session row, so revoking a session
+    never waits for a long request (such as an AI call) of that session to end.
+    """
+
+    __tablename__ = "session_activity"
+
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 def invite_to_row(invite: Invite) -> InviteRow:
@@ -163,10 +181,11 @@ def session_to_row(session: Session) -> SessionRow:
         created_at=session.created_at,
         expires_at=session.expires_at,
         revoked_at=session.revoked_at,
+        device=session.device,
     )
 
 
-def session_from_row(row: SessionRow) -> Session:
+def session_from_row(row: SessionRow, last_seen_at: datetime | None) -> Session:
     return Session(
         id=row.id,
         user_id=row.user_id,
@@ -174,6 +193,8 @@ def session_from_row(row: SessionRow) -> Session:
         created_at=row.created_at,
         expires_at=row.expires_at,
         revoked_at=row.revoked_at,
+        last_seen_at=last_seen_at,
+        device=row.device,
     )
 
 
@@ -907,6 +928,58 @@ def user_token_from_row(row: UserTokenRow) -> UserToken:
         expires_at=row.expires_at,
         used_at=row.used_at,
     )
+
+
+class AiUsageRow(Base):
+    __tablename__ = "ai_usage"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # No foreign key: usage is kept for cost accounting after an account is deleted.
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    provider: Mapped[str] = mapped_column(String)
+    model: Mapped[str] = mapped_column(String)
+    feature: Mapped[str] = mapped_column(String)
+    input_tokens: Mapped[int] = mapped_column(BigInteger)
+    output_tokens: Mapped[int] = mapped_column(BigInteger)
+    cost_micro_usd: Mapped[int] = mapped_column(BigInteger)
+    period: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+def usage_to_row(usage: AiUsage) -> AiUsageRow:
+    return AiUsageRow(
+        id=usage.id,
+        owner_id=usage.owner_id,
+        provider=usage.provider,
+        model=usage.model,
+        feature=usage.feature.value,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cost_micro_usd=usage.cost_micro_usd,
+        period=usage.period,
+        created_at=usage.created_at,
+    )
+
+
+class InstanceQuotaRow(Base):
+    """The instance's AI limits: a single row (id = 1) once an admin sets them."""
+
+    __tablename__ = "instance_quotas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    default_monthly_pages: Mapped[int] = mapped_column(Integer)
+    monthly_spend_cap_micro_usd: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class UserQuotaRow(Base):
+    """A user's monthly page limit, overriding the instance default."""
+
+    __tablename__ = "user_quotas"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    monthly_pages: Mapped[int] = mapped_column(Integer)
 
 
 class StudySettingsRow(Base):

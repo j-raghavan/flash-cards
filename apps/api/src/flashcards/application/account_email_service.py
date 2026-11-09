@@ -82,6 +82,25 @@ class AccountEmailService:
             ),
         )
 
+    def account_exists_email(self, user: User) -> OutgoingEmail | None:
+        """The notice sent when someone signs up with an email that has an account.
+
+        Public sign-up answers the same way for new and existing emails, so the
+        owner learns of the attempt here instead. Nothing goes to a suspended account.
+        """
+        if user.status() is UserStatus.SUSPENDED:
+            return None
+        return OutgoingEmail(
+            to=user.email,
+            subject="You already have a Flash-Cards account",
+            body=(
+                "Someone tried to create a Flash-Cards account with this email address, "
+                "but it already has one. Sign in instead; if you have forgotten your "
+                f"password, you can reset it here:\n\n{self._base_url}/reset-password\n\n"
+                "If this was not you, you can ignore this message."
+            ),
+        )
+
     async def verify_email(self, raw_token: str) -> User:
         token = await self._consume(raw_token, TokenPurpose.EMAIL_VERIFICATION)
         user = await self._live_user(token.user_id)

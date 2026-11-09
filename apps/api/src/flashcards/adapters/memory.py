@@ -17,7 +17,7 @@ from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
-from flashcards.domain.invites import Invite
+from flashcards.domain.invites import Invite, InviteStatus
 from flashcards.domain.jobs import AiJob, JobStatus
 from flashcards.domain.login_throttle import ThrottleState, after_attempt
 from flashcards.domain.media import MediaAsset
@@ -31,7 +31,7 @@ from flashcards.domain.progress import (
     StudySettings,
     bucket_start,
 )
-from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
+from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, InstanceQuotas
 from flashcards.domain.scheduling import (
     CardSchedule,
     DuplicateReview,
@@ -41,6 +41,7 @@ from flashcards.domain.scheduling import (
 )
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -86,6 +87,13 @@ class InMemoryInviteRepository:
     async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
         ids = sorted(i.id for i in self._by_id.values() if i.created_by == user_id)
         return [invite_id for invite_id in ids if await self.try_revoke(invite_id, now)]
+
+    async def try_rotate_token(self, invite_id: str, token_hash: str, now: datetime) -> bool:
+        invite = self._by_id.get(invite_id)
+        if invite is None or invite.status(now) is not InviteStatus.ACTIVE:
+            return False
+        self._by_id[invite_id] = invite.with_token_hash(token_hash)
+        return True
 
 
 class InMemoryUserRepository:
@@ -153,6 +161,21 @@ class InMemorySessionRepository:
         for session in list(self._by_id.values()):
             if session.user_id == user_id and session.revoked_at is None:
                 self._by_id[session.id] = session.with_revoked(now)
+
+    async def revoke_others(self, user_id: str, keep_session_id: str, now: datetime) -> int:
+        others = [
+            s.id
+            for s in self._by_id.values()
+            if s.user_id == user_id and s.id != keep_session_id and s.is_valid(now)
+        ]
+        for session_id in others:
+            self._by_id[session_id] = self._by_id[session_id].with_revoked(now)
+        return len(others)
+
+    async def touch(self, session_id: str, now: datetime) -> None:
+        session = self._by_id.get(session_id)
+        if session is not None:
+            self._by_id[session_id] = session.with_seen(now)
 
     async def delete_for_user(self, user_id: str) -> None:
         for session_id in [s.id for s in self._by_id.values() if s.user_id == user_id]:
@@ -499,17 +522,83 @@ class InMemoryQuotaRepository:
         self._limit = limit
         self._used: dict[tuple[str, str], int] = {}
 
-    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+    async def try_reserve_pages(
+        self, owner_id: str, pages: int, period: str, limit: int | None = None
+    ) -> bool:
         key = (owner_id, period)
         used = self._used.get(key, 0)
-        if used + pages > self._limit:
+        if used + pages > (self._limit if limit is None else limit):
             return False
         self._used[key] = used + pages
         return True
 
+    async def used(self, owner_id: str, period: str) -> int:
+        return self._used.get((owner_id, period), 0)
+
     async def delete_for_owner(self, owner_id: str) -> None:
         for key in [k for k in self._used if k[0] == owner_id]:
             del self._used[key]
+
+
+class InMemoryQuotaSettingsRepository:
+    def __init__(self) -> None:
+        self._instance: InstanceQuotas | None = None
+        self._user_pages: dict[str, int] = {}
+
+    async def get_instance(self) -> InstanceQuotas | None:
+        return self._instance
+
+    async def put_instance(self, quotas: InstanceQuotas) -> None:
+        self._instance = quotas
+
+    async def get_user_pages(self, user_id: str) -> int | None:
+        return self._user_pages.get(user_id)
+
+    async def set_user_pages(self, user_id: str, pages: int | None) -> None:
+        if pages is None:
+            self._user_pages.pop(user_id, None)
+        else:
+            self._user_pages[user_id] = pages
+
+
+class InMemoryUsageRepository:
+    def __init__(self) -> None:
+        self._records: list[AiUsage] = []
+
+    async def add(self, usage: AiUsage) -> None:
+        self._records.append(usage)
+
+    async def total_cost(self, period: str) -> int:
+        return sum(r.cost_micro_usd for r in self._records if r.period == period)
+
+    async def by_user(self, period: str) -> list[UserUsage]:
+        groups: dict[str, list[AiUsage]] = {}
+        for record in self._records:
+            if record.period == period:
+                groups.setdefault(record.owner_id, []).append(record)
+        totals = [UserUsage(owner_id, *_sums(records)) for owner_id, records in groups.items()]
+        return sorted(totals, key=lambda t: (-t.cost_micro_usd, t.owner_id))
+
+    async def by_provider(self, period: str) -> list[ProviderUsage]:
+        groups: dict[tuple[str, str], list[AiUsage]] = {}
+        for record in self._records:
+            if record.period == period:
+                groups.setdefault((record.provider, record.model), []).append(record)
+        totals = [
+            ProviderUsage(provider, model, *_sums(records))
+            for (provider, model), records in groups.items()
+        ]
+        return sorted(totals, key=lambda t: (-t.cost_micro_usd, t.provider, t.model))
+
+
+def _sums(records: list[AiUsage]) -> tuple[int, int, int, int]:
+    """Calls, input tokens, output tokens and cost of a group of records."""
+    return (
+        len(records),
+        sum(r.input_tokens for r in records),
+        sum(r.output_tokens for r in records),
+        sum(r.cost_micro_usd for r in records),
+    )
 
 
 class InMemoryGoalRepository:
@@ -572,6 +661,11 @@ class InMemoryMockExamRepository:
             return False
         self._by_id[exam_id] = replace(exam, submitted_at=now)
         return True
+
+    async def reopen(self, exam_id: str) -> None:
+        exam = self._by_id.get(exam_id)
+        if exam is not None:
+            self._by_id[exam_id] = replace(exam, submitted_at=None)
 
     async def delete_for_deck(self, deck_id: str) -> None:
         for exam_id in [e.id for e in self._by_id.values() if e.deck_id == deck_id]:

@@ -8,22 +8,30 @@ import pytest
 
 from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
+    InMemoryAuditRepository,
     InMemoryDeckRepository,
     InMemoryJobQueue,
     InMemoryObjectStore,
     InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
+    InMemoryUsageRepository,
+    InMemoryUserRepository,
 )
+from flashcards.application.ai_spend import AiSpend
+from flashcards.application.audit_service import AuditService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.generation_request_service import (
     DEFAULT_JOB_PAGE,
     MAX_JOB_PAGE,
     GenerationRequestService,
 )
+from flashcards.application.quota_service import QuotaService
 from flashcards.domain.ai import Thoroughness
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.jobs import JobNotFound, JobStatus, new_generation_job
-from flashcards.domain.quotas import QuotaExceeded
+from flashcards.domain.quotas import InstanceQuotas, QuotaExceeded
 from flashcards.domain.sources import ExtractedPage, TooManyPages, UnsupportedMediaType
+from flashcards.domain.usage import TokenPrices
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 ALICE = "alice"
@@ -62,6 +70,28 @@ class FakeExtractor:
         yield  # pragma: no cover
 
 
+def _limits_and_spend(clock: FakeClock, quota_limit: int = 10) -> tuple[QuotaService, AiSpend]:
+    usage = InMemoryUsageRepository()
+    limits = QuotaService(
+        InMemoryQuotaSettingsRepository(),
+        InMemoryQuotaRepository(),
+        usage,
+        InMemoryUserRepository(),
+        AuditService(InMemoryAuditRepository(), clock),
+        clock,
+        defaults=InstanceQuotas(default_monthly_pages=quota_limit),
+    )
+    spend = AiSpend(
+        usage,
+        InMemoryQuotaSettingsRepository(),
+        clock,
+        provider="test",
+        prices=TokenPrices(),
+        defaults=InstanceQuotas(),
+    )
+    return limits, spend
+
+
 def _service(
     extractor: FakeExtractor,
     *,
@@ -71,6 +101,7 @@ def _service(
     decks = DeckService(InMemoryDeckRepository(), clock)
     queue = InMemoryJobQueue()
     store = InMemoryObjectStore()
+    usage = InMemoryUsageRepository()
     service = GenerationRequestService(
         decks,
         extractor,
@@ -79,6 +110,23 @@ def _service(
         InMemoryAiJobRepository(),
         queue,
         clock,
+        QuotaService(
+            InMemoryQuotaSettingsRepository(),
+            InMemoryQuotaRepository(),
+            usage,
+            InMemoryUserRepository(),
+            AuditService(InMemoryAuditRepository(), clock),
+            clock,
+            defaults=InstanceQuotas(default_monthly_pages=quota_limit),
+        ),
+        AiSpend(
+            usage,
+            InMemoryQuotaSettingsRepository(),
+            clock,
+            provider="test",
+            prices=TokenPrices(),
+            defaults=InstanceQuotas(),
+        ),
     )
     return service, decks, queue, store
 
@@ -164,6 +212,7 @@ async def test_list_recent_is_owner_scoped_newest_first_and_bounded() -> None:
         jobs,
         InMemoryJobQueue(),
         clock,
+        *_limits_and_spend(clock),
     )
     created: list[str] = []
     for minute in range(MAX_JOB_PAGE + 5):

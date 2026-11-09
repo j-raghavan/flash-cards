@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from flashcards import __version__
+from flashcards.adapters.llm import NullLLMProvider
 from flashcards.api.body_limit import BodySizeLimitMiddleware
 from flashcards.api.container import Container
 from flashcards.api.csrf import CsrfOriginMiddleware
@@ -31,6 +32,7 @@ from flashcards.api.routers import (
     decks,
     goals,
     imports,
+    legal,
     media,
     mock_exams,
     note_types,
@@ -43,6 +45,7 @@ from flashcards.domain.ai import DraftNotFound, InvalidModelOutput, LlmError
 from flashcards.domain.anki import InvalidPackage, UnsupportedPackage
 from flashcards.domain.chat import NoChatSources
 from flashcards.domain.decks import DeckCycle, DeckNotFound, InvalidDeckName
+from flashcards.domain.disclosure import AiDisclosure, ai_disclosure
 from flashcards.domain.goals import GoalNotFound, InvalidGoal
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import IllegalJobTransition, JobNotFound
@@ -63,7 +66,13 @@ from flashcards.domain.notes import (
 )
 from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.progress import InvalidRange, InvalidStudySettings
-from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
+from flashcards.domain.quotas import (
+    MICRO_USD_PER_USD,
+    AiCallLimitReached,
+    InstanceQuotas,
+    InvalidQuota,
+    QuotaExceeded,
+)
 from flashcards.domain.scheduling import ReviewNotFound, UndoRejected
 from flashcards.domain.sharing import (
     CloneLimitReached,
@@ -79,6 +88,7 @@ from flashcards.domain.transcripts import (
     InvalidVideoUrl,
     TranscriptUnavailable,
 )
+from flashcards.domain.usage import AiMetering, SpendCapReached, TokenPrices
 from flashcards.domain.users import AdminRequired, AdminSelfAction, LastActiveAdmin, UserNotFound
 
 logger = logging.getLogger("flashcards")
@@ -231,6 +241,15 @@ def _register_error_handlers(app: FastAPI) -> None:
             content={"detail": "The AI returned an unusable answer; try again."},
         )
 
+    async def spend_cap(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "This instance's monthly AI budget is used up."},
+        )
+
+    async def invalid_quota(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
     async def job_conflict(_request: Request, _exc: Exception) -> JSONResponse:
         # e.g. retrying a job that has not failed or has no attempts left.
         return JSONResponse(
@@ -288,6 +307,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(CloneTooLarge, clone_too_large)
     app.add_exception_handler(CloneLimitReached, clone_limit)
     app.add_exception_handler(AiCallLimitReached, ai_call_limit)
+    app.add_exception_handler(SpendCapReached, spend_cap)
+    app.add_exception_handler(InvalidQuota, invalid_quota)
     app.add_exception_handler(SummaryLocked, feature_locked)
     app.add_exception_handler(ExamLocked, feature_locked)
     # The more specific handler wins: malformed output is 502, anything else 503.
@@ -299,6 +320,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     settings = settings or Settings()
     configured_llm = llm if llm is not None else _llm_from_settings(settings)
 
+    ai_enabled = not isinstance(configured_llm, NullLLMProvider)
+    metering = _metering_from_settings(settings, ai_enabled=ai_enabled)
     mailer = _mailer_from_settings(settings)
     _warn_on_local_links(settings)
     if settings.database_url:
@@ -307,6 +330,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             llm=configured_llm,
             mailer=mailer,
             public_base_url=settings.public_base_url,
+            metering=metering,
+            require_verified_sign_in=not settings.invite_only,
             max_upload_pages=settings.max_upload_pages,
         )
         container = None
@@ -315,6 +340,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             llm=configured_llm,
             mailer=mailer,
             public_base_url=settings.public_base_url,
+            metering=metering,
+            require_verified_sign_in=not settings.invite_only,
             max_upload_pages=settings.max_upload_pages,
         )
         engine = None
@@ -354,6 +381,9 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.state.container = container
     app.state.services_provider = provider
     app.state.event_stream_slots = StreamSlots()
+    app.state.ai_disclosure = _disclosure_from_settings(settings, ai_enabled=ai_enabled)
+    if not settings.invite_only:
+        logger.warning("INVITE_ONLY is off: anyone can create an account at /auth/register.")
     app.state.bootstrap_invite_token = _maybe_bootstrap_invite(settings, container)
 
     # Refuses unsafe requests that do not come from a trusted origin (ADR 0017).
@@ -376,6 +406,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(chat.router)
     app.include_router(sharing.router)
     app.include_router(note_types.router)
+    app.include_router(legal.router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
@@ -457,6 +488,33 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
         )
     logger.warning("No AI backend is configured; AI requests will be refused.")
     return NullLLMProvider()
+
+
+def _to_micro_usd(usd: float | None) -> int | None:
+    return None if usd is None else round(usd * MICRO_USD_PER_USD)
+
+
+def _metering_from_settings(settings: Settings, *, ai_enabled: bool) -> AiMetering:
+    """Usage records name the configured backend, priced at the operator's rates."""
+    return AiMetering(
+        provider=settings.llm_provider if ai_enabled else "none",
+        prices=TokenPrices(
+            input_usd_per_mtok=settings.ai_input_usd_per_mtok,
+            output_usd_per_mtok=settings.ai_output_usd_per_mtok,
+        ),
+        default_quotas=InstanceQuotas(
+            default_monthly_pages=settings.ai_default_monthly_pages,
+            monthly_spend_cap_micro_usd=_to_micro_usd(settings.ai_monthly_spend_cap_usd),
+        ),
+    )
+
+
+def _disclosure_from_settings(settings: Settings, *, ai_enabled: bool) -> AiDisclosure:
+    return ai_disclosure(
+        provider_key=settings.llm_provider if ai_enabled else None,
+        name=settings.ai_provider_name,
+        terms_url=settings.ai_provider_terms_url,
+    )
 
 
 def _mailer_from_settings(settings: Settings) -> Mailer:

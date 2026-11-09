@@ -34,12 +34,14 @@ from flashcards.adapters.memory import (
     InMemoryPassageRepository,
     InMemoryPlanBaselineRepository,
     InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
     InMemoryStudySettingsRepository,
     InMemoryStudyStatsRepository,
+    InMemoryUsageRepository,
     InMemoryUserRepository,
     InMemoryUserTokenRepository,
     NullUnitOfWork,
@@ -52,6 +54,7 @@ from flashcards.application.account_email_service import AccountEmailService
 from flashcards.application.account_service import AccountService
 from flashcards.application.admin_service import AdminService
 from flashcards.application.ai_budget import AiCallBudget
+from flashcards.application.ai_spend import AiSpend
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import AuthService
@@ -73,8 +76,11 @@ from flashcards.application.note_service import NoteService
 from flashcards.application.note_type_service import NoteTypeService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.progress_service import ProgressService
+from flashcards.application.public_signup_service import PublicSignupService
+from flashcards.application.quota_service import QuotaService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
+from flashcards.application.session_service import SessionService
 from flashcards.application.sharing_service import SharingService
 from flashcards.application.sign_in_service import SignInService
 from flashcards.application.summary_service import SummaryService
@@ -106,6 +112,7 @@ from flashcards.domain.ports import (
     PasswordHasher,
     PlanBaselineRepository,
     QuotaRepository,
+    QuotaSettingsRepository,
     ReviewLogRepository,
     Scheduler,
     ScheduleRepository,
@@ -115,12 +122,14 @@ from flashcards.domain.ports import (
     StudyStatsRepository,
     TranscriptProvider,
     UnitOfWork,
+    UsageRepository,
     UserRepository,
     UserTokenRepository,
 )
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
+from flashcards.domain.usage import AiMetering
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,11 +166,17 @@ class Repositories:
     audit_events: AuditRepository
     login_throttle: LoginThrottleRepository
     user_tokens: UserTokenRepository
+    quota_settings: QuotaSettingsRepository
+    usage: UsageRepository
     mailer: Mailer
     study_settings: StudySettingsRepository
     plan_baselines: PlanBaselineRepository
     study_stats: StudyStatsRepository
     dummy_hash: str | None = None
+    # Sign-in needs a verified email (instances with public sign-up, F-AUTH-7).
+    require_verified_sign_in: bool = False
+    # Provider name, token prices and default quotas, from configuration.
+    metering: AiMetering = field(default_factory=AiMetering)
     # Where links in emails point (the web client).
     public_base_url: str = "http://localhost:5173"
     # Most pages (or transcript chunks) one AI source document may have
@@ -208,6 +223,9 @@ class Container:
     admin: AdminService
     sign_in: SignInService
     account_email: AccountEmailService
+    sessions: SessionService
+    public_signup: PublicSignupService
+    quotas: QuotaService
     mailer: Mailer
 
 
@@ -216,7 +234,12 @@ def build_services(repos: Repositories) -> Container:
     invites = InviteService(repos.invites, repos.clock)
     registration = RegistrationService(invites, repos.users, repos.hasher, repos.clock)
     auth = AuthService(
-        repos.users, repos.sessions, repos.hasher, repos.clock, dummy_hash=repos.dummy_hash
+        repos.users,
+        repos.sessions,
+        repos.hasher,
+        repos.clock,
+        dummy_hash=repos.dummy_hash,
+        require_verified=repos.require_verified_sign_in,
     )
     decks = DeckService(repos.decks, repos.clock)
     notes = NoteService(decks, repos.notes, repos.cards, repos.clock)
@@ -233,6 +256,24 @@ def build_services(repos: Repositories) -> Container:
         repos.mock_exams,
         repos.share_links,
     )
+    audit = AuditService(repos.audit_events, repos.clock)
+    quotas = QuotaService(
+        repos.quota_settings,
+        repos.quotas,
+        repos.usage,
+        repos.users,
+        audit,
+        repos.clock,
+        defaults=repos.metering.default_quotas,
+    )
+    spend = AiSpend(
+        repos.usage,
+        repos.quota_settings,
+        repos.clock,
+        provider=repos.metering.provider,
+        prices=repos.metering.prices,
+        defaults=repos.metering.default_quotas,
+    )
     generation = GenerationRequestService(
         decks,
         repos.extractor,
@@ -241,6 +282,8 @@ def build_services(repos: Repositories) -> Container:
         repos.ai_jobs,
         repos.job_queue,
         repos.clock,
+        quotas,
+        spend,
         max_pages=repos.max_upload_pages,
     )
     draft_review = DraftReviewService(repos.ai_jobs, repos.draft_cards, notes)
@@ -252,6 +295,7 @@ def build_services(repos: Repositories) -> Container:
         repos.llm,
         repos.clock,
         repos.unit_of_work,
+        spend,
         max_pages=repos.max_upload_pages,
     )
     note_types = NoteTypeService(
@@ -313,7 +357,7 @@ def build_services(repos: Repositories) -> Container:
         repos.study_settings,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
-    ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
+    ai_budget = AiCallBudget(repos.ai_calls, repos.clock, spend, repos.unit_of_work)
     evaluation = EvaluationService(notes, repos.llm, ai_budget)
     summary = SummaryService(
         decks,
@@ -356,7 +400,6 @@ def build_services(repos: Repositories) -> Container:
         repos.note_types,
         repos.media,
     )
-    audit = AuditService(repos.audit_events, repos.clock)
     admin = AdminService(
         invites,
         audit,
@@ -366,6 +409,7 @@ def build_services(repos: Repositories) -> Container:
         repos.login_throttle,
         repos.user_tokens,
         repos.clock,
+        base_url=repos.public_base_url,
     )
     sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
     account_email = AccountEmailService(
@@ -414,6 +458,11 @@ def build_services(repos: Repositories) -> Container:
         admin=admin,
         sign_in=sign_in,
         account_email=account_email,
+        sessions=SessionService(repos.sessions, audit, repos.clock),
+        public_signup=PublicSignupService(
+            repos.users, repos.hasher, repos.login_throttle, audit, repos.clock
+        ),
+        quotas=quotas,
         mailer=repos.mailer,
     )
 
@@ -425,6 +474,8 @@ def build_container(
     transcripts: TranscriptProvider | None = None,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    metering: AiMetering | None = None,
+    require_verified_sign_in: bool = False,
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
@@ -472,11 +523,15 @@ def build_container(
             audit_events=InMemoryAuditRepository(),
             login_throttle=InMemoryLoginThrottleRepository(),
             user_tokens=InMemoryUserTokenRepository(),
+            quota_settings=InMemoryQuotaSettingsRepository(),
+            usage=InMemoryUsageRepository(),
             mailer=mailer or LogMailer(show_content=True),
             study_settings=InMemoryStudySettingsRepository(),
             plan_baselines=InMemoryPlanBaselineRepository(goals),
             study_stats=InMemoryStudyStatsRepository(cards, schedules, review_logs),
             public_base_url=public_base_url,
+            metering=metering or AiMetering(),
+            require_verified_sign_in=require_verified_sign_in,
             max_upload_pages=max_upload_pages,
         )
     )

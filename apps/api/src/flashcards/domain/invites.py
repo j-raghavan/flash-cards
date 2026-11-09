@@ -98,3 +98,6 @@ class Invite:
 
     def with_revoked(self, now: datetime) -> Invite:
         return replace(self, revoked_at=now)
+
+    def with_token_hash(self, token_hash: str) -> Invite:
+        return replace(self, token_hash=token_hash)

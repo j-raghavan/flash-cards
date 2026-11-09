@@ -24,11 +24,13 @@ from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.planner import PlanBaseline
 from flashcards.domain.progress import ActivityBucket, DueBucket, StudySettings
+from flashcards.domain.quotas import InstanceQuotas
 from flashcards.domain.scheduling import CardSchedule, LastAnswer, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.transcripts import Transcript
+from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
@@ -123,6 +125,19 @@ class SessionRepository(Protocol):
         """Revoke every active session for a user (password reset, suspension)."""
         ...
 
+    async def revoke_others(self, user_id: str, keep_session_id: str, now: datetime) -> int:
+        """Revoke every live (unrevoked, unexpired) session of the user but one; return how many."""
+        ...
+
+    async def touch(self, session_id: str, now: datetime) -> None:
+        """Record `now` as the session's last-seen time.
+
+        Best effort and never blocking: a SQL adapter skips the write when another
+        request holds the activity row, and keeps it apart from the session row so
+        a revocation never waits on a long request of that session.
+        """
+        ...
+
     async def delete_for_user(self, user_id: str) -> None:
         """Delete every session for a user (account deletion, F-IMP-5)."""
         ...
@@ -154,6 +169,14 @@ class InviteRepository(Protocol):
 
     async def revoke_created_by(self, user_id: str, now: datetime) -> list[str]:
         """Revoke every unredeemed, unrevoked invite the user created; return their ids."""
+        ...
+
+    async def try_rotate_token(self, invite_id: str, token_hash: str, now: datetime) -> bool:
+        """Replace the token hash of an active invite; return whether it changed.
+
+        Only an invite that is unredeemed, unrevoked and unexpired at `now` changes,
+        in one conditional UPDATE, so a resend never revives a spent invite.
+        """
         ...
 
 
@@ -499,12 +522,54 @@ class JobQueue(Protocol):
 
 
 class QuotaRepository(Protocol):
-    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
-        """Atomically reserve pages against the owner's limit; True if within it."""
+    async def try_reserve_pages(
+        self, owner_id: str, pages: int, period: str, limit: int | None = None
+    ) -> bool:
+        """Atomically reserve pages against a limit; True if within it.
+
+        `limit` overrides the repository's own limit for this reservation (a
+        per-user monthly page limit).
+        """
+        ...
+
+    async def used(self, owner_id: str, period: str) -> int:
+        """How much the owner has reserved in the period."""
         ...
 
     async def delete_for_owner(self, owner_id: str) -> None:
         """Delete the owner's quota counters (account deletion, F-IMP-5)."""
+        ...
+
+
+class QuotaSettingsRepository(Protocol):
+    async def get_instance(self) -> InstanceQuotas | None:
+        """The stored instance quotas, or None when an admin never set them."""
+        ...
+
+    async def put_instance(self, quotas: InstanceQuotas) -> None: ...
+
+    async def get_user_pages(self, user_id: str) -> int | None:
+        """The user's monthly page override, or None to use the instance default."""
+        ...
+
+    async def set_user_pages(self, user_id: str, pages: int | None) -> None:
+        """Set the user's monthly page override; None removes it."""
+        ...
+
+
+class UsageRepository(Protocol):
+    async def add(self, usage: AiUsage) -> None: ...
+
+    async def total_cost(self, period: str) -> int:
+        """The period's recorded cost in micro-USD, across every user."""
+        ...
+
+    async def by_user(self, period: str) -> list[UserUsage]:
+        """The period's usage per user, highest cost first."""
+        ...
+
+    async def by_provider(self, period: str) -> list[ProviderUsage]:
+        """The period's usage per provider and model, highest cost first."""
         ...
 
 
@@ -573,6 +638,10 @@ class MockExamRepository(Protocol):
 
     async def try_mark_submitted(self, exam_id: str, now: datetime) -> bool:
         """Record the one submission atomically; False if it was already submitted."""
+        ...
+
+    async def reopen(self, exam_id: str) -> None:
+        """Clear a submission whose grading produced no result, so it can be retried."""
         ...
 
     async def delete_for_deck(self, deck_id: str) -> None:

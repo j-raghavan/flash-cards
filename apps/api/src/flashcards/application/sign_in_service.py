@@ -13,6 +13,7 @@ from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import (
     AccountSuspended,
     AuthService,
+    EmailNotVerified,
     InvalidCredentials,
     IssuedSession,
 )
@@ -20,6 +21,7 @@ from flashcards.domain.audit import AuditAction
 from flashcards.domain.invites import hash_token, normalize_email
 from flashcards.domain.login_throttle import LOCKOUT, MAX_FAILED_LOGINS, LoginLocked, admitted
 from flashcards.domain.ports import Clock, LoginThrottleRepository, UserRepository
+from flashcards.domain.sessions import UNKNOWN_DEVICE
 
 
 def throttle_key(email: str) -> str:
@@ -42,7 +44,9 @@ class SignInService:
         self._audit = audit
         self._clock = clock
 
-    async def login(self, *, email: str, password: str) -> IssuedSession:
+    async def login(
+        self, *, email: str, password: str, device: str = UNKNOWN_DEVICE
+    ) -> IssuedSession:
         key = throttle_key(email)
         now = self._clock.now()
         # Count first, so attempts already in flight are counted too.
@@ -50,7 +54,7 @@ class SignInService:
         if not admitted(state):
             raise LoginLocked(state.locked_for(now) or LOCKOUT)
         try:
-            issued = await self._auth.login(email=email, password=password)
+            issued = await self._auth.login(email=email, password=password, device=device)
         except InvalidCredentials:
             if state.failures == MAX_FAILED_LOGINS:  # this failure started the lock
                 user = await self._users.get_by_email(normalize_email(email))
@@ -58,7 +62,7 @@ class SignInService:
                     AuditAction.LOGIN_LOCKED, target_id=user.id if user is not None else None
                 )
             raise
-        except AccountSuspended:
+        except (AccountSuspended, EmailNotVerified):
             await self._throttle.delete(key)  # the password was right
             raise
         await self._throttle.delete(key)

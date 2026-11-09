@@ -15,8 +15,11 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - Self-evaluated and AI-evaluated study with undo of the last answer, deck summaries, timed mock exams with a per-topic breakdown, and chat with source documents with page citations
 - Anki `.apkg` import with review history and scheduling state, selective import by deck or tag with a dry-run report, and deck export as `.apkg`, CSV or JSON
 - Full account export and account deletion
-- Invite-only access with administrator-issued invites, email verification, password reset and sign-in lockout
+- Invite-only access by default, with emailed invites that can be resent; self-hosters can open public sign-up
+- Email verification, password reset, sign-in lockout, and a device list with sign-out per device or everywhere else
 - Administrator user management (suspend, role changes, deletion) with an append-only audit log
+- Monthly AI page quotas per user, an instance-wide monthly spend cap, and a usage and cost report by user and provider
+- AI data-use disclosure: user content is never used for model training, and the configured provider and its terms are shown
 - Deck sharing by revocable link, with optional cloning
 - Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint, including locally hosted models
 - Installable web client (PWA): invite sign-up, sign-in, email verification and password reset; nested decks with statistics and a proficiency ring; keyboard-first study sessions for every note type, including Image Occlusion and custom templates (Space to reveal, 1 to 4 to rate, U to undo the last answer, E to edit the card); a card editor for every note type with Markdown and KaTeX preview, an Image Occlusion mask editor and a custom note type editor; the card browser with bulk actions; AI generation with live progress and draft approval; exam goals with the daily plan, readiness and what changed after a replan; a progress page with the daily goal, streak, review heatmap, recall curve and review forecast; deck share links and shared-deck previews; an Anki import wizard with a dry-run preview; and an admin console for users, invites and the audit log

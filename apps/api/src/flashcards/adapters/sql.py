@@ -18,6 +18,7 @@ from sqlalchemy import (
     CursorResult,
     DateTime,
     Result,
+    Select,
     SQLColumnExpression,
     and_,
     case,
@@ -33,17 +34,20 @@ from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from flashcards.adapters.db import (
     AiBlobRow,
     AiJobRow,
     AiQuotaRow,
+    AiUsageRow,
     AuditEventRow,
     CardRow,
     CardScheduleRow,
     DeckRow,
     DraftCardRow,
     GoalRow,
+    InstanceQuotaRow,
     InviteRow,
     LastAnswerRow,
     LoginThrottleRow,
@@ -54,9 +58,11 @@ from flashcards.adapters.db import (
     PassageRow,
     PlanBaselineRow,
     ReviewLogRow,
+    SessionActivityRow,
     SessionRow,
     ShareLinkRow,
     StudySettingsRow,
+    UserQuotaRow,
     UserRow,
     UserTokenRow,
     aijob_from_row,
@@ -95,6 +101,7 @@ from flashcards.adapters.db import (
     share_link_to_row,
     study_settings_from_row,
     throttle_from_row,
+    usage_to_row,
     user_from_row,
     user_to_row,
     user_token_from_row,
@@ -120,7 +127,7 @@ from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
 from flashcards.domain.planner import PlanBaseline
 from flashcards.domain.progress import BUCKET_SECONDS, ActivityBucket, DueBucket, StudySettings
-from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
+from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, InstanceQuotas
 from flashcards.domain.scheduling import (
     CardSchedule,
     DuplicateReview,
@@ -130,6 +137,7 @@ from flashcards.domain.scheduling import (
 )
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -189,6 +197,19 @@ class SqlInviteRepository:
                 InviteRow.revoked_at.is_(None),
             )
             .values(revoked_at=now)
+        )
+        return _changed_one(result)
+
+    async def try_rotate_token(self, invite_id: str, token_hash: str, now: datetime) -> bool:
+        result = await self._session.execute(
+            update(InviteRow)
+            .where(
+                InviteRow.id == invite_id,
+                InviteRow.redeemed_at.is_(None),
+                InviteRow.revoked_at.is_(None),
+                InviteRow.expires_at > now,
+            )
+            .values(token_hash=token_hash)
         )
         return _changed_one(result)
 
@@ -259,23 +280,36 @@ class SqlSessionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    def _with_activity(self) -> Select[SessionRow, datetime]:
+        return select(SessionRow, SessionActivityRow.last_seen_at).outerjoin(
+            SessionActivityRow, SessionActivityRow.session_id == SessionRow.id
+        )
+
     async def add(self, session: Session) -> None:
         self._session.add(session_to_row(session))
         await self._session.flush()
+        self._session.add(
+            SessionActivityRow(
+                session_id=session.id, last_seen_at=session.last_seen_at or session.created_at
+            )
+        )
+        await self._session.flush()
 
     async def get_by_token_hash(self, token_hash: str) -> Session | None:
-        row = await self._session.scalar(
-            select(SessionRow).where(SessionRow.token_hash == token_hash)
-        )
-        return session_from_row(row) if row is not None else None
+        found = (
+            await self._session.execute(
+                self._with_activity().where(SessionRow.token_hash == token_hash)
+            )
+        ).first()
+        return session_from_row(found[0], found[1]) if found is not None else None
 
     async def list_for_user(self, user_id: str) -> list[Session]:
-        rows = await self._session.scalars(
-            select(SessionRow)
+        rows = await self._session.execute(
+            self._with_activity()
             .where(SessionRow.user_id == user_id)
             .order_by(SessionRow.created_at.desc())
         )
-        return [session_from_row(row) for row in rows]
+        return [session_from_row(row, last_seen) for row, last_seen in rows.tuples()]
 
     async def revoke(self, session_id: str, now: datetime) -> bool:
         result = await self._session.execute(
@@ -290,6 +324,39 @@ class SqlSessionRepository:
             update(SessionRow)
             .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
             .values(revoked_at=now)
+        )
+
+    async def revoke_others(self, user_id: str, keep_session_id: str, now: datetime) -> int:
+        revoked = await self._session.scalars(
+            update(SessionRow)
+            .where(
+                SessionRow.user_id == user_id,
+                SessionRow.id != keep_session_id,
+                SessionRow.revoked_at.is_(None),
+                SessionRow.expires_at > now,
+            )
+            .values(revoked_at=now)
+            .returning(SessionRow.id)
+        )
+        return len(revoked.all())
+
+    async def touch(self, session_id: str, now: datetime) -> None:
+        # SKIP LOCKED: when a concurrent request of the same session is already
+        # recording activity, this one skips the write rather than waiting for that
+        # request's transaction to end.
+        # An alias, so the subquery keeps its own FROM instead of being correlated
+        # with the table the UPDATE targets.
+        activity = aliased(SessionActivityRow)
+        unlocked = (
+            select(activity.session_id)
+            .where(activity.session_id == session_id)
+            .with_for_update(skip_locked=True)
+            .scalar_subquery()
+        )
+        await self._session.execute(
+            update(SessionActivityRow)
+            .where(SessionActivityRow.session_id == unlocked)
+            .values(last_seen_at=now)
         )
 
     async def delete_for_user(self, user_id: str) -> None:
@@ -816,10 +883,13 @@ class SqlQuotaRepository:
         self._session = session
         self._limit = limit
 
-    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+    async def try_reserve_pages(
+        self, owner_id: str, pages: int, period: str, limit: int | None = None
+    ) -> bool:
+        limit = self._limit if limit is None else limit
         # A single upload can never exceed the whole-period limit; this also guards
         # the INSERT branch below (a fresh owner/period starts at used_pages=0).
-        if pages > self._limit:
+        if pages > limit:
             return False
         # Atomic upsert: insert the first reservation, or add to an existing one only
         # while it stays within the limit. RETURNING yields a row exactly when the
@@ -830,14 +900,123 @@ class SqlQuotaRepository:
             .on_conflict_do_update(
                 index_elements=[AiQuotaRow.owner_id, AiQuotaRow.period],
                 set_={"used_pages": AiQuotaRow.used_pages + pages},
-                where=(AiQuotaRow.used_pages + pages <= self._limit),
+                where=(AiQuotaRow.used_pages + pages <= limit),
             )
             .returning(AiQuotaRow.used_pages)
         )
         return await self._session.scalar(stmt) is not None
 
+    async def used(self, owner_id: str, period: str) -> int:
+        used = await self._session.scalar(
+            select(AiQuotaRow.used_pages).where(
+                AiQuotaRow.owner_id == owner_id, AiQuotaRow.period == period
+            )
+        )
+        return used or 0
+
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(delete(AiQuotaRow).where(AiQuotaRow.owner_id == owner_id))
+
+
+class SqlQuotaSettingsRepository:
+    _INSTANCE_ID = 1
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_instance(self) -> InstanceQuotas | None:
+        row = await self._session.get(InstanceQuotaRow, self._INSTANCE_ID)
+        if row is None:
+            return None
+        return InstanceQuotas(
+            default_monthly_pages=row.default_monthly_pages,
+            monthly_spend_cap_micro_usd=row.monthly_spend_cap_micro_usd,
+        )
+
+    async def put_instance(self, quotas: InstanceQuotas) -> None:
+        values = {
+            "default_monthly_pages": quotas.default_monthly_pages,
+            "monthly_spend_cap_micro_usd": quotas.monthly_spend_cap_micro_usd,
+        }
+        await self._session.execute(
+            pg_insert(InstanceQuotaRow)
+            .values(id=self._INSTANCE_ID, **values)
+            .on_conflict_do_update(index_elements=[InstanceQuotaRow.id], set_=values)
+        )
+
+    async def get_user_pages(self, user_id: str) -> int | None:
+        row = await self._session.get(UserQuotaRow, user_id)
+        return row.monthly_pages if row is not None else None
+
+    async def set_user_pages(self, user_id: str, pages: int | None) -> None:
+        if pages is None:
+            await self._session.execute(
+                delete(UserQuotaRow).where(UserQuotaRow.user_id == user_id)
+            )
+            return
+        await self._session.execute(
+            pg_insert(UserQuotaRow)
+            .values(user_id=user_id, monthly_pages=pages)
+            .on_conflict_do_update(
+                index_elements=[UserQuotaRow.user_id], set_={"monthly_pages": pages}
+            )
+        )
+
+
+class SqlUsageRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, usage: AiUsage) -> None:
+        self._session.add(usage_to_row(usage))
+        await self._session.flush()
+
+    async def total_cost(self, period: str) -> int:
+        total = await self._session.scalar(
+            select(func.coalesce(func.sum(AiUsageRow.cost_micro_usd), 0)).where(
+                AiUsageRow.period == period
+            )
+        )
+        return int(total or 0)
+
+    async def by_user(self, period: str) -> list[UserUsage]:
+        cost = func.sum(AiUsageRow.cost_micro_usd)
+        rows = await self._session.execute(
+            select(
+                AiUsageRow.owner_id,
+                func.count(),
+                func.sum(AiUsageRow.input_tokens),
+                func.sum(AiUsageRow.output_tokens),
+                cost,
+            )
+            .where(AiUsageRow.period == period)
+            .group_by(AiUsageRow.owner_id)
+            .order_by(cost.desc(), AiUsageRow.owner_id)
+        )
+        return [
+            UserUsage(owner, int(calls), int(inp), int(out), int(spent))
+            for owner, calls, inp, out, spent in rows.tuples()
+        ]
+
+    async def by_provider(self, period: str) -> list[ProviderUsage]:
+        cost = func.sum(AiUsageRow.cost_micro_usd)
+        rows = await self._session.execute(
+            select(
+                AiUsageRow.provider,
+                AiUsageRow.model,
+                func.count(),
+                func.sum(AiUsageRow.input_tokens),
+                func.sum(AiUsageRow.output_tokens),
+                cost,
+            )
+            .where(AiUsageRow.period == period)
+            .group_by(AiUsageRow.provider, AiUsageRow.model)
+            .order_by(cost.desc(), AiUsageRow.provider, AiUsageRow.model)
+        )
+        return [
+            ProviderUsage(provider, model, int(calls), int(inp), int(out), int(spent))
+            for provider, model, calls, inp, out, spent in rows.tuples()
+        ]
 
 
 class SqlGoalRepository:
@@ -920,6 +1099,11 @@ class SqlMockExamRepository:
             .returning(MockExamRow.id)
         )
         return marked is not None
+
+    async def reopen(self, exam_id: str) -> None:
+        await self._session.execute(
+            update(MockExamRow).where(MockExamRow.id == exam_id).values(submitted_at=None)
+        )
 
     async def delete_for_deck(self, deck_id: str) -> None:
         await self._session.execute(delete(MockExamRow).where(MockExamRow.deck_id == deck_id))

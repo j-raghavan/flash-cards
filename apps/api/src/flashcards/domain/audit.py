@@ -31,6 +31,12 @@ class AuditAction(enum.StrEnum):
     PASSWORD_RESET_REQUESTED = "password_reset.requested"  # noqa: S105
     PASSWORD_RESET_COMPLETED = "password_reset.completed"  # noqa: S105
     EMAIL_VERIFIED = "email.verified"
+    INVITE_RESENT = "invite.resent"
+    USER_REGISTERED = "user.registered"
+    SESSION_REVOKED = "session.revoked"
+    SESSIONS_REVOKED_OTHERS = "session.revoked_others"
+    QUOTA_DEFAULTS_CHANGED = "quota.defaults_changed"
+    QUOTA_USER_CHANGED = "quota.user_changed"
 
 
 @dataclass(frozen=True, slots=True)
