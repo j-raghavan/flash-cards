@@ -401,7 +401,9 @@ def build_services(repos: Repositories) -> Container:
         repos.clock,
         unlock_cards=DEFAULT_MOCK_EXAM_UNLOCK_CARDS,
     )
-    transcript_import = TranscriptImportService(decks, generation, repos.transcripts)
+    transcript_import = TranscriptImportService(
+        decks, generation, repos.transcripts, ai_budget, repos.unit_of_work
+    )
     chat = ChatService(
         decks,
         repos.ai_jobs,

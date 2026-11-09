@@ -6,6 +6,7 @@ import { describeError } from "../api/client";
 import { auth } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
 import { useOfflineSync } from "../offline/useOfflineSync";
+import { SiteFooter } from "./SiteFooter";
 import { ErrorText, Loading } from "./ui";
 
 function VerifyBanner() {
@@ -120,6 +121,7 @@ export function Layout() {
         <ErrorText message={error} />
         <Outlet />
       </main>
+      <SiteFooter />
     </>
   );
 }

@@ -6,6 +6,7 @@ import { request } from "@playwright/test";
 import { linkFromEmail, PASSWORD, signUpWithApi, uniqueEmail } from "../support/api";
 import { WEB_URL } from "../support/env";
 import { expect, test } from "../support/fixtures";
+import { skipGuidedSetup } from "../support/onboarding";
 
 const NEW_PASSWORD = "e2e a brand new passphrase";
 
@@ -53,5 +54,6 @@ test("a member resets a forgotten password from the emailed link", async ({ page
 
   await page.getByLabel("Password").fill(NEW_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Decks", level: 1 })).toBeVisible();
+  // Signed in: a user with no decks lands on the guided setup first.
+  await skipGuidedSetup(page);
 });

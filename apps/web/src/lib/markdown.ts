@@ -147,6 +147,8 @@ function linksToText(root: DocumentFragment): void {
 export interface RenderOptions {
   /** Render links as text showing their address, for AI output. */
   linksAsText?: boolean;
+  /** Look for math (default true). Prose such as a legal page sets false. */
+  math?: boolean;
 }
 
 /**
@@ -157,7 +159,8 @@ export interface RenderOptions {
  */
 export function renderMarkdown(source: string, options: RenderOptions = {}): string {
   installHooks();
-  const { text, parts } = extractMath(source);
+  // Prose such as a legal page has no math, and "$5 or $10" must stay as written.
+  const { text, parts } = options.math === false ? { text: source, parts: [] } : extractMath(source);
   const fragment = DOMPurify.sanitize(marked.parse(text, { async: false }), {
     USE_PROFILES: { html: true },
     // Media would load from any origin (src, poster), unlike images; a template
@@ -182,7 +185,9 @@ export function renderMarkdown(source: string, options: RenderOptions = {}): str
   if (options.linksAsText === true) {
     linksToText(fragment);
   }
-  insertMath(fragment, parts);
+  if (options.math !== false) {
+    insertMath(fragment, parts);
+  }
   const container = document.createElement("div");
   container.append(fragment);
   return container.innerHTML;

@@ -3,6 +3,7 @@
 // upload -> review drafts -> study -> share, then a second user clones the deck.
 import { Api, createInvite, PASSWORD, signUpWithApi, uniqueEmail } from "../support/api";
 import { expect, test } from "../support/fixtures";
+import { skipGuidedSetup } from "../support/onboarding";
 import { textPdf } from "../support/pdf";
 
 // Five pages, two fixed drafts each from the fake AI provider, which takes a
@@ -31,7 +32,8 @@ test("invite, sign up, build a deck with AI, study it, share it and clone it", a
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page.getByRole("heading", { name: "Decks", level: 1 })).toBeVisible();
+    // A new member with no decks is offered the guided setup first; it is skippable.
+    await skipGuidedSetup(page);
   });
 
   await test.step("creates a deck and adds a card by hand", async () => {

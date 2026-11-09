@@ -8,11 +8,13 @@ import { afterEach, beforeEach } from "vitest";
 
 import { onUnauthorized } from "../api/client";
 import { resetForTests } from "../offline/reviewQueue";
+import { resetOnboardingForTests } from "../onboarding/state";
 
 beforeEach(async () => {
   await resetForTests();
   globalThis.indexedDB = new IDBFactory();
   localStorage.clear();
+  resetOnboardingForTests();
   Object.defineProperty(navigator, "onLine", { configurable: true, get: () => true });
 });
 

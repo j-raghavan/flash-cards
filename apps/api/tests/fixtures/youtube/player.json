@@ -1,0 +1,33 @@
+{
+  "responseContext": {"visitorData": "fixture"},
+  "playabilityStatus": {"status": "OK", "playableInEmbed": true},
+  "captions": {
+    "playerCaptionsTracklistRenderer": {
+      "captionTracks": [
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&ei=fixture&caps=asr&lang=en&fmt=srv3",
+          "name": {"runs": [{"text": "English"}]},
+          "vssId": ".en",
+          "languageCode": "en",
+          "isTranslatable": true,
+          "trackName": ""
+        },
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&ei=fixture&kind=asr&lang=de",
+          "name": {"runs": [{"text": "German (auto-generated)"}]},
+          "vssId": "a.de",
+          "languageCode": "de",
+          "kind": "asr",
+          "isTranslatable": true,
+          "trackName": ""
+        }
+      ],
+      "audioTracks": [{"captionTrackIndices": [0, 1]}],
+      "translationLanguages": [
+        {"languageCode": "fr", "languageName": {"runs": [{"text": "French"}]}}
+      ],
+      "defaultAudioTrackIndex": 0
+    }
+  },
+  "videoDetails": {"videoId": "dQw4w9WgXcQ", "title": "Cell biology lecture 1", "lengthSeconds": "212"}
+}

@@ -91,7 +91,7 @@ describe("goals", () => {
   it("says when there are no goals or decks, and shows a list that cannot load", async () => {
     mockApi({ ...me, "GET /goals": { body: [] }, "GET /decks": { body: [] } });
     const { unmount } = renderApp("/goals");
-    expect(await screen.findByText("No goals yet.")).toBeInTheDocument();
+    expect(await screen.findByText(/No goals yet/)).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "decks page" })).toBeInTheDocument();
     unmount();
     mockApi({ ...me, "GET /goals": { status: 500 }, "GET /decks": { status: 500 } });
@@ -222,7 +222,7 @@ describe("goals", () => {
     expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Delete goal" }));
     await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete goal" }));
-    expect(await screen.findByText("No goals yet.")).toBeInTheDocument();
+    expect(await screen.findByText(/No goals yet/)).toBeInTheDocument();
   });
 
   it("reports a goal that cannot load, a plan that cannot load and a failed delete", async () => {

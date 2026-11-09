@@ -16,7 +16,14 @@ from flashcards.domain.ai import StructuredRequest, StructuredResult, Thoroughne
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.invites import Role
 from flashcards.domain.jobs import JobStatus
+from flashcards.domain.quotas import (
+    DEFAULT_DAILY_AI_CALLS,
+    AiCallLimitReached,
+    InstanceQuotas,
+    QuotaExceeded,
+)
 from flashcards.domain.transcripts import Transcript, TranscriptSegment
+from flashcards.domain.usage import AiMetering
 
 PASSWORD = "correct-horse-battery"
 VID = "dQw4w9WgXcQ"
@@ -207,3 +214,41 @@ async def test_youtube_for_someone_elses_deck_never_fetches() -> None:
             thoroughness=Thoroughness.STANDARD,
         )
     assert transcripts.fetched == []
+
+
+async def test_youtube_over_the_page_quota_never_fetches() -> None:
+    transcripts = _FakeTranscripts()
+    metering = AiMetering(default_quotas=InstanceQuotas(default_monthly_pages=0))
+    container = build_container(llm=_FakeLLM(), transcripts=transcripts, metering=metering)
+    deck = await container.decks.create(owner_id="alice", name="Talk")
+    with pytest.raises(QuotaExceeded):
+        await container.transcript_import.from_youtube(
+            owner_id="alice",
+            deck_id=deck.id,
+            url=f"https://youtu.be/{VID}",
+            thoroughness=Thoroughness.STANDARD,
+        )
+    assert transcripts.fetched == []
+
+
+async def test_each_fetch_counts_against_the_daily_ai_requests() -> None:
+    transcripts = _FakeTranscripts()
+    container = build_container(llm=_FakeLLM(), transcripts=transcripts)
+    deck = await container.decks.create(owner_id="alice", name="Talk")
+    budget = container.transcript_import._budget
+    for _ in range(DEFAULT_DAILY_AI_CALLS - 1):
+        await budget.charge("alice")
+    await container.transcript_import.from_youtube(
+        owner_id="alice",
+        deck_id=deck.id,
+        url=f"https://youtu.be/{VID}",
+        thoroughness=Thoroughness.CONCISE,
+    )
+    with pytest.raises(AiCallLimitReached):
+        await container.transcript_import.from_youtube(
+            owner_id="alice",
+            deck_id=deck.id,
+            url=f"https://youtu.be/{VID}",
+            thoroughness=Thoroughness.STANDARD,
+        )
+    assert transcripts.fetched == [VID]

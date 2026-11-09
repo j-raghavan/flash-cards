@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The account page: email confirmation, signed-in devices (F-AUTH-2), two-step
-// sign-in (F-AUTH-3), the AI
-// page quota, the AI data-use disclosure (F-LEGAL-2), data export and account
-// deletion (F-IMP-5, NF-PRIV-1). Loaded on first visit.
+// sign-in (F-AUTH-3), the AI page quota, the AI data-use disclosure (F-LEGAL-2),
+// the guided setup (F-ONB-1), data export and account deletion (F-IMP-5,
+// NF-PRIV-1). Loaded on first visit.
 
 import { startTransition, useEffect, useId, useRef, useState, type SubmitEvent } from "react";
 import { useLocation, useNavigate } from "react-router";
@@ -14,6 +14,7 @@ import type { User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmButton, Dialog, ErrorText, Loading } from "../components/ui";
 import { discard } from "../offline/reviewQueue";
+import { forgetOnboarding, startOnboarding } from "../onboarding/state";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
@@ -265,6 +266,30 @@ function DisclosurePanel() {
   );
 }
 
+// --- guided setup ---
+
+function SetupPanel({ user }: { user: User }) {
+  const navigate = useNavigate();
+  return (
+    <section className="panel" aria-labelledby="setup-heading">
+      <h2 id="setup-heading">Guided setup</h2>
+      <p className="muted">
+        Five short steps: start a deck, add material, check the cards, set your exam and study. Run it again any time.
+      </p>
+      <button
+        type="button"
+        className="button"
+        onClick={() => {
+          startOnboarding(user.id);
+          void navigate("/welcome");
+        }}
+      >
+        Run the guided setup
+      </button>
+    </section>
+  );
+}
+
 // --- data export ---
 
 const EXPORT_URL_LIFETIME_MS = 60_000;
@@ -385,6 +410,7 @@ function DeleteDialog({ user, onClose }: { user: User; onClose: () => void }) {
         // A browser without IndexedDB has no queue to clear.
       }
       forgetAiNotice(user.id);
+      forgetOnboarding(user.id);
       // The router navigates in a transition; forgetting the user in the same
       // transition keeps the signed-in frame from redirecting on its own first.
       startTransition(() => {
@@ -476,6 +502,7 @@ export function AccountPage() {
       <TwoFactorPanel email={user.email} />
       <QuotaPanel />
       <DisclosurePanel />
+      <SetupPanel user={user} />
       <ExportPanel />
       <DeletePanel user={user} />
     </section>

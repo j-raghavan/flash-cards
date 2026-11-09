@@ -3,6 +3,7 @@
 // account page, then sign in with the password and a code.
 import { PASSWORD } from "../support/api";
 import { expect, test } from "../support/fixtures";
+import { skipGuidedSetup } from "../support/onboarding";
 import { totpCode } from "../support/totp";
 
 test("a member turns on an authenticator app and signs in with a code", async ({ page, member }) => {
@@ -36,5 +37,6 @@ test("a member turns on an authenticator app and signs in with a code", async ({
   // The code that turned the app on is spent: the next step's code signs in.
   await field.fill(totpCode(secret, 1));
   await page.getByRole("button", { name: "Verify" }).click();
-  await expect(page.getByRole("heading", { name: "Decks", level: 1 })).toBeVisible();
+  // A member with no decks lands on the guided first run.
+  await skipGuidedSetup(page);
 });

@@ -7,6 +7,7 @@ import { Link } from "react-router";
 import { decks } from "../api/endpoints";
 import type { Deck } from "../api/types";
 import { ErrorText, Loading } from "../components/ui";
+import { OnboardingPrompt } from "../onboarding/OnboardingPrompt";
 import { buildDeckTree, deckOptions, type DeckNode } from "../lib/deckTree";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
@@ -98,9 +99,11 @@ export function DeckListPage() {
       <ErrorText message={list.error} />
       {list.data === undefined ? null : (
         <>
+          <OnboardingPrompt deckCount={list.data.length} />
           {list.data.length === 0 ? (
             <p className="empty">
-              No decks yet. Create one below, then add cards by hand or generate them from a PDF or image.
+              No decks yet. Create one below, then add cards by hand or generate them from a PDF or image. The{" "}
+              <Link to="/welcome">guided setup</Link> walks you through it.
             </p>
           ) : (
             <DeckTree nodes={buildDeckTree(list.data)} />

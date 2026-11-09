@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Account routes: sessions (F-AUTH-2), public sign-up (F-AUTH-7), AI quota,
-// data export and deletion (F-IMP-5) and the AI data-use disclosure (F-LEGAL-2).
+// data export and deletion (F-IMP-5), the AI data-use disclosure (F-LEGAL-2)
+// and the operator's legal pages (F-LEGAL-1).
 // Shapes mirror apps/api/src/flashcards/api/schemas.py and ai_schemas.py.
 
 import { request } from "./client";
@@ -42,6 +43,17 @@ export interface AiDisclosure {
   provider: AiProvider | null;
 }
 
+export type LegalPageName = "privacy" | "terms" | "imprint";
+
+/** An operator-written legal page (F-LEGAL-1); the Markdown is rendered through the sanitizer. */
+export interface LegalPageContent {
+  page: LegalPageName;
+  title: string;
+  markdown: string;
+  /** True while the operator has not filled the page in yet. */
+  is_template: boolean;
+}
+
 const id = encodeURIComponent;
 
 export const sessions = {
@@ -66,6 +78,7 @@ export const account = {
 
 export const legal = {
   aiDisclosure: () => request<AiDisclosure>("/legal/ai-disclosure"),
+  page: (name: LegalPageName) => request<LegalPageContent>(`/legal/${id(name)}`),
 };
 
 /** A provider terms link, only when it is a plain web address. */

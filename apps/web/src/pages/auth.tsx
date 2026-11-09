@@ -11,6 +11,7 @@ import { auth } from "../api/endpoints";
 import { needsSecondFactor, type SecondFactorRequired } from "../api/twoFactor";
 import type { User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { SiteFooter } from "../components/SiteFooter";
 import { SecondFactorStep } from "../auth/SecondFactorStep";
 import { ErrorText, Loading } from "../components/ui";
 import { safeNextPath, tokenFromLocation } from "../lib/text";
@@ -23,11 +24,24 @@ const MIN_PASSWORD_LENGTH = 12;
 function AuthFrame({ title, children }: { title: string; children: ReactNode }) {
   useDocumentTitle(title);
   return (
-    <main id="main" className="auth">
-      <p className="brand">Flash-Cards</p>
-      <h1>{title}</h1>
-      {children}
-    </main>
+    <>
+      <main id="main" className="auth">
+        <p className="brand">Flash-Cards</p>
+        <h1>{title}</h1>
+        {children}
+      </main>
+      <SiteFooter />
+    </>
+  );
+}
+
+/** Shown before an account is created: what signing up agrees to (F-LEGAL-1). */
+function LegalConsent() {
+  return (
+    <p className="muted">
+      By creating an account you agree to the <Link to="/terms">terms of use</Link> and confirm you have read the{" "}
+      <Link to="/privacy">privacy policy</Link>.
+    </p>
   );
 }
 
@@ -255,6 +269,7 @@ function PublicSignup() {
         <form onSubmit={onSubmit} className="stack">
           <EmailField value={email} onChange={setEmail} />
           <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" />
+          <LegalConsent />
           <ErrorText message={submit.error} />
           <button type="submit" className="button primary" disabled={submit.busy}>
             {submit.busy ? "Creating…" : "Create account"}
@@ -293,6 +308,7 @@ export function SignupPage() {
       <form onSubmit={onSubmit} className="stack">
         <EmailField value={email} onChange={setEmail} />
         <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" />
+        <LegalConsent />
         <ErrorText message={submit.error} />
         <button type="submit" className="button primary" disabled={submit.busy}>
           {submit.busy ? "Creating…" : "Create account"}
