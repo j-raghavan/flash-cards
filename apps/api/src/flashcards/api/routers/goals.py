@@ -11,6 +11,7 @@ from flashcards.api.schemas import (
     GoalCreateRequest,
     GoalOut,
     GoalUpdateRequest,
+    PlanReportOut,
     StudyPlanOut,
 )
 
@@ -81,11 +82,24 @@ async def delete_goal(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{goal_id}/plan", response_model=StudyPlanOut)
+@router.get("/{goal_id}/plan", response_model=PlanReportOut)
 async def goal_plan(
     goal_id: str,
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
+) -> PlanReportOut:
+    """The plan, recomputed from the live cards, and what changed since it was
+    last accepted (F-PLAN-3). A goal's first plan becomes its baseline."""
+    report = await container.planner.report(owner_id=caller.user.id, goal_id=goal_id)
+    return PlanReportOut.from_report(report)
+
+
+@router.post("/{goal_id}/plan/accept", response_model=StudyPlanOut)
+async def accept_plan(
+    goal_id: str,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
 ) -> StudyPlanOut:
-    plan = await container.planner.plan_for(owner_id=caller.user.id, goal_id=goal_id)
+    """Make the current plan the baseline later changes are measured from."""
+    plan = await container.planner.accept(owner_id=caller.user.id, goal_id=goal_id)
     return StudyPlanOut.from_plan(plan)

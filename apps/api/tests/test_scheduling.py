@@ -155,7 +155,8 @@ async def test_submit_advances_schedule_and_logs(
     reviews: ReviewService, notes: NoteService, schedules: InMemoryScheduleRepository
 ) -> None:
     _, card_id = await _card(notes)
-    updated = await reviews.submit(owner_id=ALICE, card_id=card_id, rating=Rating.GOOD)
+    outcome = await reviews.submit(owner_id=ALICE, card_id=card_id, rating=Rating.GOOD)
+    updated = outcome.schedule
     assert updated.state is ScheduleState.REVIEW
     assert updated.due_at == START + timedelta(days=1)
     assert (await schedules.get(card_id)) is not None
@@ -179,8 +180,9 @@ async def test_submit_is_idempotent_on_key(
     second = await reviews.submit(
         owner_id=ALICE, card_id=card_id, rating=Rating.AGAIN, idempotency_key="k1"
     )
-    # The replay is a no-op: same schedule, and only one log recorded.
-    assert second.due_at == first.due_at
+    # The replay is a no-op: same schedule and review, and only one log recorded.
+    assert second.schedule.due_at == first.schedule.due_at
+    assert second.review_id == first.review_id
     assert len(logs._logs) == 1
 
 
