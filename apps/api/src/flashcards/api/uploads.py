@@ -4,8 +4,9 @@
 The multipart parser spools each upload to a temporary file before the handler
 runs. Reading that file in one call would put all of it in memory before any
 size check, so the cap would bound nothing. read_capped reads in fixed chunks
-and answers 413 as soon as the total passes the cap, so at most the cap plus
-one chunk is ever held in memory.
+and answers 413 as soon as the total passes the cap, so an upload never holds
+more than about twice the cap (the chunks plus the joined result). The disk the
+parser spools to is bounded by BodySizeLimitMiddleware.
 """
 
 from __future__ import annotations

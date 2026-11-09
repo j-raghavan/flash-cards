@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from flashcards import __version__
+from flashcards.api.body_limit import BodySizeLimitMiddleware
 from flashcards.api.container import Container
 from flashcards.api.csrf import CsrfOriginMiddleware
 from flashcards.api.job_events import StreamSlots
@@ -343,6 +344,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
 
     # Refuses unsafe requests that do not come from a trusted origin (ADR 0017).
     app.add_middleware(CsrfOriginMiddleware, public_base_url=settings.public_base_url)
+    # Added last, so it runs first: no body is parsed or spooled past the cap.
+    app.add_middleware(BodySizeLimitMiddleware)
     _register_error_handlers(app)
     app.include_router(auth.router)
     app.include_router(admin.router)
