@@ -74,7 +74,10 @@ def test_export_requires_auth(client: TestClient) -> None:
 
 def test_delete_account_revokes_access(member: TestClient) -> None:
     member.post("/decks", json={"name": "Spanish"})
-    assert member.delete("/account").status_code == 204
+    deleted = member.delete("/account")
+    assert deleted.status_code == 204
+    # The browser drops its HTTP cache; stored data is left to the web client.
+    assert deleted.headers["Clear-Site-Data"] == '"cache"'
     # The account is gone, so the session no longer authenticates.
     assert member.get("/decks").status_code == 401
 
