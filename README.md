@@ -22,12 +22,12 @@ Open-source, AI-assisted spaced-repetition study platform. Upload lecture PDFs, 
 - AI data-use disclosure: user content is never used for model training, and the configured provider and its terms are shown
 - Deck sharing by revocable link, with optional cloning
 - Provider-agnostic AI: Anthropic by default, or any OpenAI-compatible endpoint, including locally hosted models
-- Installable web client (PWA): invite sign-up, sign-in, email verification and password reset; nested decks with statistics and a proficiency ring; keyboard-first study sessions for every note type, including Image Occlusion and custom templates (Space to reveal, 1 to 4 to rate, U to undo the last answer, E to edit the card); a card editor for every note type with Markdown and KaTeX preview, an Image Occlusion mask editor and a custom note type editor; the card browser with bulk actions; AI generation with live progress and draft approval; exam goals with the daily plan, readiness and what changed after a replan; a progress page with the daily goal, streak, review heatmap, recall curve and review forecast; deck share links and shared-deck previews; an Anki import wizard with a dry-run preview; and an admin console for users, invites and the audit log
+- Installable web client (PWA): invite sign-up, sign-in, email verification and password reset; nested decks with statistics and a proficiency ring; keyboard-first study sessions for every note type, including Image Occlusion and custom templates (Space to reveal, 1 to 4 to rate, U to undo the last answer, E to edit the card), with an AI-evaluation mode where a typed answer is graded, the gap explained and a rating suggested for confirmation; timed mock exams with a calm timer and a per-topic breakdown; deck summaries and chat with a deck's source documents with file and page citations, all labelled as AI output; a card editor for every note type with Markdown and KaTeX preview, an Image Occlusion mask editor and a custom note type editor; the card browser with bulk actions; AI generation with live progress and draft approval; exam goals with the daily plan, readiness and what changed after a replan; a progress page with the daily goal, streak, review heatmap, recall curve and review forecast; deck share links and shared-deck previews; an Anki import wizard with a dry-run preview; and an admin console for users, invites and the audit log
 - Offline review: the app shell and recently opened decks stay available offline, and answers given offline are kept on the device and synced when the connection returns
 
 ## Roadmap
 
-- Web client screens for mock exams, document chat, deck summaries, AI answer evaluation, account export and deletion, and signed-in sessions
+- Web client screens for account export and deletion, and signed-in sessions
 - Undo for answers given offline, before they sync
 - Interface translations
 - Automatic YouTube transcript retrieval
