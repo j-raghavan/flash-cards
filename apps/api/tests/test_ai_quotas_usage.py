@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 import pymupdf
@@ -229,8 +229,14 @@ class _Extractor:
         return 1
 
     async def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
         yield ExtractedPage(ref=SourceRef(file_id=file_id, page=1), kind=PageKind.TEXT, text="t")
 
 
@@ -249,7 +255,7 @@ async def test_the_worker_records_usage_even_when_the_output_is_unusable() -> No
     await jobs.add(job)
     worker = CardGenerationService(
         jobs, InMemoryDraftCardRepository(), store, _Extractor(), _UnusableLLM(),
-        q.clock, NullUnitOfWork(), q.spend,
+        q.clock, NullUnitOfWork(), q.spend, users=InMemoryUserRepository(),
     )
     await worker.run(job.id)
 

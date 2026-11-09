@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import uuid
+from contextlib import aclosing
 
 from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_prompts import chat_prompt
@@ -42,13 +43,18 @@ from flashcards.domain.ports import (
 )
 from flashcards.domain.sources import (
     DEFAULT_MAX_UPLOAD_PAGES,
-    PageKind,
     clean_source_name,
+    page_cap,
     source_name_key,
 )
 from flashcards.domain.usage import AiFeature
 
 logger = logging.getLogger(__name__)
+
+# Most pages of one source chat indexes for an admin, who has no page cap. Indexing
+# reads each page's text inside the chat request, one page at a time on the single
+# PyMuPDF slot, so this bounds how long one question can take (ADR 0022).
+MAX_CHAT_INDEX_PAGES = 2_000
 
 
 class ChatService:
@@ -73,12 +79,23 @@ class ChatService:
         self._budget = budget
         self._max_pages = max_pages
 
-    async def ask(self, *, owner_id: str, deck_id: str, question: str) -> ChatAnswer:
+    async def ask(
+        self, *, owner_id: str, deck_id: str, question: str, admin: bool = False
+    ) -> ChatAnswer:
+        """Answer from the deck's sources; admin is the caller's role for this request.
+
+        Indexing runs inside this request, so it is bounded for everyone: a member's
+        sources by the page cap, an admin's (which have none, ADR 0022) by
+        MAX_CHAT_INDEX_PAGES. A longer source is recorded as having no text.
+        """
         # A deck's sources include its subdecks'. Raises DeckNotFound if the deck is
         # missing or not the caller's.
         deck_ids = await self._decks.subtree_ids(owner_id=owner_id, deck_id=deck_id)
         jobs = await self._jobs.list_for_owner(owner_id)
-        await self._index(owner_id, deck_ids, jobs)
+        cap = page_cap(self._max_pages, admin=admin)
+        if cap is None:
+            cap = max(self._max_pages, MAX_CHAT_INDEX_PAGES)
+        await self._index(owner_id, deck_ids, jobs, cap)
         indexed = [p for d in deck_ids for p in await self._passages.list_for_deck(d)]
         if not any(p.text.strip() for p in indexed):
             raise NoChatSources(deck_id)
@@ -118,7 +135,9 @@ class ChatService:
             )
         return tuple(dataclasses.replace(c, file_name=names[c.file_id]) for c in citations)
 
-    async def _index(self, owner_id: str, deck_ids: list[str], jobs: list[AiJob]) -> None:
+    async def _index(
+        self, owner_id: str, deck_ids: list[str], jobs: list[AiJob], max_pages: int
+    ) -> None:
         # Each source is indexed under the deck its job generated into, so deleting
         # that deck later removes exactly its passages.
         wanted = set(deck_ids)
@@ -131,12 +150,12 @@ class ChatService:
             if data is None:
                 continue  # the source was removed; nothing to index
             await self._passages.add_many(
-                await self._extract(owner_id, job.draft_deck_id, job.source_id, data)
+                await self._extract(owner_id, job.draft_deck_id, job.source_id, data, max_pages)
             )
             done.add(key)
 
     async def _extract(
-        self, owner_id: str, deck_id: str, file_id: str, data: bytes
+        self, owner_id: str, deck_id: str, file_id: str, data: bytes, max_pages: int
     ) -> list[Passage]:
         def passage(page: int, ordinal: int, text: str) -> Passage:
             return Passage(
@@ -151,18 +170,22 @@ class ChatService:
 
         out: list[Passage] = []
         try:
-            async for page in self._extractor.extract(
-                data, file_id=file_id, max_pages=self._max_pages
-            ):
-                # Image-only pages have no text to retrieve; card generation reads them
-                # with the vision model, but chat retrieval is text-only.
-                if page.kind is PageKind.TEXT and page.text:
-                    for ordinal, text in enumerate(split_passages(page.text)):
+            # Retrieval is text-only, so text-less pages are not rasterized at all;
+            # aclosing closes the document at once when the passage bound stops early.
+            async with aclosing(
+                self._extractor.extract(
+                    data, file_id=file_id, max_pages=max_pages, text_only=True
+                )
+            ) as pages:
+                async for page in pages:
+                    # Image-only pages have no text to retrieve (text_only leaves them
+                    # out); card generation reads them with the vision model.
+                    for ordinal, text in enumerate(split_passages(page.text or "")):
                         out.append(passage(page.ref.page, ordinal, text))
-                if len(out) >= MAX_PASSAGES_PER_SOURCE:
-                    # Bound what one source can add to the index and to every ranking.
-                    out = out[:MAX_PASSAGES_PER_SOURCE]
-                    break
+                    if len(out) >= MAX_PASSAGES_PER_SOURCE:
+                        # Bound what one source can add to the index and to every ranking.
+                        out = out[:MAX_PASSAGES_PER_SOURCE]
+                        break
         except Exception:
             # Any unreadable source (encrypted PDF, corrupt file, bad envelope) must
             # not break chat for the whole deck: record it as having no text.

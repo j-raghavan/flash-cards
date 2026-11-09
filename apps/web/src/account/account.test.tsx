@@ -25,7 +25,7 @@ const PHONE: DeviceSession = {
   device: "Safari on iPhone",
   current: false,
 };
-const QUOTA: AiQuota = { period: "2026-11", monthly_pages: 200, used_pages: 37 };
+const QUOTA: AiQuota = { period: "2026-11", monthly_pages: 200, used_pages: 37, max_document_pages: 300, quota_applies: true };
 const DISCLOSURE: AiDisclosure = {
   ai_enabled: true,
   trains_on_user_content: false,
@@ -168,7 +168,7 @@ describe("signed-in devices", () => {
 
 describe("AI quota", () => {
   it("says calmly when the month's pages are used up", async () => {
-    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 1, used_pages: 3 } } });
+    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 1, used_pages: 3, max_document_pages: 300, quota_applies: true } } });
     await openAccount();
     expect(await screen.findByText(/You have used all 1 page for/)).toHaveTextContent(
       "The allowance renews at the start of next month.",
@@ -177,16 +177,39 @@ describe("AI quota", () => {
   });
 
   it("says when AI generation is not included, with one page left otherwise", async () => {
-    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 0, used_pages: 0 } } });
+    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 0, used_pages: 0, max_document_pages: 300, quota_applies: true } } });
     await openAccount();
     expect(await screen.findByText(/AI generation is not included in your account/)).toBeInTheDocument();
     expect(screen.queryByRole("meter")).toBeNull();
   });
 
   it("uses the singular for one page left", async () => {
-    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 2, used_pages: 1 } } });
+    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 2, used_pages: 1, max_document_pages: 300, quota_applies: true } } });
     await openAccount();
     expect(await screen.findByText(/You have used 1 of 2 pages/)).toHaveTextContent("so 1 page are left");
+  });
+
+  it("tells an admin they have no monthly page limit", async () => {
+    accountApi({
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 10, used_pages: 42, max_document_pages: null, quota_applies: false },
+      },
+    });
+    await openAccount();
+    expect(await screen.findByText(/As an admin you have no monthly page limit/)).toHaveTextContent(
+      "You have used 42 pages for",
+    );
+    expect(screen.queryByRole("meter")).toBeNull();
+  });
+
+  it("uses the singular for an admin's one page", async () => {
+    accountApi({
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 10, used_pages: 1, max_document_pages: null, quota_applies: false },
+      },
+    });
+    await openAccount();
+    expect(await screen.findByText(/You have used 1 page for/)).toBeInTheDocument();
   });
 
   it("shows when the quota cannot load", async () => {

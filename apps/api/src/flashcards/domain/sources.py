@@ -18,11 +18,22 @@ class PageKind(enum.StrEnum):
     IMAGE = "image"  # scanned/photo/formula/handwriting: hand to the vision model
 
 
-# Most pages (or transcript chunks) an AI source document may have, by default.
-DEFAULT_MAX_UPLOAD_PAGES = 20
+# Most pages (or transcript chunks) a member's AI source document may have, by
+# default (ADR 0022). Admins have no per-document cap. Extraction streams one page
+# at a time, so the cap bounds a job's time and cost, not its memory.
+DEFAULT_MAX_UPLOAD_PAGES = 300
 # Longest source name kept for chat citations, in characters.
 MAX_SOURCE_NAME = 120
 _SPACES = re.compile(r"\s+")
+
+
+def page_cap(configured: int, *, admin: bool) -> int | None:
+    """The most pages one document may have for this uploader; None means no cap.
+
+    Admins upload documents of any length (ADR 0022); everyone else is held to the
+    configured cap (FLASHCARDS_MAX_UPLOAD_PAGES).
+    """
+    return None if admin else configured
 
 
 def source_name_key(source_id: str) -> str:
@@ -53,6 +64,16 @@ class UnsupportedMediaType(Exception):
 
 class TooManyPages(Exception):
     """The document has more pages than the configured cap."""
+
+    def __init__(self, pages: int, limit: int, *, transcript: bool = False) -> None:
+        # Shown to the uploader as is.
+        super().__init__(
+            f"This transcript has {pages} parts, each counted as a page; the limit is {limit}."
+            if transcript
+            else f"This document has {pages} pages; the limit is {limit}."
+        )
+        self.pages = pages
+        self.limit = limit
 
 
 class UnreadableDocument(Exception):

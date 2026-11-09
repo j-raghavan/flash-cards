@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -35,6 +36,7 @@ from flashcards.domain.ai import Thoroughness
 from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
 from flashcards.domain.ports import AiJobRepository
 from flashcards.domain.quotas import InstanceQuotas
+from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.usage import TokenPrices
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
@@ -52,7 +54,15 @@ class _NoExtractor:
     async def count_pages(self, data: bytes) -> int:
         raise AssertionError("not used")
 
-    def extract(self, data: bytes, *, file_id: str, max_pages: int) -> object:
+    def extract(
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
         raise AssertionError("not used")
 
 
@@ -73,7 +83,7 @@ def _service(
     usage = InMemoryUsageRepository()
     return GenerationRequestService(
         DeckService(InMemoryDeckRepository(), clock),
-        _NoExtractor(),  # type: ignore[arg-type]
+        _NoExtractor(),
         InMemoryObjectStore(),
         InMemoryQuotaRepository(),
         jobs,

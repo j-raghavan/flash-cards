@@ -136,3 +136,48 @@ async def test_a_corrupt_pdf_is_unreadable_when_counting() -> None:
 async def test_a_corrupt_pdf_is_unreadable_when_extracting() -> None:
     with pytest.raises(UnreadableDocument):
         await _pages(_CORRUPT_PDF)
+
+
+async def test_skip_leaves_out_earlier_pages_without_rendering_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered: list[int] = []
+    real = extraction._render_page
+
+    def counting(
+        doc: pymupdf.Document, index: int, file_id: str, text_only: bool = False
+    ) -> ExtractedPage | None:
+        rendered.append(index)
+        return real(doc, index, file_id, text_only)
+
+    monkeypatch.setattr(extraction, "_render_page", counting)
+    data = _pdf(["First page has plenty of text", "", "Third page also has text"])
+    extractor = PyMuPDFExtractor()
+    pages = [p async for p in extractor.extract(data, file_id="f", max_pages=None, skip=1)]
+    assert [p.ref.page for p in pages] == [2, 3]
+    assert rendered == [1, 2]
+
+
+async def test_no_cap_allows_any_page_count() -> None:
+    data = _pdf([f"Page {i} has plenty of text" for i in range(5)])
+    extractor = PyMuPDFExtractor()
+    pages = [p async for p in extractor.extract(data, file_id="f", max_pages=None)]
+    assert len(pages) == 5
+
+
+async def test_the_cap_error_states_the_count_and_the_limit() -> None:
+    with pytest.raises(TooManyPages) as caught:
+        await _pages(_pdf(["one page of text here", "second page of text"]), max_pages=1)
+    assert str(caught.value) == "This document has 2 pages; the limit is 1."
+    assert (caught.value.pages, caught.value.limit) == (2, 1)
+
+
+async def test_text_only_leaves_out_textless_pages_and_images() -> None:
+    extractor = PyMuPDFExtractor()
+    data = _pdf(["First page has plenty of text", ""])
+    pages = [p async for p in extractor.extract(data, file_id="f", max_pages=None, text_only=True)]
+    assert [(p.ref.page, p.kind) for p in pages] == [(1, PageKind.TEXT)]
+    images = extractor.extract(_png(), file_id="f", max_pages=None, text_only=True)
+    assert [p async for p in images] == []
+    skipped = extractor.extract(_png(), file_id="f", max_pages=None, skip=1)
+    assert [p async for p in skipped] == []

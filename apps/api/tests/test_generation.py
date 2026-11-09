@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +15,7 @@ from flashcards.adapters.memory import (
     InMemoryQuotaSettingsRepository,
     InMemorySpendHoldRepository,
     InMemoryUsageRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.ai_spend import AiSpend
 from flashcards.application.card_generation_service import (
@@ -29,6 +30,7 @@ from flashcards.domain.ai import (
     Thoroughness,
     TokenUsage,
 )
+from flashcards.domain.invites import Role
 from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
 from flashcards.domain.ports import Clock
 from flashcards.domain.quotas import AiCallLimitReached, InstanceQuotas, QuotaExceeded
@@ -42,6 +44,7 @@ from flashcards.domain.sources import (
 )
 from flashcards.domain.transcripts import InvalidTranscript
 from flashcards.domain.usage import TokenPrices
+from flashcards.domain.users import User
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 ALICE = "alice"
@@ -83,20 +86,35 @@ class FakeExtractor:
     def __init__(self, pages: list[ExtractedPage], error: Exception | None = None) -> None:
         self._pages = pages
         self._error = error
+        self.skips: list[int] = []
+        self.caps: list[int | None] = []
 
     def sniff(self, data: bytes) -> str:
         return "application/pdf"
 
     async def count_pages(self, data: bytes) -> int:
+        if self._error is not None:
+            raise self._error
         return len(self._pages)
 
     async def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
-        if self._error is not None:
-            raise self._error
-        for page in self._pages:
-            yield page
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
+        self.skips.append(skip)
+        self.caps.append(max_pages)
+        self.closed = False
+        try:
+            for page in self._pages[skip:]:
+                yield page
+        finally:
+            # Records that the worker closed the document, also when it stopped early.
+            self.closed = True
 
 
 class FakeLLM:
@@ -157,7 +175,8 @@ def _service(
 ) -> CardGenerationService:
     clock = FakeClock()
     return CardGenerationService(
-        jobs, drafts, store, extractor, llm, clock, uow or RecordingUnitOfWork(), _spend(clock)
+        jobs, drafts, store, extractor, llm, clock, uow or RecordingUnitOfWork(), _spend(clock),
+        users=InMemoryUserRepository(),
     )
 
 
@@ -265,7 +284,7 @@ async def test_extractor_failure_marks_job_failed() -> None:
         InMemoryObjectStore(),
     )
     service = _service(
-        jobs, drafts, store, FakeExtractor([], error=TooManyPages("too many")), FakeLLM()
+        jobs, drafts, store, FakeExtractor([], error=TooManyPages(99, 20)), FakeLLM()
     )
     job_id = await _seed_job(jobs, store)
 
@@ -273,7 +292,7 @@ async def test_extractor_failure_marks_job_failed() -> None:
 
     job = await jobs.get(job_id)
     assert job is not None and job.status is JobStatus.FAILED
-    assert job.error == JobFailure.UNREADABLE_DOCUMENT.value
+    assert job.error == JobFailure.TOO_MANY_PAGES.value
 
 
 async def test_failure_midway_preserves_progress_and_resumes_on_retry() -> None:
@@ -302,6 +321,62 @@ async def test_failure_midway_preserves_progress_and_resumes_on_retry() -> None:
     done = await jobs.get(job_id)
     assert done is not None and done.status is JobStatus.SUCCEEDED
     assert [r.source_page for r in await drafts.list_for_job(job_id)] == [1, 2, 3]
+    # The retry asked the extractor to skip the page already done, not to render it.
+    assert extractor.skips == [0, 1]
+
+
+async def _owner(role: Role) -> InMemoryUserRepository:
+    users = InMemoryUserRepository()
+    await users.add(
+        User(id=ALICE, email="alice@example.com", password_hash="h", role=role, created_at=NOW)
+    )
+    return users
+
+
+@pytest.mark.parametrize(
+    ("role", "cap"), [(Role.ADMIN, None), (Role.MEMBER, 2), (None, 2)]
+)
+async def test_the_worker_reads_the_owners_role_for_the_page_cap(
+    role: Role | None, cap: int | None
+) -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    pages = [_text_page(1), _text_page(2)]
+    extractor = FakeExtractor(pages)
+    clock = FakeClock()
+    users = await _owner(role) if role is not None else InMemoryUserRepository()
+    service = CardGenerationService(
+        jobs, drafts, store, extractor, FakeLLM(), clock, RecordingUnitOfWork(), _spend(clock),
+        max_pages=2, users=users,
+    )
+    job_id = await _seed_job(jobs, store)
+    await service.run(job_id)
+    assert extractor.caps == [cap]
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.SUCCEEDED
+
+
+async def test_the_worker_fails_a_member_document_over_the_cap() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    extractor = FakeExtractor([_text_page(1), _text_page(2), _text_page(3)])
+    clock = FakeClock()
+    service = CardGenerationService(
+        jobs, drafts, store, extractor, FakeLLM(), clock, RecordingUnitOfWork(), _spend(clock),
+        max_pages=2, users=await _owner(Role.MEMBER),
+    )
+    job_id = await _seed_job(jobs, store)
+    await service.run(job_id)
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.FAILED
+    assert job.error == JobFailure.TOO_MANY_PAGES.value
+    assert extractor.caps == []  # refused from the count, before any page was rendered
 
 
 async def test_zero_page_document_fails_rather_than_succeeding_at_zero() -> None:
@@ -334,13 +409,29 @@ async def test_cancel_between_pages_keeps_earlier_drafts() -> None:
 
     # Cancel arrives while page 1 is generating; page 2 is never produced.
     llm = FakeLLM(after_call=cancel_after_first_page)
-    service = _service(jobs, drafts, store, FakeExtractor([_text_page(1), _text_page(2)]), llm)
+    extractor = FakeExtractor([_text_page(1), _text_page(2)])
+    service = _service(jobs, drafts, store, extractor, llm)
 
     await service.run(job_id)
 
     job = await jobs.get(job_id)
     assert job is not None and job.status is JobStatus.CANCELLED
     assert [r.source_page for r in await drafts.list_for_job(job_id)] == [1]
+    assert extractor.closed  # the document is released when the job stops early
+
+
+async def test_a_failing_page_still_closes_the_document() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    job_id = await _seed_job(jobs, store)
+    extractor = FakeExtractor([_text_page(1), _text_page(2)])
+    await _service(jobs, drafts, store, extractor, FakeLLM(fail_on_call=1)).run(job_id)
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.FAILED
+    assert extractor.closed
 
 
 async def test_run_is_a_noop_when_not_claimable() -> None:
@@ -410,9 +501,9 @@ async def test_a_failed_page_is_rolled_back_before_the_job_fails() -> None:
         (InvalidModelOutput("raw model text"), JobFailure.BAD_MODEL_OUTPUT),
         (UnreadableDocument("FileDataError"), JobFailure.UNREADABLE_DOCUMENT),
         (UnsupportedMediaType("image/gif"), JobFailure.UNREADABLE_DOCUMENT),
-        (TooManyPages("99 pages"), JobFailure.UNREADABLE_DOCUMENT),
+        (TooManyPages(99, 20), JobFailure.TOO_MANY_PAGES),
         (InvalidTranscript("bad"), JobFailure.UNREADABLE_DOCUMENT),
-        (QuotaExceeded("over"), JobFailure.QUOTA_EXCEEDED),
+        (QuotaExceeded(pages=5, remaining=1), JobFailure.QUOTA_EXCEEDED),
         (AiCallLimitReached("over"), JobFailure.QUOTA_EXCEEDED),
         (RuntimeError("postgres://user:pw@db/x is down"), JobFailure.INTERNAL),
     ],

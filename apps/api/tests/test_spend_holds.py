@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 import pytest
@@ -17,6 +17,7 @@ from flashcards.adapters.memory import (
     InMemoryQuotaSettingsRepository,
     InMemorySpendHoldRepository,
     InMemoryUsageRepository,
+    InMemoryUserRepository,
     NullUnitOfWork,
 )
 from flashcards.application.ai_budget import AiCallBudget
@@ -191,8 +192,14 @@ class _Extractor:
         return 2
 
     async def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
         for page in (1, 2):
             yield ExtractedPage(
                 ref=SourceRef(file_id=file_id, page=page), kind=PageKind.TEXT, text=f"page {page}"
@@ -229,7 +236,7 @@ async def test_a_generation_job_stops_at_the_page_whose_hold_is_refused() -> Non
     )
     worker = CardGenerationService(
         jobs, InMemoryDraftCardRepository(), store, _Extractor(), llm, rig.clock,
-        NullUnitOfWork(), rig.spend,
+        NullUnitOfWork(), rig.spend, users=InMemoryUserRepository(),
     )
     await worker.run(job_id)
 
@@ -250,7 +257,7 @@ async def test_a_failed_page_call_releases_its_hold() -> None:
     job_id = await _queued_job(jobs, store)
     worker = CardGenerationService(
         jobs, InMemoryDraftCardRepository(), store, _Extractor(), _Failing(), rig.clock,
-        NullUnitOfWork(), rig.spend,
+        NullUnitOfWork(), rig.spend, users=InMemoryUserRepository(),
     )
     await worker.run(job_id)
     job = await jobs.get(job_id)

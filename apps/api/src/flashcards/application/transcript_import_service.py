@@ -33,13 +33,19 @@ class TranscriptImportService:
         self._uow = unit_of_work
 
     async def from_youtube(
-        self, *, owner_id: str, deck_id: str, url: str, thoroughness: Thoroughness
+        self,
+        *,
+        owner_id: str,
+        deck_id: str,
+        url: str,
+        thoroughness: Thoroughness,
+        admin: bool = False,
     ) -> AiJob:
         video_id = parse_youtube_video_id(url)  # raises InvalidVideoUrl
         # Everything that can refuse the request is checked before the fetch, so a
         # bad deck, a spent quota or the spend cap never costs a call to YouTube.
         await self._decks.get(owner_id=owner_id, deck_id=deck_id)
-        await self._generation.ensure_pages_left(owner_id)
+        await self._generation.ensure_pages_left(owner_id, admin=admin)
         # Each fetch counts against the daily AI request allowance, which bounds how
         # often one user can make the server contact YouTube (ADR 0020).
         await self._budget.count(owner_id)  # raises SpendCapReached, AiCallLimitReached
@@ -48,15 +54,26 @@ class TranscriptImportService:
         await self._uow.commit()
         transcript = await self._transcripts.fetch(video_id)  # raises TranscriptUnavailable
         return await self._generation.start_transcript(
-            owner_id=owner_id, deck_id=deck_id, transcript=transcript, thoroughness=thoroughness
+            owner_id=owner_id,
+            deck_id=deck_id,
+            transcript=transcript,
+            thoroughness=thoroughness,
+            admin=admin,
         )
 
     async def from_text(
-        self, *, owner_id: str, deck_id: str, text: str, thoroughness: Thoroughness
+        self,
+        *,
+        owner_id: str,
+        deck_id: str,
+        text: str,
+        thoroughness: Thoroughness,
+        admin: bool = False,
     ) -> AiJob:
         return await self._generation.start_transcript(
             owner_id=owner_id,
             deck_id=deck_id,
             transcript=pasted_transcript(text),  # raises InvalidTranscript
             thoroughness=thoroughness,
+            admin=admin,
         )

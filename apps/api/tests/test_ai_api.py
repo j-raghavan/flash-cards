@@ -114,8 +114,10 @@ def test_generate_rejects_a_corrupt_pdf(member: tuple[TestClient, str]) -> None:
 def test_generate_rejects_too_many_pages(member: tuple[TestClient, str]) -> None:
     client, _ = member
     deck_id = _make_deck(client)
-    resp = _upload(client, deck_id, _pdf(21))
+    # The default cap is 300 pages per document.
+    resp = _upload(client, deck_id, _pdf(301))
     assert resp.status_code == 413
+    assert resp.json() == {"detail": "This document has 301 pages; the limit is 300."}
 
 
 def test_generate_rejects_over_quota(member: tuple[TestClient, str]) -> None:
@@ -124,6 +126,10 @@ def test_generate_rejects_over_quota(member: tuple[TestClient, str]) -> None:
     # Default monthly quota is 10 pages; an 11-page document is refused.
     resp = _upload(client, deck_id, _pdf(11))
     assert resp.status_code == 429
+    assert resp.json() == {
+        "detail": "This document has 11 pages, but you have only 10 pages of AI generation "
+        "left this month."
+    }
 
 
 def test_generate_rejects_oversized_upload(

@@ -54,6 +54,7 @@ class JobFailure(enum.StrEnum):
     BAD_MODEL_OUTPUT = "The AI returned an unusable answer. Try again."
     UNREADABLE_DOCUMENT = "The document could not be read."
     NO_READABLE_PAGES = "The document has no readable pages."
+    TOO_MANY_PAGES = "The document has more pages than your limit allows."
     QUOTA_EXCEEDED = "Your AI quota for this period is used up."
     INTERNAL = "Something went wrong while generating cards. Try again."
 

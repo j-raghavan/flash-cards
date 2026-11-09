@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -410,12 +410,20 @@ class DocumentExtractor(Protocol):
         ...
 
     def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
         """Yield one normalized page at a time (peak memory ~ one page).
 
         Raise flashcards.domain.sources.TooManyPages when the real page count
-        exceeds max_pages, and never execute embedded content.
+        exceeds max_pages (None: no cap), and never execute embedded content. The
+        first `skip` pages are neither yielded nor rendered (a resumed job). With
+        text_only, pages without text are left out instead of rasterized.
         """
         ...
 

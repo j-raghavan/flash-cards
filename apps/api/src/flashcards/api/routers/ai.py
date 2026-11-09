@@ -60,6 +60,8 @@ async def start_generation(
         data=data,
         thoroughness=thoroughness,
         source_name=file.filename,
+        # The role as read for this request: no page cap or page quota for admins.
+        admin=caller.user.is_active_admin,
     )
     return JobOut.from_job(job)
 
@@ -77,6 +79,7 @@ async def start_youtube_generation(
         deck_id=body.deck_id,
         url=body.url,
         thoroughness=body.thoroughness,
+        admin=caller.user.is_active_admin,
     )
     return JobOut.from_job(job)
 
@@ -94,6 +97,7 @@ async def start_transcript_generation(
         deck_id=body.deck_id,
         text=body.transcript,
         thoroughness=body.thoroughness,
+        admin=caller.user.is_active_admin,
     )
     return JobOut.from_job(job)
 

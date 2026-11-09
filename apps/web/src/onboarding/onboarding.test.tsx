@@ -267,7 +267,7 @@ describe("guided first run", () => {
       ...me,
       "GET /decks": { body: [deck("d1", "Biology")] },
       "GET /auth/sessions": { body: [] },
-      "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 10, used_pages: 0 } },
+      "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 10, used_pages: 0, max_document_pages: 300, quota_applies: true } },
       "GET /legal/ai-disclosure": {
         body: { ai_enabled: false, trains_on_user_content: false, statements: [], provider: null },
       },

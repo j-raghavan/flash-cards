@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from contextlib import aclosing
 
 from flashcards.application.ai_prompts import prompt_for
 from flashcards.application.ai_spend import AiSpend
@@ -34,6 +35,7 @@ from flashcards.domain.ports import (
     LLMProvider,
     ObjectStore,
     UnitOfWork,
+    UserRepository,
 )
 from flashcards.domain.quotas import AiCallLimitReached, QuotaExceeded
 from flashcards.domain.sources import (
@@ -43,6 +45,7 @@ from flashcards.domain.sources import (
     TooManyPages,
     UnreadableDocument,
     UnsupportedMediaType,
+    page_cap,
 )
 from flashcards.domain.transcripts import InvalidTranscript
 from flashcards.domain.usage import AiFeature, SpendCapReached
@@ -51,7 +54,7 @@ MAX_OUTPUT_TOKENS = 4096
 
 logger = logging.getLogger("flashcards")
 
-_DOCUMENT_ERRORS = (UnreadableDocument, UnsupportedMediaType, TooManyPages, InvalidTranscript)
+_DOCUMENT_ERRORS = (UnreadableDocument, UnsupportedMediaType, InvalidTranscript)
 _QUOTA_ERRORS = (QuotaExceeded, AiCallLimitReached, SpendCapReached)
 
 
@@ -72,6 +75,9 @@ def classify_failure(exc: Exception) -> JobFailure:
         return JobFailure.BAD_MODEL_OUTPUT
     if isinstance(exc, LlmError):
         return JobFailure.PROVIDER_UNAVAILABLE
+    if isinstance(exc, TooManyPages):
+        # The owner's cap at run time, e.g. an admin demoted after queueing it.
+        return JobFailure.TOO_MANY_PAGES
     if isinstance(exc, _DOCUMENT_ERRORS):
         return JobFailure.UNREADABLE_DOCUMENT
     if isinstance(exc, _QUOTA_ERRORS):
@@ -100,9 +106,12 @@ class CardGenerationService:
         clock: Clock,
         unit_of_work: UnitOfWork,
         spend: AiSpend,
+        *,
+        users: UserRepository,
         max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     ) -> None:
         self._uow = unit_of_work
+        self._users = users
         self._spend = spend
         self._jobs = jobs
         self._drafts = drafts
@@ -164,13 +173,13 @@ class CardGenerationService:
         if data is None:
             raise FileNotFoundError("source document not found")
 
-        pages = [
-            page
-            async for page in self._extractor.extract(
-                data, file_id=job.source_id, max_pages=self._max_pages
-            )
-        ]
-        if not pages:
+        # The owner's role is read now, as a request would read it: an admin's
+        # document has no page cap (ADR 0022).
+        max_pages = await self._page_cap(job.owner_id)
+        total = await self._extractor.count_pages(data)
+        if max_pages is not None and total > max_pages:
+            raise TooManyPages(total, max_pages)
+        if total == 0:
             # An empty/garbage upload must not look like a done job stuck at 0%.
             current = await self._current(job)
             await self._jobs.update(
@@ -182,32 +191,43 @@ class CardGenerationService:
         # attempt; resume from there so their drafts are not regenerated and duplicated.
         resume_from = job.completed_units
         current = await self._current(job)
-        await self._jobs.update(current.with_total(len(pages), self._clock.now()))
+        await self._jobs.update(current.with_total(total, self._clock.now()))
         await self._uow.commit()
 
-        for index, page in enumerate(pages):
-            if index < resume_from:
-                continue
-            current = await self._current(job)
-            if current.cancel_requested:
-                await self._jobs.update(current.cancelled(self._clock.now()))
-                return
-            records = await self._generate_page(current, page)
-            for record in records:
-                await self._drafts.add(record)
-            # Re-read before advancing: generation is the slow step, so a cancel or a
-            # requeue can arrive during it. Advancing a fresh read records progress
-            # AND preserves a cancel flag, where writing the pre-generation snapshot
-            # would wipe it; a requeued job raises _Superseded and its page is dropped.
-            latest = await self._current(job)
-            if latest.cancel_requested:
-                await self._jobs.update(latest.cancelled(self._clock.now()))
-                return  # this page's drafts are kept; later pages are not generated
-            await self._jobs.update(latest.advanced(self._clock.now()))
-            await self._uow.commit()  # this page's drafts and its progress, together
+        # Pages are extracted one at a time, each generated before the next is
+        # rendered, so memory stays at about one page however long the document is
+        # (ADR 0022). Pages already generated are skipped without being rendered.
+        async with aclosing(
+            self._extractor.extract(
+                data, file_id=job.source_id, max_pages=max_pages, skip=resume_from
+            )
+        ) as pages:
+            async for page in pages:
+                current = await self._current(job)
+                if current.cancel_requested:
+                    await self._jobs.update(current.cancelled(self._clock.now()))
+                    return
+                records = await self._generate_page(current, page)
+                for record in records:
+                    await self._drafts.add(record)
+                # Re-read before advancing: generation is the slow step, so a cancel or
+                # a requeue can arrive during it. Advancing a fresh read records
+                # progress AND preserves a cancel flag, where writing the
+                # pre-generation snapshot would wipe it; a requeued job raises
+                # _Superseded and its page is dropped.
+                latest = await self._current(job)
+                if latest.cancel_requested:
+                    await self._jobs.update(latest.cancelled(self._clock.now()))
+                    return  # this page's drafts are kept; later pages are not generated
+                await self._jobs.update(latest.advanced(self._clock.now()))
+                await self._uow.commit()  # this page's drafts and its progress, together
 
         final = await self._current(job)
         await self._jobs.update(final.succeeded(self._clock.now()))
+
+    async def _page_cap(self, owner_id: str) -> int | None:
+        owner = await self._users.get(owner_id)
+        return page_cap(self._max_pages, admin=owner is not None and owner.is_active_admin)
 
     async def _generate_page(self, job: AiJob, page: ExtractedPage) -> list[DraftCardRecord]:
         request = StructuredRequest(

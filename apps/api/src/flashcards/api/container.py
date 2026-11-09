@@ -320,6 +320,7 @@ def build_services(repos: Repositories) -> Container:
         repos.unit_of_work,
         spend,
         max_pages=repos.max_upload_pages,
+        users=repos.users,
     )
     note_types = NoteTypeService(
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock

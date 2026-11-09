@@ -19,8 +19,9 @@ from urllib.parse import parse_qs, urlparse
 TRANSCRIPT_MEDIA_TYPE = "application/vnd.flashcards.transcript+json"
 ENVELOPE_PREFIX = b"FLASHCARDS-TRANSCRIPT/1\n"
 CHUNK_CHARS = 6_000
-# The whole transcript must fit the default 20-page generation cap at one chunk per
-# page, so a too-long paste gets a clear "too long" instead of "too many pages".
+# A transcript is at most 20 chunks (one page each), within the default per-document
+# page cap (300), so a too-long paste gets a clear "too long" instead of "too many
+# pages". An operator cap below 20 can still refuse a long transcript (413).
 MAX_TRANSCRIPT_CHARS = 20 * CHUNK_CHARS
 # The envelope can arrive as an upload, so bound it before parsing: the byte size
 # (generous for 120k chars of escaped JSON), the segment count and the timestamps.

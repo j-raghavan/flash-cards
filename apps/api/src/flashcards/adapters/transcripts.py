@@ -12,7 +12,8 @@ worker process it unchanged. Anything else goes to the wrapped extractor.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 
 from flashcards.domain.ports import DocumentExtractor
 from flashcards.domain.sources import ExtractedPage, PageKind, SourceRef, TooManyPages
@@ -48,17 +49,28 @@ class TranscriptAwareExtractor:
         return await self._inner.count_pages(data)
 
     async def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
         if not is_transcript_envelope(data):
-            async for page in self._inner.extract(data, file_id=file_id, max_pages=max_pages):
-                yield page
+            async with aclosing(
+                self._inner.extract(
+                    data, file_id=file_id, max_pages=max_pages, skip=skip, text_only=text_only
+                )
+            ) as pages:
+                async for page in pages:
+                    yield page
             return
         transcript = decode_transcript(data)
         chunks = chunk_transcript(transcript)
-        if len(chunks) > max_pages:
-            raise TooManyPages(f"{len(chunks)} transcript chunks (max {max_pages})")
-        for chunk in chunks:
+        if max_pages is not None and len(chunks) > max_pages:
+            raise TooManyPages(len(chunks), max_pages, transcript=True)
+        for chunk in chunks[max(skip, 0) :]:
             yield ExtractedPage(
                 ref=SourceRef(file_id=file_id, page=chunk.index),
                 kind=PageKind.TEXT,

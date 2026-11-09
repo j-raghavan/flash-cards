@@ -104,6 +104,57 @@ describe("generate page", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("AI page quota exceeded");
   });
 
+  it("states the page limit and the pages left, and shows the server's refusal", async () => {
+    mockApi({
+      ...me,
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 10, used_pages: 9, max_document_pages: 300, quota_applies: true },
+      },
+      "POST /ai/generate": { status: 413, body: { detail: "This document has 412 pages; the limit is 300." } },
+    });
+    renderApp("/decks/d1/generate");
+    expect(
+      await screen.findByText(
+        "PDFs up to 300 pages, 25 MB. You have 1 page of AI generation left this month; each page counts once.",
+      ),
+    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    const input = screen.getByLabelText(/File/);
+    expect(input).toHaveAccessibleDescription(/PDFs up to 300 pages/);
+    await user.upload(input, new File(["%PDF"], "long.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "Generate drafts" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This document has 412 pages; the limit is 300.");
+  });
+
+  it("tells an admin there is no page limit", async () => {
+    mockApi({
+      ...me,
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 10, used_pages: 40, max_document_pages: null, quota_applies: false },
+      },
+    });
+    renderApp("/decks/d1/generate");
+    expect(
+      await screen.findByText("PDFs of any length, up to 25 MB: as an admin you have no page limit."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a generic size until the limits load, and never a negative allowance", async () => {
+    mockApi({
+      ...me,
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 10, used_pages: 12, max_document_pages: 300, quota_applies: true },
+      },
+    });
+    renderApp("/decks/d1/generate");
+    expect(await screen.findByText("Files up to 25 MB.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "PDFs up to 300 pages, 25 MB. You have 0 pages of AI generation left this month; each page counts once.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("ignores a submit without a file and lists recent generations from the server", async () => {
     const started = "2026-01-01T10:00:00Z";
     const calls = mockApi({
