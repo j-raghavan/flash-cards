@@ -5,11 +5,14 @@ import { Api, createInvite, PASSWORD, signUpWithApi, uniqueEmail } from "../supp
 import { expect, test } from "../support/fixtures";
 import { textPdf } from "../support/pdf";
 
-// Three pages, two fixed drafts each from the fake AI provider.
+// Five pages, two fixed drafts each from the fake AI provider, which takes a
+// second per page: the job runs long enough for its progress to be watched.
 const PAGES = [
   "Cell biology: the mitochondrion makes ATP.",
   "Thermodynamics: water boils at 100 degrees.",
   "Revision notes for the end-of-term exam.",
+  "Genetics: DNA is copied before a cell divides.",
+  "Ecology: energy flows from producers to consumers.",
 ];
 const DRAFTS = PAGES.length * 2;
 
@@ -53,15 +56,21 @@ test("invite, sign up, build a deck with AI, study it, share it and clone it", a
       .getByLabel(/^File \(PDF/)
       .setInputFiles({ name: "notes.pdf", mimeType: "application/pdf", buffer: textPdf(PAGES) });
 
-    // The job page subscribes to the job's Server-Sent Events stream.
+    // The job page subscribes to the job's Server-Sent Events stream. A 200 (not
+    // the 204 sent for a finished job) means it subscribed while the job ran.
     const stream = page.waitForResponse(
-      (response) => /\/api\/ai\/jobs\/[^/]+\/events$/.test(new URL(response.url()).pathname) && response.ok(),
+      (response) =>
+        /\/api\/ai\/jobs\/[^/]+\/events$/.test(new URL(response.url()).pathname) && response.status() === 200,
     );
     await page.getByRole("button", { name: "Generate drafts" }).click();
     await expect(page).toHaveURL(/\/jobs\/[^/?]+\?deck=/);
     expect((await stream).headers()["content-type"]).toContain("text/event-stream");
     await expect(page.getByRole("progressbar", { name: "Generation progress" })).toBeVisible();
-    await expect(page.getByText(new RegExp(`\\d of ${String(PAGES.length)} pages`))).toBeVisible();
+    // The API runs one generation job at a time, so with tests repeated in parallel
+    // this job can wait in the queue first.
+    await expect(page.getByText(new RegExp(`\\d of ${String(PAGES.length)} pages`))).toBeVisible({
+      timeout: 45_000,
+    });
     await expect(page.getByRole("status").filter({ hasText: "Finished." })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("progressbar")).toHaveCount(0);
   });
@@ -85,7 +94,7 @@ test("invite, sign up, build a deck with AI, study it, share it and clone it", a
 
     await page.keyboard.press("Space");
     await expect(page.getByRole("group", { name: "How well did you know it?" })).toBeVisible();
-    const answered = page.waitForResponse((r) => r.url().includes("/review") && r.request().method() === "POST");
+    const answered = page.waitForResponse((r) => r.url().endsWith("/review") && r.request().method() === "POST");
     await page.keyboard.press("3");
     expect((await answered).ok()).toBe(true);
     await expect(page.getByText(`Card 2 of ${String(total)}`)).toBeVisible();
@@ -93,7 +102,7 @@ test("invite, sign up, build a deck with AI, study it, share it and clone it", a
 
     // U takes the answer back: the first card is asked again and the review is gone.
     await expect(page.getByRole("button", { name: /Undo last answer/ })).toBeVisible();
-    const undone = page.waitForResponse((r) => r.url().includes("/undo") && r.request().method() === "POST");
+    const undone = page.waitForResponse((r) => r.url().endsWith("/undo") && r.request().method() === "POST");
     await page.keyboard.press("u");
     expect((await undone).ok()).toBe(true);
     await expect(page.getByText(`Card 1 of ${String(total)}`)).toBeVisible();

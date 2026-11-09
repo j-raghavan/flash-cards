@@ -26,7 +26,7 @@ test("a member resets a forgotten password from the emailed link", async ({ page
   await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Send reset link" }).click();
-  await expect(page.getByRole("status")).toContainText("a reset link is on its way");
+  await expect(page.getByRole("status").filter({ hasText: "a reset link is on its way" })).toBeVisible();
 
   const link = await linkFromEmail(email, "reset-password");
   await page.goto(link);
@@ -34,7 +34,7 @@ test("a member resets a forgotten password from the emailed link", async ({ page
   await expect(page).toHaveURL(/\/reset-password$/);
   await page.getByLabel("New password").fill(NEW_PASSWORD);
   await page.getByRole("button", { name: "Change password" }).click();
-  await expect(page.getByRole("status")).toContainText("Your password has been changed");
+  await expect(page.getByRole("status").filter({ hasText: "Your password has been changed" })).toBeVisible();
 
   // The link works once. (A new tab: in this one the link only changes the fragment.)
   const again = await page.context().newPage();

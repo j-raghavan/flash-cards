@@ -24,7 +24,7 @@ async function json<T>(response: APIResponse, what: string): Promise<T> {
   if (!response.ok()) {
     throw new Error(`${what} failed: ${String(response.status())} ${await response.text()}`);
   }
-  return response.status() === 204 ? (undefined as T) : ((await response.json()) as T);
+  return (await response.json()) as T;
 }
 
 /**
@@ -104,8 +104,11 @@ export function apiLog(): string {
 
 /** Wait for the email to `to` whose body has a link to `page`, and return that link. */
 export async function linkFromEmail(to: string, page: string): Promise<string> {
+  // The link must be in this email's own body: the match may not run past the
+  // start of the next log record into someone else's email.
+  const sameRecord = "(?:(?!\\n(?:DEBUG|INFO|WARNING|ERROR|CRITICAL) )[\\s\\S])*?";
   const pattern = new RegExp(
-    `DEV MAIL \\(not sent\\) to ${escapeRegExp(to)}:[^\\n]*\\n[\\s\\S]*?(${escapeRegExp(WEB_URL)}/${page}#token=[^\\s]+)`,
+    `DEV MAIL \\(not sent\\) to ${escapeRegExp(to)}:${sameRecord}(${escapeRegExp(WEB_URL)}/${page}#token=[^\\s]+)`,
   );
   let link = "";
   await expect

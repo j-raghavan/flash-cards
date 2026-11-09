@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // End-to-end suite: the real API (in-memory mode, fake AI provider) and the real
 // production web build (vite preview, whose /api proxy forwards to the API).
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,11 +13,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..");
 const isCI = process.env.CI !== undefined && process.env.CI !== "";
 
-// The API's log (bootstrap invite, emails) is written here; start each run clean.
-// Playwright loads this file in every worker too, so only the main process clears it.
-if (process.env.TEST_WORKER_INDEX === undefined) {
-  rmSync(RUN_DIR, { recursive: true, force: true });
-}
+// The API's log (bootstrap invite, emails) is written here. Nothing is deleted:
+// the API truncates its log when it starts and setup overwrites the rest, so
+// loading this config again (a listing, an editor plugin) never pulls files from
+// under a running suite.
 mkdirSync(RUN_DIR, { recursive: true });
 
 // The API's interpreter: E2E_PYTHON, else the local venv, else python on PATH (CI).

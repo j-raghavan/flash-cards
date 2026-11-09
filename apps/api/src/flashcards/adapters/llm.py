@@ -51,7 +51,7 @@ class FakeLLMProvider:
         self._latency = latency_seconds
 
     async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
-        if request.schema is not DRAFT_CARDS_SCHEMA:
+        if request.schema != DRAFT_CARDS_SCHEMA:
             raise LlmError("the fake AI provider only drafts cards")
         await asyncio.sleep(self._latency)
         cards: list[object] = [

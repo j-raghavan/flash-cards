@@ -21,7 +21,8 @@ test("an answer given offline syncs once when the connection returns", async ({ 
   await expect(page.getByRole("heading", { name: "All caught up" })).toBeVisible();
   await expect(page.getByText("1 will sync when you are back online.")).toBeVisible();
   await expect(banner).toContainText("1 answer is waiting to sync.");
-  // The API helper is not part of the browser context, so it still reaches the server.
+  // The API helper's requests are sent from Node, outside the browser's offline
+  // emulation, so it still reaches the server.
   expect((await member.api.exportAccount()).review_logs).toHaveLength(0);
 
   const synced = page.waitForResponse(
