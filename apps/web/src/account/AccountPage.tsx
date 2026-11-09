@@ -192,6 +192,11 @@ function SessionsPanel() {
 
 function quotaText(quota: AiQuota): string {
   const month = formatPeriod(quota.period);
+  if (!quota.quota_applies) {
+    // An admin: pages are counted for the usage report, never refused.
+    const used = `${String(quota.used_pages)} ${quota.used_pages === 1 ? "page" : "pages"}`;
+    return `As an admin you have no monthly page limit. You have used ${used} for ${month}.`;
+  }
   if (quota.monthly_pages === 0) {
     return `AI generation is not included in your account for ${month}.`;
   }
@@ -214,7 +219,7 @@ function QuotaPanel() {
       {quota.data === undefined ? null : (
         <>
           <p>{quotaText(quota.data)}</p>
-          {quota.data.monthly_pages > 0 ? (
+          {quota.data.quota_applies && quota.data.monthly_pages > 0 ? (
             <meter
               aria-label="AI pages used this month"
               min={0}

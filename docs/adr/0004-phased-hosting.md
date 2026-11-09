@@ -25,7 +25,7 @@ Rules that keep the phases interchangeable:
 ## Phase 0 constraints and how we handle them
 
 - **Free web services sleep** after about 15 minutes idle, with cold starts of 30–60 seconds. Accepted for testers. The UI shows a "waking up" state.
-- **Small instance** (512 MB RAM, 0.1 CPU). Cap uploads (about 20 pages per file) and process pages in a streaming fashion.
+- **Small instance** (512 MB RAM, 0.1 CPU). Cap uploads (about 20 pages per file) and process pages in a streaming fashion. (ADR 0022 raised the cap to 300 pages once extraction streamed one page at a time.)
 - **Jobs in the API process die on sleep or restart.** Job state lives in Postgres; jobs are idempotent and resumable; at boot the app requeues jobs stuck in `running`.
 - **Supabase Free pauses after a week of inactivity.** We rely on normal use and do not add keep-alive tricks. If it pauses, an admin resumes it.
 - **Connection strings:** use Supabase's pooled connection string; to be verified, since direct connections may be IPv6-only.

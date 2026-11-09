@@ -138,18 +138,16 @@ def _register_error_handlers(app: FastAPI) -> None:
             content={"detail": "A deck cannot be moved under itself or a descendant."},
         )
 
-    async def quota_exceeded(_request: Request, _exc: Exception) -> JSONResponse:
-        return JSONResponse(
-            status_code=429, content={"detail": "AI page quota exceeded for this period."}
-        )
+    async def quota_exceeded(_request: Request, exc: Exception) -> JSONResponse:
+        # The message is written for the user: the document's pages and what is left.
+        return JSONResponse(status_code=429, content={"detail": str(exc)})
 
     async def unsupported_media(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=415, content={"detail": "Unsupported file type."})
 
-    async def too_large(_request: Request, _exc: Exception) -> JSONResponse:
-        return JSONResponse(
-            status_code=413, content={"detail": "The document has too many pages."}
-        )
+    async def too_large(_request: Request, exc: Exception) -> JSONResponse:
+        # The message states the document's page count and the limit.
+        return JSONResponse(status_code=413, content={"detail": str(exc)})
 
     async def unreadable_document(_request: Request, exc: Exception) -> JSONResponse:
         logger.warning("unreadable upload: %s", exc)

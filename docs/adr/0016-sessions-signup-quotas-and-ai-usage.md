@@ -51,6 +51,7 @@ Providers already returned token counts with every response, but nothing recorde
 
 - Admins set the instance's default monthly page limit and monthly spend cap (`GET`/`PUT /admin/quotas`), and per-user page limits that override the default (`GET`/`PUT /admin/users/{id}/quota`, where null clears the override). Until an admin sets them, the defaults come from `FLASHCARDS_AI_DEFAULT_MONTHLY_PAGES` and `FLASHCARDS_AI_MONTHLY_SPEND_CAP_USD`. Every change is audited with its old and new values.
 - Users see their own limit and use at `GET /account/ai-quota`.
+- Amended by ADR 0022: an active admin is not refused by the monthly page quota (their pages are still counted for the usage report) and has no per-document page cap. The spend cap still applies to admins.
 - Generation reserves pages against the user's limit in the same atomic statement as before, with the limit passed in.
 - Before any new AI work, the month's recorded spend is compared with the cap, and the work is refused with 429 once it is reached. New AI work means a synchronous call (grading, summaries, mock exams, chat), a new generation job, and a retry. The check runs before the daily call count and before page reservation, so refused work uses neither.
 - A call's cost is known only after it returns, so the cap cannot be reserved in advance. Work already running when the cap is reached finishes, so the cap can be overshot by the work in flight at that moment. A running generation job is not stopped between pages.

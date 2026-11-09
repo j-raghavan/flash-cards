@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 import pytest
 
@@ -192,6 +192,9 @@ async def test_null_provider_reports_no_transcript() -> None:
 
 
 class _Inner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int | None, int, bool]] = []
+
     def sniff(self, data: bytes) -> str:
         return "application/pdf"
 
@@ -199,8 +202,15 @@ class _Inner:
         return 3
 
     async def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
+        self.calls.append((max_pages, skip, text_only))
         yield ExtractedPage(ref=SourceRef(file_id, 1), kind=PageKind.TEXT, text="inner")
 
 
@@ -226,8 +236,22 @@ async def test_extractor_decorator_splits_a_transcript_into_text_pages() -> None
 async def test_extractor_decorator_enforces_the_page_cap() -> None:
     extractor = TranscriptAwareExtractor(_Inner())
     data = encode_transcript(_video("a" * 7000))  # two chunks at the default size
-    with pytest.raises(TooManyPages):
+    with pytest.raises(TooManyPages) as caught:
         _ = [p async for p in extractor.extract(data, file_id="src", max_pages=1)]
+    assert str(caught.value) == (
+        "This transcript has 2 parts, each counted as a page; the limit is 1."
+    )
+
+
+async def test_extractor_decorator_skips_resumed_chunks_and_passes_options_on() -> None:
+    extractor = TranscriptAwareExtractor(_Inner())
+    data = encode_transcript(_video("a" * 7000))  # two chunks
+    pages = [p async for p in extractor.extract(data, file_id="src", max_pages=None, skip=1)]
+    assert [p.ref.page for p in pages] == [2]
+    inner = _Inner()
+    wrapped = TranscriptAwareExtractor(inner)
+    _ = [p async for p in wrapped.extract(b"%PDF", file_id="f", max_pages=None, text_only=True)]
+    assert inner.calls == [(None, 0, True)]
 
 
 def test_extractor_decorator_rejects_a_malformed_envelope() -> None:

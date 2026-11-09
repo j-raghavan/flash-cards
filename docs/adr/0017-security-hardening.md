@@ -76,7 +76,7 @@ Requeue was chosen over marking the jobs failed: the owner gets their cards with
 
 ### `FLASHCARDS_MAX_UPLOAD_PAGES` is the page cap
 
-The setting (default 20, at least 1) reaches the request-time check, the worker's extractor cap and document-chat indexing through `Repositories.max_upload_pages`, so the three always agree.
+The setting (default 20, at least 1; 300 since ADR 0022, which also lifts it for admins) reaches the request-time check, the worker's extractor cap and document-chat indexing through `Repositories.max_upload_pages`, so the three always agree for a given role.
 
 ## Consequences
 

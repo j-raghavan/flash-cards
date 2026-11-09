@@ -17,6 +17,7 @@ from flashcards.api.deps import (
 from flashcards.api.schemas import AccountExportOut
 from flashcards.config import Settings
 from flashcards.domain.audit import AuditAction
+from flashcards.domain.sources import page_cap
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -34,11 +35,20 @@ async def export_account(
 async def my_ai_quota(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
+    settings: Settings = Depends(get_settings),
 ) -> MyAiQuotaOut:
-    """The caller's monthly AI page limit and how much of it is used."""
+    """The caller's monthly AI page limit, how much is used, and the per-document cap.
+
+    An admin has no per-document cap and is not held to the monthly limit (ADR 0022).
+    """
     quota = await container.quotas.user_quota(caller.user.id)
+    admin = caller.user.is_active_admin
     return MyAiQuotaOut(
-        period=quota.period, monthly_pages=quota.monthly_pages, used_pages=quota.used_pages
+        period=quota.period,
+        monthly_pages=quota.monthly_pages,
+        used_pages=quota.used_pages,
+        max_document_pages=page_cap(settings.max_upload_pages, admin=admin),
+        quota_applies=not admin,
     )
 
 

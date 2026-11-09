@@ -29,6 +29,10 @@ export interface AiQuota {
   period: string;
   monthly_pages: number;
   used_pages: number;
+  /** Most pages one uploaded document may have; null means no limit (an admin). */
+  max_document_pages: number | null;
+  /** False for an admin: their pages are counted but never refused. */
+  quota_applies: boolean;
 }
 
 export interface AiProvider {

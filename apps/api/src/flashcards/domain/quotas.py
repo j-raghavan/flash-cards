@@ -21,8 +21,53 @@ DEFAULT_DAILY_AI_CALLS = 200
 DEFAULT_DAILY_CLONE_CARDS = 50_000
 
 
+# The reservation limit used for an admin's pages (ADR 0022): they are counted, so
+# the usage report shows them, but never refused. Far below the INTEGER column's
+# maximum (2,147,483,647), so `used_pages + pages` in the reservation's guard
+# cannot overflow while it is still compared against this limit.
+UNMETERED_PAGE_LIMIT = 1_000_000_000
+
+
 class QuotaExceeded(Exception):
-    """The owner has no remaining page quota for the period."""
+    """The owner has no remaining page quota for the period.
+
+    `pages` is what the refused document needed, `remaining` what the owner had
+    left and `limit` their monthly limit, when known. The message is shown to the
+    user as is, so it says them.
+    """
+
+    def __init__(
+        self,
+        *,
+        pages: int | None = None,
+        remaining: int | None = None,
+        limit: int | None = None,
+    ) -> None:
+        super().__init__(_quota_message(pages, remaining, limit))
+        self.pages = pages
+        self.remaining = remaining
+        self.limit = limit
+
+
+def _pages(n: int) -> str:
+    return f"{n} page" if n == 1 else f"{n} pages"
+
+
+def _quota_message(pages: int | None, remaining: int | None, limit: int | None) -> str:
+    document = "" if pages is None else f" This document has {_pages(pages)}."
+    if limit == 0:
+        return f"AI generation is not included in your account this month.{document}"
+    if remaining is None or (pages is None and remaining > 0):
+        return "AI page quota exceeded for this period."
+    if remaining <= 0 or pages is None:
+        return (
+            "You have no AI pages left this month; the allowance renews at the start "
+            f"of next month.{document}"
+        )
+    return (
+        f"This document has {_pages(pages)}, but you have only "
+        f"{_pages(remaining)} of AI generation left this month."
+    )
 
 
 class InvalidQuota(ValueError):

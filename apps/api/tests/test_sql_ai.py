@@ -23,6 +23,7 @@ from flashcards.adapters.sql import (
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.jobs import AiJob, JobFailure, JobStatus, new_generation_job
 from flashcards.domain.notes import NoteType
+from flashcards.domain.quotas import UNMETERED_PAGE_LIMIT
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 
@@ -201,6 +202,19 @@ async def test_quota_reserves_atomically_up_to_the_limit(engine: AsyncEngine) ->
         assert await SqlQuotaRepository(s).used_by_owner("2026-11") == {"alice": 10}
         assert await SqlQuotaRepository(s).used_by_owner("2026-12") == {"alice": 10}
         assert await SqlQuotaRepository(s).used_by_owner("2027-01") == {}
+
+
+async def test_an_unmetered_reservation_counts_without_refusing(engine: AsyncEngine) -> None:
+    # An admin's pages (ADR 0022): reserved against UNMETERED_PAGE_LIMIT, so they
+    # show in the usage report, and the guard's addition stays within INTEGER.
+    sm = create_sessionmaker(engine)
+    for pages in (5_000, 120_000):
+        async with sm() as s, s.begin():
+            assert await SqlQuotaRepository(s, limit=10).try_reserve_pages(
+                "admin", pages, "2026-10", limit=UNMETERED_PAGE_LIMIT
+            )
+    async with sm() as s:
+        assert await SqlQuotaRepository(s).used("admin", "2026-10") == 125_000
 
 
 def test_sync_sessionmaker_type(engine: AsyncEngine) -> None:

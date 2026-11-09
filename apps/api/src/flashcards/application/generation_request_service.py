@@ -25,11 +25,12 @@ from flashcards.domain.ports import (
     ObjectStore,
     QuotaRepository,
 )
-from flashcards.domain.quotas import QuotaExceeded, billing_period
+from flashcards.domain.quotas import UNMETERED_PAGE_LIMIT, QuotaExceeded, billing_period
 from flashcards.domain.sources import (
     DEFAULT_MAX_UPLOAD_PAGES,
     TooManyPages,
     clean_source_name,
+    page_cap,
     source_name_key,
 )
 from flashcards.domain.transcripts import (
@@ -76,10 +77,13 @@ class GenerationRequestService:
         data: bytes,
         thoroughness: Thoroughness,
         source_name: str | None = None,
+        admin: bool = False,
     ) -> AiJob:
         """Validate and enqueue a generation job; raises before spending quota on bad input.
 
         source_name is the uploaded file's name, kept only to label chat citations.
+        admin is the caller's role as read for this request: an admin's document
+        has no page cap and is not held to the monthly page quota (ADR 0022).
         """
         # Raises DeckNotFound if the deck is missing or not the caller's; the drafts
         # are approved into this deck later (F-AI-4).
@@ -88,7 +92,14 @@ class GenerationRequestService:
         media = self._extractor.sniff(data)
         pages = await self._extractor.count_pages(data)
         return await self._enqueue(
-            owner_id, deck_id, data, media, pages, thoroughness, clean_source_name(source_name)
+            owner_id,
+            deck_id,
+            data,
+            media,
+            pages,
+            thoroughness,
+            clean_source_name(source_name),
+            admin=admin,
         )
 
     async def start_transcript(
@@ -98,6 +109,7 @@ class GenerationRequestService:
         deck_id: str,
         transcript: Transcript,
         thoroughness: Thoroughness,
+        admin: bool = False,
     ) -> AiJob:
         """Enqueue generation from a video or pasted transcript (F-AI-2).
 
@@ -112,20 +124,22 @@ class GenerationRequestService:
             else clean_source_name(f"YouTube video {transcript.video_id}")
         )
         return await self._enqueue(
-            owner_id, deck_id, data, TRANSCRIPT_MEDIA_TYPE, pages, thoroughness, name
+            owner_id, deck_id, data, TRANSCRIPT_MEDIA_TYPE, pages, thoroughness, name, admin=admin
         )
 
-    async def ensure_pages_left(self, owner_id: str) -> None:
+    async def ensure_pages_left(self, owner_id: str, *, admin: bool = False) -> None:
         """Raise SpendCapReached or QuotaExceeded when no generation could start now.
 
         A cheap check before slow work (a transcript fetch) that would otherwise be
         wasted; the reservation itself still happens atomically in _enqueue.
         """
         await self._spend.ensure_available()
+        if admin:
+            return  # the spend cap above applies to admins; the page quota does not
         period = billing_period(self._clock.now())
         limit = await self._limits.page_limit(owner_id)
         if await self._quotas.used(owner_id, period) >= limit:
-            raise QuotaExceeded(f"no pages left for {period}")
+            raise QuotaExceeded(remaining=0, limit=limit)
 
     async def _enqueue(
         self,
@@ -136,17 +150,24 @@ class GenerationRequestService:
         pages: int,
         thoroughness: Thoroughness,
         name: str | None,
+        *,
+        admin: bool,
     ) -> AiJob:
-        if pages > self._max_pages:
-            raise TooManyPages(f"{pages} pages (max {self._max_pages})")
+        max_pages = page_cap(self._max_pages, admin=admin)
+        if max_pages is not None and pages > max_pages:
+            raise TooManyPages(pages, max_pages, transcript=media == TRANSCRIPT_MEDIA_TYPE)
 
-        await self._spend.ensure_available()  # raises SpendCapReached
+        # The instance spend cap is the operator's guard on money: it applies to
+        # admins too (ADR 0022). Raises SpendCapReached.
+        await self._spend.ensure_available()
         now = self._clock.now()
-        limit = await self._limits.page_limit(owner_id)
-        if not await self._quotas.try_reserve_pages(
-            owner_id, pages, billing_period(now), limit=limit
-        ):
-            raise QuotaExceeded(f"{pages} pages exceeds the remaining quota")
+        period = billing_period(now)
+        # An admin's pages are still counted, so the usage report shows them, but
+        # against a limit that never refuses them.
+        limit = UNMETERED_PAGE_LIMIT if admin else await self._limits.page_limit(owner_id)
+        if not await self._quotas.try_reserve_pages(owner_id, pages, period, limit=limit):
+            remaining = max(limit - await self._quotas.used(owner_id, period), 0)
+            raise QuotaExceeded(pages=pages, remaining=remaining, limit=limit)
 
         source_id = str(uuid.uuid4())
         await self._store.put(source_id, data, media)

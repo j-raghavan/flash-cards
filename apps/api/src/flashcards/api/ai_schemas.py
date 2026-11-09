@@ -73,6 +73,10 @@ class MyAiQuotaOut(BaseModel):
     period: str
     monthly_pages: int
     used_pages: int
+    # Most pages one uploaded document may have; null means no limit (an admin).
+    max_document_pages: int | None
+    # False for an admin: their pages are counted but never refused (ADR 0022).
+    quota_applies: bool
 
 
 class UserUsageOut(BaseModel):

@@ -13,7 +13,7 @@ its pixmap under MAX_RASTER_PIXELS however large the page claims to be.
 from __future__ import annotations
 
 import math
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from functools import partial
 
 import puremagic
@@ -58,10 +58,18 @@ class PyMuPDFExtractor:
         return await _parse(lambda: _page_count(data))
 
     async def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
         media = self.sniff(data)
         if media != "application/pdf":
+            if skip > 0 or text_only:
+                return
             yield ExtractedPage(
                 ref=SourceRef(file_id=file_id, page=1),
                 kind=PageKind.IMAGE,
@@ -72,10 +80,15 @@ class PyMuPDFExtractor:
 
         doc, page_count = await _parse(lambda: _open(data))
         try:
-            if page_count > max_pages:
-                raise TooManyPages(f"{page_count} pages (max {max_pages})")
-            for index in range(page_count):
-                yield await _parse(partial(_render_page, doc, index, file_id))
+            if max_pages is not None and page_count > max_pages:
+                raise TooManyPages(page_count, max_pages)
+            # One page is rendered at a time and handed on before the next, so peak
+            # memory is about one page whatever the page count (ADR 0022); pages
+            # before `skip` are not rendered at all.
+            for index in range(max(skip, 0), page_count):
+                page = await _parse(partial(_render_page, doc, index, file_id, text_only))
+                if page is not None:
+                    yield page
         finally:
             # Closing touches MuPDF too, so it takes the same single slot.
             await run_blocking(PYMUPDF, doc.close)
@@ -120,12 +133,16 @@ def raster_zoom(width: float, height: float) -> float:
     return zoom
 
 
-def _render_page(doc: pymupdf.Document, index: int, file_id: str) -> ExtractedPage:
+def _render_page(
+    doc: pymupdf.Document, index: int, file_id: str, text_only: bool = False
+) -> ExtractedPage | None:
     page = doc[index]
     text = str(page.get_text()).strip()
     ref = SourceRef(file_id=file_id, page=index + 1)
     if len(text) >= _TEXT_THRESHOLD:
         return ExtractedPage(ref=ref, kind=PageKind.TEXT, text=text)
+    if text_only:
+        return None  # a text-less page is not rasterized when only text is wanted
     rect = page.rect
     zoom = raster_zoom(float(rect.width), float(rect.height))
     png = bytes(page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png"))

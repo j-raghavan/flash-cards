@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -73,8 +73,14 @@ class FakeExtractor:
         return self._pages
 
     async def extract(
-        self, data: bytes, *, file_id: str, max_pages: int
-    ) -> AsyncIterator[ExtractedPage]:
+        self,
+        data: bytes,
+        *,
+        file_id: str,
+        max_pages: int | None,
+        skip: int = 0,
+        text_only: bool = False,
+    ) -> AsyncGenerator[ExtractedPage, None]:
         raise NotImplementedError  # pragma: no cover
         yield  # pragma: no cover
 

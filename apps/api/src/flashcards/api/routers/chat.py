@@ -21,6 +21,9 @@ async def ask_deck(
     container: Container = Depends(get_container, scope="function"),
 ) -> ChatAnswerOut:
     answer = await container.chat.ask(
-        owner_id=caller.user.id, deck_id=deck_id, question=body.question
+        owner_id=caller.user.id,
+        deck_id=deck_id,
+        question=body.question,
+        admin=caller.user.is_active_admin,
     )
     return ChatAnswerOut.from_answer(answer)

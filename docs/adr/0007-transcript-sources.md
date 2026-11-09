@@ -20,7 +20,8 @@ parallel pipeline for transcripts would duplicate all of that.
   `TranscriptAwareExtractor` decorates the PDF/image extractor: an envelope is split
   into chunks of at most 6,000 characters, each yielded as a text page; anything else
   goes to the wrapped extractor. Quota, the worker, drafts and approval are unchanged.
-- Each chunk counts as one page for the quota and the 20-page cap. The whole
+- Each chunk counts as one page for the quota and the page cap (20 pages then, 300
+  since ADR 0022). The whole
   transcript is capped at 120,000 characters (20 chunks of 6,000), so a too-long
   paste gets a clear 422 instead of a "too many pages" error. Whitespace-only chunks
   are never produced, and a chunk's end time is the start of the segment after it.

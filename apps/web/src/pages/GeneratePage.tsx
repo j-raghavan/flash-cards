@@ -7,6 +7,7 @@ import { useRef, useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { AiNotice } from "../account/AiNotice";
+import { account, type AiQuota } from "../api/account";
 import { ai } from "../api/endpoints";
 import type { JobStatus, Thoroughness } from "../api/types";
 import { ApiError } from "../api/client";
@@ -24,6 +25,21 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 };
 
 const MAX_BYTES = 25 * 1024 * 1024;
+
+const pages = (n: number): string => `${n.toLocaleString()} ${n === 1 ? "page" : "pages"}`;
+
+/** The upload limits for this user, from the server; generic until they load. */
+function limitsText(quota: AiQuota | undefined): string {
+  if (quota === undefined) {
+    return "Files up to 25 MB.";
+  }
+  if (quota.max_document_pages === null) {
+    return "PDFs of any length, up to 25 MB: as an admin you have no page limit.";
+  }
+  const limit = `PDFs up to ${pages(quota.max_document_pages)}, 25 MB.`;
+  const left = Math.max(quota.monthly_pages - quota.used_pages, 0);
+  return `${limit} You have ${pages(left)} of AI generation left this month; each page counts once.`;
+}
 const ACCEPTED = ["application/pdf", "image/png", "image/jpeg"];
 
 const LEVELS: { value: Thoroughness; label: string; hint: string }[] = [
@@ -131,6 +147,8 @@ export function GeneratePage() {
   // Recent jobs come from the server, so they follow the user across devices.
   // The list is a convenience: if it cannot load, the page works without it.
   const recent = useResource(() => ai.jobs(deckId), `jobs:${deckId}`).data ?? [];
+  // The page cap and what is left this month; the form works without them.
+  const quota = useResource(account.aiQuota, "ai-quota").data;
 
   const onSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
@@ -167,6 +185,7 @@ export function GeneratePage() {
           <span>File (PDF, PNG or JPEG, up to 25 MB)</span>
           <input
             type="file"
+            aria-describedby="upload-limits"
             accept={ACCEPTED.join(",")}
             onChange={(event) => {
               setFile(event.target.files?.[0] ?? null);
@@ -174,6 +193,9 @@ export function GeneratePage() {
             }}
           />
         </label>
+        <small id="upload-limits" className="muted">
+          {limitsText(quota)}
+        </small>
         <fieldset className="segmented">
           <legend>Thoroughness</legend>
           {LEVELS.map((option) => (
