@@ -19,6 +19,7 @@ from flashcards import __version__
 from flashcards.adapters.legal_pages import load_legal_pages
 from flashcards.adapters.llm import NullLLMProvider
 from flashcards.adapters.transcripts import NullTranscriptProvider
+from flashcards.adapters.two_factor import FernetSecretBox, parse_keys
 from flashcards.api.body_limit import BodySizeLimitMiddleware
 from flashcards.api.container import Container
 from flashcards.api.csrf import CsrfOriginMiddleware
@@ -41,6 +42,7 @@ from flashcards.api.routers import (
     progress,
     review,
     sharing,
+    two_factor,
 )
 from flashcards.config import Settings, fake_llm_refusal
 from flashcards.domain.ai import DraftNotFound, InvalidModelOutput, LlmError
@@ -66,7 +68,7 @@ from flashcards.domain.notes import (
     InvalidNote,
     NoteNotFound,
 )
-from flashcards.domain.ports import LLMProvider, Mailer, TranscriptProvider
+from flashcards.domain.ports import LLMProvider, Mailer, SecretBox, TranscriptProvider
 from flashcards.domain.progress import InvalidRange, InvalidStudySettings
 from flashcards.domain.quotas import (
     MICRO_USD_PER_USD,
@@ -319,6 +321,23 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(LlmError, ai_unavailable)
 
 
+def _secret_box_from_settings(settings: Settings, *, persistent: bool) -> SecretBox | None:
+    """The key that encrypts authenticator secrets (ADR 0018).
+
+    Without one, a persistent (SQL) instance offers no authenticator apps, since
+    secrets stored now could not be read after a restart with a different key;
+    in-memory mode lets build_container use a throwaway key.
+    """
+    keys = parse_keys(settings.totp_encryption_keys or "")
+    if keys:
+        return FernetSecretBox(keys)
+    if persistent:
+        logger.warning(
+            "FLASHCARDS_TOTP_ENCRYPTION_KEYS is not set: authenticator apps are unavailable."
+        )
+    return None
+
+
 def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = None) -> FastAPI:
     settings = settings or Settings()
     configured_llm = llm if llm is not None else _llm_from_settings(settings)
@@ -339,6 +358,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             require_verified_sign_in=not settings.invite_only,
             max_upload_pages=settings.max_upload_pages,
             transcripts=transcripts,
+            secret_box=_secret_box_from_settings(settings, persistent=True),
         )
         container = None
     else:
@@ -350,6 +370,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             require_verified_sign_in=not settings.invite_only,
             max_upload_pages=settings.max_upload_pages,
             transcripts=transcripts,
+            secret_box=_secret_box_from_settings(settings, persistent=False),
         )
         engine = None
 
@@ -415,6 +436,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.include_router(sharing.router)
     app.include_router(note_types.router)
     app.include_router(legal.router)
+    app.include_router(two_factor.router)
+    app.include_router(two_factor.admin_router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

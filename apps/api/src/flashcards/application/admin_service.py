@@ -24,6 +24,7 @@ from flashcards.application.invite_service import (
     InviteService,
     invite_email,
 )
+from flashcards.application.login_attempts import second_factor_key
 from flashcards.application.sign_in_service import throttle_key
 from flashcards.domain.audit import AuditAction
 from flashcards.domain.invites import Role
@@ -170,6 +171,7 @@ class AdminService:
         if user is None:
             raise UserNotFound(user_id)
         await self._throttle.delete(throttle_key(user.email))
+        await self._throttle.delete(second_factor_key(user.id))
         await self._audit.record(AuditAction.USER_UNLOCKED, actor_id=admin_id, target_id=user_id)
         return user
 

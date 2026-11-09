@@ -52,14 +52,16 @@ from flashcards.adapters.sql import (
     SqlUserRepository,
     SqlUserTokenRepository,
 )
+from flashcards.adapters.sql_two_factor import SqlTwoFactorRepository
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
+from flashcards.adapters.two_factor import WebAuthnCeremonies
 from flashcards.api.container import (
     Container,
     Repositories,
     build_container,
     build_services,
 )
-from flashcards.domain.ports import LLMProvider, Mailer, TranscriptProvider
+from flashcards.domain.ports import LLMProvider, Mailer, SecretBox, TranscriptProvider
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 from flashcards.domain.usage import AiMetering
@@ -92,6 +94,7 @@ def in_memory_provider(
     require_verified_sign_in: bool = False,
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     transcripts: TranscriptProvider | None = None,
+    secret_box: SecretBox | None = None,
 ) -> tuple[Container, ServicesProvider, InProcessJobQueue]:
     job_queue = InProcessJobQueue()
     container = build_container(
@@ -103,6 +106,7 @@ def in_memory_provider(
         metering=metering,
         require_verified_sign_in=require_verified_sign_in,
         max_upload_pages=max_upload_pages,
+        secret_box=secret_box,
     )
 
     async def provider() -> AsyncIterator[Container]:
@@ -121,6 +125,7 @@ def sql_provider(
     require_verified_sign_in: bool = False,
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
     transcripts: TranscriptProvider | None = None,
+    secret_box: SecretBox | None = None,
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
@@ -137,6 +142,7 @@ def sql_provider(
     provider_llm = llm or NullLLMProvider()
     provider_mailer = mailer or LogMailer(show_content=False)
     provider_metering = metering or AiMetering()
+    ceremonies = WebAuthnCeremonies(public_base_url=public_base_url)
 
     async def provider() -> AsyncIterator[Container]:
         # One unit of work: commit on success, roll back on any error. Explicit
@@ -192,6 +198,9 @@ def sql_provider(
                         public_base_url=public_base_url,
                         max_upload_pages=max_upload_pages,
                         unit_of_work=SqlUnitOfWork(session),
+                        two_factor=SqlTwoFactorRepository(session),
+                        secret_box=secret_box,
+                        passkey_ceremonies=ceremonies,
                     )
                 )
             except BaseException:

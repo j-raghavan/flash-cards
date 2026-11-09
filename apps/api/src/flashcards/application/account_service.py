@@ -39,6 +39,7 @@ from flashcards.domain.ports import (
     SessionRepository,
     ShareLinkRepository,
     StudySettingsRepository,
+    TwoFactorRepository,
     UserRepository,
     UserTokenRepository,
 )
@@ -92,7 +93,10 @@ class AccountService:
         invites: InviteService,
         note_types: NoteTypeRepository,
         study_settings: StudySettingsRepository,
+        *,
+        two_factor: TwoFactorRepository | None = None,
     ) -> None:
+        self._two_factor = two_factor
         self._note_types = note_types
         self._library = library
         self._decks = decks
@@ -185,6 +189,8 @@ class AccountService:
         # The throttle key is derived from the email, so it goes with the account.
         await self._login_throttle.delete(throttle_key(user.email))
         await self._user_tokens.delete_for_user(owner_id)
+        if self._two_factor is not None:
+            await self._two_factor.delete_for_user(owner_id)
         await self._sessions.delete_for_user(owner_id)
         await self._users.delete(owner_id)
         # Invites the account sent stop working once it is gone.

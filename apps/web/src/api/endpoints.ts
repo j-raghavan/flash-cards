@@ -3,6 +3,7 @@
 
 import { request } from "./client";
 import type { ReviewResult } from "./studyProgress";
+import type { SecondFactorRequired } from "./twoFactor";
 import type {
   AdminUser,
   AuditEvent,
@@ -43,8 +44,9 @@ const id = encodeURIComponent;
 
 export const auth = {
   me: () => request<User>("/auth/me"),
+  /** The user, or (202) a pending sign-in that a second factor must finish. */
   login: (email: string, password: string) =>
-    request<User>("/auth/login", { method: "POST", json: { email, password } }),
+    request<User | SecondFactorRequired>("/auth/login", { method: "POST", json: { email, password } }),
   signup: (token: string, email: string, password: string) =>
     request<User>("/auth/signup", { method: "POST", json: { token, email, password } }),
   logout: () => request<undefined>("/auth/logout", { method: "POST" }),

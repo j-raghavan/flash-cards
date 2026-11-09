@@ -26,6 +26,10 @@ dependencies = [
   # PSF-2.0). Used only when FLASHCARDS_YOUTUBE_TRANSCRIPTS_ENABLED is on (ADR 0020).
   "youtube-transcript-api>=1.2,<2",
   "requests>=2.32",
+  # Two-factor sign-in (F-AUTH-3, ADR 0018).
+  "pyotp>=2.9",
+  "webauthn>=3.0,<4",
+  "cryptography>=43",
 ]
 
 [project.scripts]

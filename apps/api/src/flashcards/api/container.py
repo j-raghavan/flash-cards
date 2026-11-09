@@ -41,6 +41,7 @@ from flashcards.adapters.memory import (
     InMemoryShareLinkRepository,
     InMemoryStudySettingsRepository,
     InMemoryStudyStatsRepository,
+    InMemoryTwoFactorRepository,
     InMemoryUsageRepository,
     InMemoryUserRepository,
     InMemoryUserTokenRepository,
@@ -50,6 +51,7 @@ from flashcards.adapters.memory import (
 from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.adapters.passwords import Argon2PasswordHasher
 from flashcards.adapters.transcripts import NullTranscriptProvider, TranscriptAwareExtractor
+from flashcards.adapters.two_factor import FernetSecretBox, PyOtpPasswords, WebAuthnCeremonies
 from flashcards.application.account_email_service import AccountEmailService
 from flashcards.application.account_service import AccountService
 from flashcards.application.admin_service import AdminService
@@ -70,6 +72,7 @@ from flashcards.application.generation_request_service import GenerationRequestS
 from flashcards.application.goal_service import GoalService
 from flashcards.application.invite_service import InviteService
 from flashcards.application.library_service import LibraryService
+from flashcards.application.login_attempts import LoginAttempts
 from flashcards.application.media_service import MediaService
 from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
@@ -80,11 +83,13 @@ from flashcards.application.public_signup_service import PublicSignupService
 from flashcards.application.quota_service import QuotaService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
+from flashcards.application.second_factor_sign_in_service import SecondFactorSignInService
 from flashcards.application.session_service import SessionService
 from flashcards.application.sharing_service import SharingService
 from flashcards.application.sign_in_service import SignInService
 from flashcards.application.summary_service import SummaryService
 from flashcards.application.transcript_import_service import TranscriptImportService
+from flashcards.application.two_factor_service import TwoFactorService
 from flashcards.domain.mock_exam import DEFAULT_MOCK_EXAM_UNLOCK_CARDS
 from flashcards.domain.ports import (
     AiJobRepository,
@@ -107,8 +112,10 @@ from flashcards.domain.ports import (
     NoteRepository,
     NoteTypeRepository,
     ObjectStore,
+    OneTimePasswords,
     PackageReader,
     PassageRepository,
+    PasskeyCeremonies,
     PasswordHasher,
     PlanBaselineRepository,
     QuotaRepository,
@@ -116,11 +123,13 @@ from flashcards.domain.ports import (
     ReviewLogRepository,
     Scheduler,
     ScheduleRepository,
+    SecretBox,
     SessionRepository,
     ShareLinkRepository,
     StudySettingsRepository,
     StudyStatsRepository,
     TranscriptProvider,
+    TwoFactorRepository,
     UnitOfWork,
     UsageRepository,
     UserRepository,
@@ -186,6 +195,12 @@ class Repositories:
     unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
     # Serializes deck exports (F-IMP-4); stateless, so every provider shares it.
     deck_export_writer: DeckExportWriter = field(default_factory=FileDeckExportWriter)
+    # Two-factor sign-in (F-AUTH-3, ADR 0018). Without a secret box, authenticator
+    # apps are unavailable; without ceremonies, WebAuthn uses public_base_url.
+    two_factor: TwoFactorRepository = field(default_factory=InMemoryTwoFactorRepository)
+    secret_box: SecretBox | None = None
+    otp: OneTimePasswords = field(default_factory=PyOtpPasswords)
+    passkey_ceremonies: PasskeyCeremonies | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +242,8 @@ class Container:
     public_signup: PublicSignupService
     quotas: QuotaService
     mailer: Mailer
+    two_factor: TwoFactorService
+    second_factor: SecondFactorSignInService
 
 
 def build_services(repos: Repositories) -> Container:
@@ -355,6 +372,7 @@ def build_services(repos: Repositories) -> Container:
         invites,
         repos.note_types,
         repos.study_settings,
+        two_factor=repos.two_factor,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
     ai_budget = AiCallBudget(repos.ai_calls, repos.clock, spend, repos.unit_of_work)
@@ -413,7 +431,27 @@ def build_services(repos: Repositories) -> Container:
         repos.clock,
         base_url=repos.public_base_url,
     )
-    sign_in = SignInService(auth, repos.login_throttle, repos.users, audit, repos.clock)
+    ceremonies = repos.passkey_ceremonies
+    if ceremonies is None:
+        ceremonies = WebAuthnCeremonies(public_base_url=repos.public_base_url)
+    attempts = LoginAttempts(repos.login_throttle, audit, repos.clock)
+    two_factor = TwoFactorService(
+        repos.two_factor,
+        repos.users,
+        repos.hasher,
+        repos.otp,
+        ceremonies,
+        attempts,
+        audit,
+        repos.clock,
+        box=repos.secret_box,
+    )
+    sign_in = SignInService(
+        auth, repos.login_throttle, repos.users, audit, repos.clock, two_factor=two_factor
+    )
+    second_factor = SecondFactorSignInService(
+        auth, two_factor, repos.two_factor, repos.users, ceremonies, attempts, audit, repos.clock
+    )
     account_email = AccountEmailService(
         repos.users,
         repos.user_tokens,
@@ -466,6 +504,8 @@ def build_services(repos: Repositories) -> Container:
         ),
         quotas=quotas,
         mailer=repos.mailer,
+        two_factor=two_factor,
+        second_factor=second_factor,
     )
 
 
@@ -479,6 +519,7 @@ def build_container(
     metering: AiMetering | None = None,
     require_verified_sign_in: bool = False,
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
+    secret_box: SecretBox | None = None,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -535,5 +576,7 @@ def build_container(
             metering=metering or AiMetering(),
             require_verified_sign_in=require_verified_sign_in,
             max_upload_pages=max_upload_pages,
+            # Nothing outlives the process here, so a throwaway key will do.
+            secret_box=secret_box or FernetSecretBox.ephemeral(),
         )
     )

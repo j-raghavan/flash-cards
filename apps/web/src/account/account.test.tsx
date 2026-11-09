@@ -41,6 +41,9 @@ function accountApi(overrides: Routes = {}): Call[] {
     "GET /auth/sessions": { body: [THIS_DEVICE, PHONE] },
     "GET /account/ai-quota": { body: QUOTA },
     "GET /legal/ai-disclosure": { body: DISCLOSURE },
+    "GET /auth/two-factor": {
+      body: { enabled: false, totp: false, totp_available: true, passkeys: [], recovery_codes_left: 0 },
+    },
     ...overrides,
   });
 }

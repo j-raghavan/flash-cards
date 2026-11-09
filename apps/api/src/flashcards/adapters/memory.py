@@ -41,6 +41,12 @@ from flashcards.domain.scheduling import (
 )
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.two_factor import (
+    Challenge,
+    Passkey,
+    RecoveryCode,
+    TotpCredential,
+)
 from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
@@ -802,6 +808,142 @@ class InMemoryUserTokenRepository:
     async def delete_for_user(self, user_id: str) -> None:
         for token_id in [t.id for t in self._by_id.values() if t.user_id == user_id]:
             del self._by_id[token_id]
+
+
+class InMemoryTwoFactorRepository:
+    def __init__(self) -> None:
+        self._totp: dict[str, TotpCredential] = {}
+        self._codes: dict[str, RecoveryCode] = {}
+        self._passkeys: dict[str, Passkey] = {}
+        self._challenges: dict[str, Challenge] = {}
+
+    async def get_totp(self, user_id: str) -> TotpCredential | None:
+        return self._totp.get(user_id)
+
+    async def save_totp(self, credential: TotpCredential) -> None:
+        self._totp[credential.user_id] = credential
+
+    async def confirm_totp(self, user_id: str, step: int, now: datetime) -> bool:
+        credential = self._totp.get(user_id)
+        if credential is None or credential.confirmed:
+            return False
+        self._totp[user_id] = replace(credential, confirmed_at=now, last_used_step=step)
+        return True
+
+    async def use_totp_step(self, user_id: str, step: int) -> bool:
+        credential = self._totp.get(user_id)
+        if credential is None or not credential.confirmed:
+            return False
+        if credential.last_used_step is not None and credential.last_used_step >= step:
+            return False
+        self._totp[user_id] = replace(credential, last_used_step=step)
+        return True
+
+    async def delete_totp(self, user_id: str) -> bool:
+        return self._totp.pop(user_id, None) is not None
+
+    async def list_totp(self) -> list[TotpCredential]:
+        return list(self._totp.values())
+
+    async def set_totp_secret(self, user_id: str, *, old: str, new: str) -> bool:
+        credential = self._totp.get(user_id)
+        if credential is None or credential.secret_ciphertext != old:
+            return False
+        self._totp[user_id] = replace(credential, secret_ciphertext=new)
+        return True
+
+    async def replace_recovery_codes(self, user_id: str, codes: Sequence[RecoveryCode]) -> None:
+        await self.delete_recovery_codes(user_id)
+        self._codes.update((code.id, code) for code in codes)
+
+    async def use_recovery_code(self, user_id: str, code_hash: str, now: datetime) -> bool:
+        for code in self._codes.values():
+            if code.user_id == user_id and code.code_hash == code_hash and code.used_at is None:
+                self._codes[code.id] = replace(code, used_at=now)
+                return True
+        return False
+
+    async def count_recovery_codes(self, user_id: str) -> int:
+        return sum(1 for c in self._codes.values() if c.user_id == user_id and c.used_at is None)
+
+    async def delete_recovery_codes(self, user_id: str) -> None:
+        for code_id in [c.id for c in self._codes.values() if c.user_id == user_id]:
+            del self._codes[code_id]
+
+    async def add_passkey(self, passkey: Passkey) -> None:
+        self._passkeys[passkey.id] = passkey
+
+    async def list_passkeys(self, user_id: str) -> list[Passkey]:
+        mine = [p for p in self._passkeys.values() if p.user_id == user_id]
+        return sorted(mine, key=lambda p: p.created_at)
+
+    async def get_passkey_by_credential(self, credential_id: bytes) -> Passkey | None:
+        return next(
+            (p for p in self._passkeys.values() if p.credential_id == credential_id), None
+        )
+
+    async def record_passkey_use(
+        self, passkey_id: str, *, expected_count: int, new_count: int, now: datetime
+    ) -> bool:
+        passkey = self._passkeys.get(passkey_id)
+        if passkey is None or passkey.sign_count != expected_count:
+            return False
+        self._passkeys[passkey_id] = passkey.with_used(new_count, now)
+        return True
+
+    async def delete_passkey(self, user_id: str, passkey_id: str) -> bool:
+        passkey = self._passkeys.get(passkey_id)
+        if passkey is None or passkey.user_id != user_id:
+            return False
+        del self._passkeys[passkey_id]
+        return True
+
+    async def add_challenge(self, challenge: Challenge) -> None:
+        self._challenges[challenge.id] = challenge
+
+    async def get_challenge(self, token_hash: str) -> Challenge | None:
+        return next((c for c in self._challenges.values() if c.token_hash == token_hash), None)
+
+    async def set_webauthn_challenge(self, challenge_id: str, value: bytes | None) -> None:
+        challenge = self._challenges.get(challenge_id)
+        if challenge is not None:
+            self._challenges[challenge_id] = challenge.with_webauthn(value)
+
+    async def take_webauthn_challenge(self, challenge_id: str, expected: bytes) -> bool:
+        challenge = self._challenges.get(challenge_id)
+        if challenge is None or challenge.webauthn_challenge != expected:
+            return False
+        self._challenges[challenge_id] = challenge.with_webauthn(None)
+        return True
+
+    async def use_challenge(self, challenge_id: str, now: datetime) -> bool:
+        challenge = self._challenges.get(challenge_id)
+        if challenge is None or challenge.used_at is not None:
+            return False
+        self._challenges[challenge_id] = replace(challenge, used_at=now)
+        return True
+
+    async def delete_stale_challenges(self, user_id: str, now: datetime) -> None:
+        stale = [
+            c.id
+            for c in self._challenges.values()
+            if c.user_id == user_id and (c.used_at is not None or now >= c.expires_at)
+        ]
+        for challenge_id in stale:
+            del self._challenges[challenge_id]
+
+    async def enabled_user_ids(self, user_ids: Sequence[str]) -> set[str]:
+        with_totp = {u for u, c in self._totp.items() if c.confirmed}
+        with_passkey = {p.user_id for p in self._passkeys.values()}
+        return set(user_ids) & (with_totp | with_passkey)
+
+    async def delete_for_user(self, user_id: str) -> None:
+        self._totp.pop(user_id, None)
+        await self.delete_recovery_codes(user_id)
+        for passkey_id in [p.id for p in self._passkeys.values() if p.user_id == user_id]:
+            del self._passkeys[passkey_id]
+        for challenge_id in [c.id for c in self._challenges.values() if c.user_id == user_id]:
+            del self._challenges[challenge_id]
 
 
 class InMemoryStudySettingsRepository:

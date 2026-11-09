@@ -44,6 +44,7 @@ Requirements: Docker Engine with the Compose v2 plugin (the stack is tested with
    - `FLASHCARDS_PUBLIC_BASE_URL`: the public HTTPS origin of the site, for example `https://flashcards.example.org`, without `/api`. Email links point at the web app's pages under it (`/verify-email#token=...`, `/reset-password#token=...`), and the API logs a warning at startup when it still contains `localhost`.
    - `FLASHCARDS_DOMAIN`, if the Caddy proxy is used: the host name from the URL above.
    - An AI provider and SMTP server, if wanted (see the comments in `.env.example`).
+   - `FLASHCARDS_TOTP_ENCRYPTION_KEYS`, to offer authenticator apps for two-factor sign-in: generate a key with `openssl rand -base64 32 | tr "+/" "-_"` (or, once the stack runs, `docker compose exec api flashcards generate-totp-key`). Passkeys work without it, and their relying party is the host of `FLASHCARDS_PUBLIC_BASE_URL`, so changing that host invalidates registered passkeys.
 
    Leave optional settings commented out instead of setting them to empty values.
 
@@ -206,6 +207,7 @@ docker compose up -d --wait
 - **Security headers.** `web` sends the Content-Security-Policy and the other headers listed under [The web app and routing](#the-web-app-and-routing) on every response, and HSTS for requests that arrived over HTTPS. A proxy in front should pass them through rather than add its own copies.
 - **Share links in logs.** Share-link tokens appear in request paths (`/api/shared/{token}`), so the API's access log (`docker compose logs api`) contains working links, as does any proxy access log that is enabled (neither bundled Caddyfile enables one). Restrict who can read those logs.
 - **Unhealthy containers are not restarted.** `restart: unless-stopped` restarts a container whose process exits. Compose does not restart a container that is running but failing its healthcheck; use external monitoring on `/api/healthz` (from the host, `http://127.0.0.1:8000/api/healthz`).
+- **Two-factor keys.** `FLASHCARDS_TOTP_ENCRYPTION_KEYS` encrypts authenticator-app secrets, so the database and its backups alone cannot generate codes. Back the key up apart from the database: without it no stored authenticator app can be used, and users fall back to recovery codes, passkeys or an admin reset. Rotate it as described in `.env.example` (ADR 0018).
 - **Secrets.** `.env` holds every secret (database password, AI key, SMTP password). Keep it `chmod 600` and out of version control (`.env` is git-ignored, and `.dockerignore` keeps it out of the image build context). The `api` and `migrate` containers receive the whole file as environment variables, including `POSTGRES_PASSWORD`, which they need for the database URL anyway.
 
 ## nginx example
