@@ -126,6 +126,25 @@ class GenerationRequestService:
         await self._queue.enqueue(job.id)
         return queued
 
+    async def recover_interrupted(self) -> int:
+        """Hand jobs left behind by a stopped process to the worker; return how many.
+
+        Run once at startup, before the worker starts. QUEUED jobs are simply
+        enqueued again (the queue lives in memory). RUNNING jobs are requeued as a
+        new attempt and resume from completed_units, so pages already generated are
+        neither regenerated nor charged again, and the requeue is conditional, so a
+        job that finished meanwhile is left alone. A runner in another process that
+        still holds the old attempt stops at its next progress check.
+        """
+        now = self._clock.now()
+        recovered = [job.id for job in await self._jobs.list_queued()]
+        for job in await self._jobs.list_running():
+            if await self._jobs.try_requeue_interrupted(job.id, job.attempt, now) is not None:
+                recovered.append(job.id)
+        for job_id in recovered:
+            await self._queue.enqueue(job_id)
+        return len(recovered)
+
     async def cancel(self, *, owner_id: str, job_id: str) -> None:
         await self.get(owner_id=owner_id, job_id=job_id)  # ownership check
         await self._jobs.request_cancel(job_id, self._clock.now())

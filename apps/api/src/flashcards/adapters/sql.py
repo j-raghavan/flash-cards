@@ -553,7 +553,10 @@ class SqlAiJobRepository:
         await self._session.flush()
 
     async def get(self, job_id: str) -> AiJob | None:
-        row = await self._session.get(AiJobRow, job_id)
+        # populate_existing: the row as committed, not the session's cached copy.
+        # The worker's session lives across commits (expire_on_commit=False), and
+        # it must see a cancel or a requeue that another session committed.
+        row = await self._session.get(AiJobRow, job_id, populate_existing=True)
         return aijob_from_row(row) if row is not None else None
 
     async def update(self, job: AiJob) -> None:
@@ -609,6 +612,35 @@ class SqlAiJobRepository:
             select(AiJobRow).where(AiJobRow.status == JobStatus.RUNNING.value)
         )
         return [aijob_from_row(row) for row in rows]
+
+    async def list_queued(self) -> list[AiJob]:
+        rows = await self._session.scalars(
+            select(AiJobRow).where(AiJobRow.status == JobStatus.QUEUED.value)
+        )
+        return [aijob_from_row(row) for row in rows]
+
+    async def try_requeue_interrupted(
+        self, job_id: str, attempt: int, now: datetime
+    ) -> AiJob | None:
+        # Mirrors AiJob.requeued_after_interruption in one conditional UPDATE: a job
+        # that finished, or was requeued by another process, is left alone.
+        row = await self._session.scalar(
+            update(AiJobRow)
+            .where(
+                AiJobRow.id == job_id,
+                AiJobRow.status == JobStatus.RUNNING.value,
+                AiJobRow.attempt == attempt,
+            )
+            .values(
+                status=JobStatus.QUEUED.value,
+                attempt=AiJobRow.attempt + 1,
+                max_attempts=AiJobRow.max_attempts + 1,
+                error=None,
+                updated_at=now,
+            )
+            .returning(AiJobRow)
+        )
+        return aijob_from_row(row) if row is not None else None
 
     async def list_for_owner(self, owner_id: str) -> list[AiJob]:
         rows = await self._session.scalars(

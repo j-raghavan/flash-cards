@@ -396,6 +396,23 @@ class AiJobRepository(Protocol):
         """Jobs left RUNNING (e.g. by a crash), for boot-time requeue."""
         ...
 
+    async def list_queued(self) -> list[AiJob]:
+        """QUEUED jobs, for handing to a freshly started worker at boot."""
+        ...
+
+    async def try_requeue_interrupted(
+        self, job_id: str, attempt: int, now: datetime
+    ) -> AiJob | None:
+        """Atomically re-queue a RUNNING job still at this attempt.
+
+        Mirrors AiJob.requeued_after_interruption.
+
+        Returns the queued job, or None when the job has moved on (finished, or
+        already requeued), so a job that completed meanwhile is never run again.
+        A SQL adapter uses one conditional UPDATE.
+        """
+        ...
+
     async def list_for_owner(self, owner_id: str) -> list[AiJob]:
         """The owner's jobs (for account deletion, F-IMP-5)."""
         ...

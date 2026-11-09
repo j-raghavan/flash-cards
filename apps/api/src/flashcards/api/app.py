@@ -17,7 +17,7 @@ from flashcards import __version__
 from flashcards.api.container import Container
 from flashcards.api.csrf import CsrfOriginMiddleware
 from flashcards.api.job_events import StreamSlots
-from flashcards.api.provider import in_memory_provider, sql_provider
+from flashcards.api.provider import ServicesProvider, in_memory_provider, sql_provider
 from flashcards.api.routers import (
     account,
     admin,
@@ -306,6 +306,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             async for request_container in provider():
                 await request_container.card_generation.run(job_id)
 
+        await _recover_jobs(provider)
         job_queue.start(process)
         yield
         await job_queue.stop()
@@ -352,6 +353,24 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
         return {"status": "ok", "version": __version__}
 
     return app
+
+
+async def _recover_jobs(provider: ServicesProvider) -> None:
+    """Requeue the jobs a previous process left queued or running (ADR 0017).
+
+    In SQL mode this is its own unit of work: the requeue commits, then the jobs
+    reach the worker. A failure is logged rather than raised, so a database that
+    is briefly unavailable does not stop the API from starting.
+    """
+    recovered = 0
+    try:
+        async for container in provider():
+            recovered = await container.generation.recover_interrupted()
+    except Exception:
+        logger.exception("could not recover interrupted generation jobs at startup")
+        return
+    if recovered:
+        logger.info("requeued %d interrupted generation job(s)", recovered)
 
 
 def _llm_from_settings(settings: Settings) -> LLMProvider:

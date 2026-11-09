@@ -435,3 +435,78 @@ async def test_unexpected_failure_is_logged_with_its_traceback(
         await service.run(job.id)
 
     assert [r.exc_info is not None for r in caplog.records] == [True]
+
+
+async def _requeue_from_another_process(jobs: InMemoryAiJobRepository, job_id: str) -> None:
+    job = await jobs.get(job_id)
+    assert job is not None
+    assert await jobs.try_requeue_interrupted(job_id, job.attempt, NOW) is not None
+
+
+async def test_a_requeued_job_stops_the_old_run_without_writing() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    job_id = await _seed_job(jobs, store)
+    uow = RecordingUnitOfWork(jobs)
+
+    async def requeue() -> None:
+        await _requeue_from_another_process(jobs, job_id)
+
+    llm = FakeLLM(after_call=requeue)  # requeued while the first page is generated
+    extractor = FakeExtractor([_text_page(1), _text_page(2)])
+    service = _service(jobs, drafts, store, extractor, llm, uow)
+
+    await service.run(job_id)
+
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.QUEUED  # left for the new run
+    assert (job.attempt, job.completed_units) == (2, 0)
+    assert len(llm.seen) == 1  # stopped before the second page
+    assert uow.log[-1] == "rollback queued:0/2"  # the in-flight page is discarded
+
+    # The new run resumes the job from its committed progress.
+    extractor = FakeExtractor([_text_page(1), _text_page(2)])
+    await _service(jobs, drafts, store, extractor, FakeLLM()).run(job_id)
+    done = await jobs.get(job_id)
+    assert done is not None and done.status is JobStatus.SUCCEEDED and done.attempt == 2
+
+
+async def test_a_superseded_run_that_then_fails_does_not_fail_the_new_run() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    job_id = await _seed_job(jobs, store)
+
+    async def requeue_then_fail() -> None:
+        await _requeue_from_another_process(jobs, job_id)
+        raise LlmError("provider dropped the connection")
+
+    service = _service(
+        jobs, drafts, store, FakeExtractor([_text_page(1)]), FakeLLM(after_call=requeue_then_fail)
+    )
+    await service.run(job_id)
+
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.QUEUED and job.error is None
+
+
+async def test_a_job_deleted_mid_run_stops_quietly() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(),
+        InMemoryDraftCardRepository(),
+        InMemoryObjectStore(),
+    )
+    job_id = await _seed_job(jobs, store)
+
+    async def delete() -> None:
+        await jobs.delete(job_id)
+
+    llm = FakeLLM(after_call=delete)
+    service = _service(jobs, drafts, store, FakeExtractor([_text_page(1)]), llm)
+    await service.run(job_id)
+    assert await jobs.get(job_id) is None

@@ -135,6 +135,23 @@ class AiJob:
     def with_cancel_requested(self, now: datetime) -> AiJob:
         return replace(self, cancel_requested=True, updated_at=now)
 
+    def requeued_after_interruption(self, now: datetime) -> AiJob:
+        """Queue a job the process stopped while running, to resume at boot.
+
+        The run counts as a new attempt, so a runner still holding the old attempt
+        can tell it was superseded and stops. max_attempts grows with it: an
+        interruption is not the owner's failure and does not use up their retries.
+        """
+        self._require(self.status is JobStatus.RUNNING, "requeue")
+        return replace(
+            self,
+            status=JobStatus.QUEUED,
+            attempt=self.attempt + 1,
+            max_attempts=self.max_attempts + 1,
+            error=None,
+            updated_at=now,
+        )
+
     def retried(self, now: datetime) -> AiJob:
         self._require(self.can_retry, "retry")
         # Resume: keep completed_units as the restart point, spend another attempt.

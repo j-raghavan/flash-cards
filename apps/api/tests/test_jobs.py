@@ -156,3 +156,13 @@ def test_public_error_never_exposes_raw_text() -> None:
     # A row written before failures were categorized holds raw exception text.
     legacy = replace(failed, error="anthropic.APIStatusError: key sk-123 revoked")
     assert legacy.public_error == JobFailure.INTERNAL.value
+
+
+def test_requeue_after_interruption_is_a_free_new_attempt() -> None:
+    running = _job(max_attempts=2).started(NOW).with_total(4, NOW).advanced(NOW)
+    queued = running.requeued_after_interruption(NOW)
+    assert queued.status is JobStatus.QUEUED
+    assert (queued.attempt, queued.max_attempts) == (2, 3)
+    assert queued.completed_units == 1  # resumes where it stopped
+    with pytest.raises(IllegalJobTransition):
+        queued.requeued_after_interruption(NOW)
