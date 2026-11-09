@@ -1,0 +1,8 @@
+# Keep local secrets and bulky directories out of the Docker build context.
+.git
+**/.env
+**/.env.*
+**/node_modules
+**/.venv
+**/__pycache__
+test_data

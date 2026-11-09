@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Caddy front end for deploy/compose (profile "proxy").
+# FLASHCARDS_DOMAIN must resolve to this host for automatic HTTPS to work.
+
+{$FLASHCARDS_DOMAIN} {
+	# Above the largest API upload (40 MB for .apkg). Requests over this are
+	# refused here, before the API reads them into memory.
+	request_body {
+		max_size 50MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	# Today the whole site is the API.
+	reverse_proxy api:8000 {
+		# Pass SSE frames (GET /ai/jobs/{id}/events) through as they arrive.
+		flush_interval -1
+	}
+
+	# Web app slot. When the static build is mounted at /srv/web (see
+	# compose.yaml), replace the reverse_proxy block above with:
+	#
+	# handle_path /api/* {
+	# 	reverse_proxy api:8000 {
+	# 		flush_interval -1
+	# 	}
+	# }
+	# handle {
+	# 	root * /srv/web
+	# 	try_files {path} /index.html
+	# 	file_server
+	# }
+	#
+	# The web app and the API must share one origin: the API sends no CORS
+	# headers and its session cookie is SameSite=Lax.
+}
