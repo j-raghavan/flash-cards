@@ -37,6 +37,15 @@ class AuditAction(enum.StrEnum):
     SESSIONS_REVOKED_OTHERS = "session.revoked_others"
     QUOTA_DEFAULTS_CHANGED = "quota.defaults_changed"
     QUOTA_USER_CHANGED = "quota.user_changed"
+    # Two-factor sign-in (F-AUTH-3).
+    TOTP_ENABLED = "two_factor.totp_enabled"
+    TOTP_DISABLED = "two_factor.totp_disabled"
+    PASSKEY_ADDED = "two_factor.passkey_added"
+    PASSKEY_REMOVED = "two_factor.passkey_removed"
+    PASSKEY_COUNTER_REGRESSED = "two_factor.passkey_counter_regressed"
+    RECOVERY_CODES_GENERATED = "two_factor.recovery_codes_generated"
+    RECOVERY_CODE_USED = "two_factor.recovery_code_used"
+    TWO_FACTOR_RESET = "two_factor.reset"
 
 
 @dataclass(frozen=True, slots=True)

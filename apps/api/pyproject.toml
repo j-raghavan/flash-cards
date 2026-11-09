@@ -22,6 +22,10 @@ dependencies = [
   "puremagic>=2.1",
   "anthropic>=2.6,<3",
   "httpx>=0.27",
+  # Two-factor sign-in (F-AUTH-3, ADR 0018).
+  "pyotp>=2.9",
+  "webauthn>=3.0,<4",
+  "cryptography>=43",
 ]
 
 [project.scripts]

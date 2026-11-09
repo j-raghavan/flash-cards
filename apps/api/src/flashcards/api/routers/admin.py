@@ -128,7 +128,9 @@ async def list_users(
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container, scope="function"),
 ) -> list[AdminUserOut]:
-    return [AdminUserOut.from_user(user) for user in await container.admin.list_users()]
+    users = await container.admin.list_users()
+    enabled = await container.two_factor.enabled_among([user.id for user in users])
+    return [AdminUserOut.from_user(user, two_factor=user.id in enabled) for user in users]
 
 
 @router.post("/users/{user_id}/suspend", response_model=AdminUserOut)

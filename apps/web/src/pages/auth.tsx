@@ -8,7 +8,10 @@ import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react
 import { signup } from "../api/account";
 import { ApiError, describeError } from "../api/client";
 import { auth } from "../api/endpoints";
+import { needsSecondFactor, type SecondFactorRequired } from "../api/twoFactor";
+import type { User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { SecondFactorStep } from "../auth/SecondFactorStep";
 import { ErrorText, Loading } from "../components/ui";
 import { safeNextPath, tokenFromLocation } from "../lib/text";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
@@ -100,6 +103,8 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [pending, setPending] = useState<SecondFactorRequired | null>(null);
+  const [restartNote, setRestartNote] = useState<string | null>(null);
   const submit = useSubmit();
   const location = useLocation();
   const next = safeNextPath(params.get("next") ?? new URLSearchParams(location.hash.replace(/^#/, "")).get("next"));
@@ -119,17 +124,44 @@ export function LoginPage() {
     return <Navigate to={next} replace />;
   }
 
+  const finished = (signedInUser: User): void => {
+    signedIn(signedInUser);
+    void navigate(next, { replace: true });
+  };
+
   const onSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
+    setRestartNote(null);
     void submit.run(async () => {
-      signedIn(await auth.login(email, password));
-      void navigate(next, { replace: true });
+      const result = await auth.login(email, password);
+      if (needsSecondFactor(result)) {
+        setPassword("");
+        setPending(result);
+        return;
+      }
+      finished(result);
     });
   };
+
+  if (pending !== null) {
+    return (
+      <AuthFrame title="Confirm it's you">
+        <SecondFactorStep
+          pending={pending}
+          onSignedIn={finished}
+          onRestart={(message) => {
+            setPending(null);
+            setRestartNote(message);
+          }}
+        />
+      </AuthFrame>
+    );
+  }
 
   return (
     <AuthFrame title="Sign in">
       {accountDeleted ? <p role="status">Your account has been deleted.</p> : null}
+      {restartNote === null ? null : <p role="status">{restartNote}</p>}
       <form onSubmit={onSubmit} className="stack">
         <EmailField value={email} onChange={setEmail} />
         <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" />

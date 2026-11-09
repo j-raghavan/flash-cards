@@ -69,8 +69,13 @@ class Settings(BaseSettings):
     # link. Known providers have defaults; a self-hosted endpoint should set both.
     ai_provider_name: str | None = None
     ai_provider_terms_url: str | None = None
-    # Where the web client lives; links in emails point here.
+    # Where the web client lives; links in emails point here. Its host is also the
+    # WebAuthn relying party id, and its origin the only one passkeys answer for.
     public_base_url: str = "http://localhost:5173"
+    # Comma-separated Fernet keys that encrypt authenticator-app (TOTP) secrets at
+    # rest, newest first (ADR 0018). Without one, SQL mode offers no authenticator
+    # apps (passkeys still work); in-memory mode uses a throwaway key.
+    totp_encryption_keys: str | None = None
     # Outgoing mail. Without smtp_host, mail is not sent: in development it is
     # logged so the links can be followed; elsewhere only its subject is logged.
     smtp_host: str | None = None
