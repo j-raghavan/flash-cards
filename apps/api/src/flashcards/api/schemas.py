@@ -28,6 +28,7 @@ from flashcards.domain.evaluation import AnswerEvaluation
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite, InviteStatus, Role
 from flashcards.domain.jobs import AiJob, JobStatus
+from flashcards.domain.legal import LegalDocument, LegalPage
 from flashcards.domain.mock_exam import ExamResult, MockExam
 from flashcards.domain.note_types import CardTemplate
 from flashcards.domain.notes import MAX_FLAG, MAX_MEDIA_ID_LEN, Card, Note, NoteType
@@ -1127,4 +1128,21 @@ class PlanReportOut(StudyPlanOut):
         return cls(
             **StudyPlanOut.from_plan(report.plan).model_dump(),
             changes=PlanChangeOut.from_change(change) if change is not None else None,
+        )
+
+
+class LegalPageOut(BaseModel):
+    page: LegalPage
+    title: str
+    # Operator-written Markdown; the web client renders it through its sanitizer.
+    markdown: str
+    is_template: bool
+
+    @classmethod
+    def from_document(cls, document: LegalDocument) -> LegalPageOut:
+        return cls(
+            page=document.page,
+            title=document.page.heading,
+            markdown=document.markdown,
+            is_template=document.is_template,
         )

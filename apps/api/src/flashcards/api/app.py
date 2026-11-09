@@ -16,7 +16,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from flashcards import __version__
+from flashcards.adapters.legal_pages import load_legal_pages
 from flashcards.adapters.llm import NullLLMProvider
+from flashcards.adapters.transcripts import NullTranscriptProvider
 from flashcards.adapters.two_factor import FernetSecretBox, parse_keys
 from flashcards.api.body_limit import BodySizeLimitMiddleware
 from flashcards.api.container import Container
@@ -66,7 +68,7 @@ from flashcards.domain.notes import (
     InvalidNote,
     NoteNotFound,
 )
-from flashcards.domain.ports import LLMProvider, Mailer, SecretBox
+from flashcards.domain.ports import LLMProvider, Mailer, SecretBox, TranscriptProvider
 from flashcards.domain.progress import InvalidRange, InvalidStudySettings
 from flashcards.domain.quotas import (
     MICRO_USD_PER_USD,
@@ -89,6 +91,7 @@ from flashcards.domain.transcripts import (
     InvalidTranscript,
     InvalidVideoUrl,
     TranscriptUnavailable,
+    parse_language_preference,
 )
 from flashcards.domain.usage import AiMetering, SpendCapReached, TokenPrices
 from flashcards.domain.users import AdminRequired, AdminSelfAction, LastActiveAdmin, UserNotFound
@@ -342,6 +345,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     ai_enabled = not isinstance(configured_llm, NullLLMProvider)
     metering = _metering_from_settings(settings, ai_enabled=ai_enabled)
     mailer = _mailer_from_settings(settings)
+    transcripts = _transcripts_from_settings(settings)
+    legal_pages = load_legal_pages(settings.legal_dir)  # raises on an unusable page
     _warn_on_local_links(settings)
     if settings.database_url:
         engine, provider, job_queue = sql_provider(
@@ -352,6 +357,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             metering=metering,
             require_verified_sign_in=not settings.invite_only,
             max_upload_pages=settings.max_upload_pages,
+            transcripts=transcripts,
             secret_box=_secret_box_from_settings(settings, persistent=True),
         )
         container = None
@@ -363,6 +369,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
             metering=metering,
             require_verified_sign_in=not settings.invite_only,
             max_upload_pages=settings.max_upload_pages,
+            transcripts=transcripts,
             secret_box=_secret_box_from_settings(settings, persistent=False),
         )
         engine = None
@@ -403,6 +410,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.state.services_provider = provider
     app.state.event_stream_slots = StreamSlots()
     app.state.ai_disclosure = _disclosure_from_settings(settings, ai_enabled=ai_enabled)
+    app.state.legal_pages = legal_pages
     if not settings.invite_only:
         logger.warning("INVITE_ONLY is off: anyone can create an account at /auth/register.")
     app.state.bootstrap_invite_token = _maybe_bootstrap_invite(settings, container)
@@ -521,6 +529,18 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
         )
     logger.warning("No AI backend is configured; AI requests will be refused.")
     return NullLLMProvider()
+
+
+def _transcripts_from_settings(settings: Settings) -> TranscriptProvider:
+    """The YouTube fetcher when the operator turned it on, else the declining stub."""
+    if not settings.youtube_transcripts_enabled:
+        return NullTranscriptProvider()
+    from flashcards.adapters.youtube_transcripts import YouTubeTranscriptProvider
+
+    return YouTubeTranscriptProvider(
+        languages=parse_language_preference(settings.youtube_transcript_languages),
+        timeout_seconds=settings.youtube_transcript_timeout_seconds,
+    )
 
 
 def _to_micro_usd(usd: float | None) -> int | None:

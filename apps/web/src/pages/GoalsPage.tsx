@@ -200,7 +200,7 @@ export function GoalsPage() {
           <Loading />
         ) : null
       ) : list.data.length === 0 ? (
-        <p className="empty">No goals yet.</p>
+        <p className="empty">No goals yet. Add your exam date below and the plan works out what to study each day.</p>
       ) : (
         <ul className="deck-tree">
           {list.data.map((goal) => (

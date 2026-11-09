@@ -22,6 +22,10 @@ dependencies = [
   "puremagic>=2.1",
   "anthropic>=2.6,<3",
   "httpx>=0.27",
+  # F-AI-2: YouTube transcripts (MIT; pulls in requests, Apache-2.0, and defusedxml,
+  # PSF-2.0). Used only when FLASHCARDS_YOUTUBE_TRANSCRIPTS_ENABLED is on (ADR 0020).
+  "youtube-transcript-api>=1.2,<2",
+  "requests>=2.32",
   # Two-factor sign-in (F-AUTH-3, ADR 0018).
   "pyotp>=2.9",
   "webauthn>=3.0,<4",
@@ -41,6 +45,7 @@ dev = [
   "mypy>=1.11",
   "import-linter>=2.0",
   "testcontainers>=4.0",
+  "types-requests>=2.32",
 ]
 
 [tool.setuptools.packages.find]

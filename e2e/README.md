@@ -24,7 +24,7 @@ The API's log is written to `e2e/.run/api.log`. Tests read emails (password rese
 
 | Spec | Covers |
 | --- | --- |
-| `core-journey.spec.ts` | An admin invites a member; the member signs up in the browser, creates a deck and a card, uploads a five-page PDF, watches live progress (Server-Sent Events) to the end, approves the drafts, studies with the keyboard (Space, 1 to 4) and undoes an answer, then shares the deck; a second user previews and copies it |
+| `core-journey.spec.ts` | An admin invites a member; the member signs up in the browser, skips the guided first run, creates a deck and a card, uploads a five-page PDF, watches live progress (Server-Sent Events) to the end, approves the drafts, studies with the keyboard (Space, 1 to 4) and undoes an answer, then shares the deck; a second user previews and copies it |
 | `password-reset.spec.ts` | Forgot password, the emailed link, the new password works, the old one and a reused link do not |
 | `card-browser.spec.ts` | Tag filter in the card browser, then a bulk suspend of the matches |
 | `offline-review.spec.ts` | Answer with the browser offline, reconnect, and the review is recorded exactly once |
