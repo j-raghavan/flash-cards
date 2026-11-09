@@ -117,7 +117,7 @@ describe("document chat", () => {
             };
           });
         }
-        return { status: 502, body: { detail: "x" } };
+        return reply === 2 ? { status: 502, body: { detail: "x" } } : new TypeError("Failed to fetch");
       },
     });
     renderApp("/decks/d1");
@@ -135,6 +135,8 @@ describe("document chat", () => {
     await waitFor(() => {
       expect(within(region).getByText(/could not be used/)).toBeInTheDocument();
     });
+    await user.type(box, "Three?{Enter}");
+    expect(await within(region).findByText(/Could not reach the server/)).toBeInTheDocument();
   });
 
   it("ignores an answer cancelled by leaving the page", async () => {

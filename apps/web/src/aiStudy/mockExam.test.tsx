@@ -235,6 +235,35 @@ describe("mock exam", () => {
     expect(submits[0]?.body).toEqual({ answers: [{ question_id: "q2", answer: "Water moves" }] });
   });
 
+  it("sends the answers once when time runs out during a submission", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let release: (() => void) | null = null;
+    const calls = mockApi({
+      ...me,
+      "POST /decks/d1/mock-exam": {
+        status: 201,
+        body: exam({ time_limit_seconds: 60, deadline: "2026-01-01T10:01:00Z" }),
+      },
+      "POST /mock-exams/e1/submit": () =>
+        new Promise((resolve) => {
+          release = () => {
+            resolve({ body: RESULT });
+          };
+        }),
+    });
+    renderApp("/decks/d1/exam");
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    await startExam(user);
+    await user.click(await screen.findByRole("button", { name: "Submit for grading" }));
+    expect(screen.getByText("The AI is grading your answers.")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(61_000);
+    });
+    (release as unknown as () => void)();
+    expect(await screen.findByRole("heading", { name: "Your score: 40%" })).toBeInTheDocument();
+    expect(calls.filter((c) => c.path === "/mock-exams/e1/submit")).toHaveLength(1);
+  });
+
   it("words the time left without counting seconds", () => {
     expect(timeLeftText(0)).toBe("Time is up");
     expect(timeLeftText(30_000)).toBe("Less than a minute left");

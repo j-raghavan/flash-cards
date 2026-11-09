@@ -66,12 +66,8 @@ export interface ChatAnswer {
 }
 
 export const deckChat = {
-  ask: (deckId: string, question: string, signal?: AbortSignal) =>
-    request<ChatAnswer>(`/decks/${id(deckId)}/chat`, {
-      method: "POST",
-      json: { question },
-      ...(signal === undefined ? {} : { signal }),
-    }),
+  ask: (deckId: string, question: string, signal: AbortSignal) =>
+    request<ChatAnswer>(`/decks/${id(deckId)}/chat`, { method: "POST", json: { question }, signal }),
 };
 
 // --- deck summary ---
@@ -81,11 +77,8 @@ export interface DeckSummary {
   key_points: string[];
 }
 
-export const summarizeDeck = (deckId: string, signal?: AbortSignal) =>
-  request<DeckSummary>(`/decks/${id(deckId)}/summary`, {
-    method: "POST",
-    ...(signal === undefined ? {} : { signal }),
-  });
+export const summarizeDeck = (deckId: string, signal: AbortSignal) =>
+  request<DeckSummary>(`/decks/${id(deckId)}/summary`, { method: "POST", signal });
 
 // --- typed-answer evaluation ---
 
@@ -98,12 +91,8 @@ export interface Evaluation {
   explanation: string;
 }
 
-export const evaluateAnswer = (cardId: string, answer: string, signal?: AbortSignal) =>
-  request<Evaluation>(`/cards/${id(cardId)}/evaluate`, {
-    method: "POST",
-    json: { answer },
-    ...(signal === undefined ? {} : { signal }),
-  });
+export const evaluateAnswer = (cardId: string, answer: string, signal: AbortSignal) =>
+  request<Evaluation>(`/cards/${id(cardId)}/evaluate`, { method: "POST", json: { answer }, signal });
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
   correct: "Correct",

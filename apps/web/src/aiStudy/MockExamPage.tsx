@@ -188,7 +188,7 @@ function ExamForm({
   onGraded,
 }: {
   exam: MockExam;
-  onGraded: (result: ExamResult, answers: Record<string, string>) => void;
+  onGraded: (exam: MockExam, result: ExamResult, answers: Record<string, string>) => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -227,7 +227,7 @@ function ExamForm({
       .filter((a) => a.answer !== "");
     mockExams.submit(exam.id, payload).then(
       (result) => {
-        onGraded(result, given);
+        onGraded(exam, result, given);
       },
       (failure: unknown) => {
         sending.current = false;
@@ -379,10 +379,8 @@ export function MockExamPage() {
   const [stage, setStage] = useState<Stage>({ name: "setup" });
 
   const onGraded = useCallback(
-    (result: ExamResult, answers: Record<string, string>) => {
-      setStage((current) =>
-        current.name === "exam" ? { name: "result", exam: current.exam, result, answers } : current,
-      );
+    (exam: MockExam, result: ExamResult, answers: Record<string, string>) => {
+      setStage({ name: "result", exam, result, answers });
     },
     [],
   );
