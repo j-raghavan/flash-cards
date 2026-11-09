@@ -184,10 +184,16 @@ def test_field_sources_follow_renames_and_keep_unchanged_names() -> None:
     assert moved == (("Term", "chat"), ("Meaning", "cat"), ("Word", ""), ("Notes", ""))
 
 
+def test_fields_can_swap_names() -> None:
+    sources = field_sources(("A", "B"), ("A", "B"), {"A": "B", "B": "A"})
+    assert sources == {"A": "B", "B": "A"}
+
+
 @pytest.mark.parametrize(
     ("renamed", "message"),
     [
         ({"Nope": "Term"}, "not a field"),
+        ({"Word": "Meaning"}, "another field that is kept"),
         ({"Word": "Elsewhere"}, "one distinct"),
         ({"Word": "Term", "Meaning": "Term"}, "one distinct"),
     ],
@@ -202,6 +208,11 @@ def test_editing_keeps_what_is_omitted() -> None:
     renamed, sources = edit_note_type(vocab, name="Words")
     assert renamed.name == "Words" and renamed.templates == vocab.templates
     assert sources == {"Word": "Word", "Meaning": "Meaning", "Example": "Example"}
+
+
+def test_a_rename_needs_the_new_field_list() -> None:
+    with pytest.raises(InvalidNoteType, match="new list of fields"):
+        edit_note_type(_vocab(), renamed={"Word": "Meaning"})
 
 
 def test_editing_fields_rechecks_the_existing_templates() -> None:

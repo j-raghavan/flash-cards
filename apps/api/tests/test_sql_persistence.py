@@ -784,3 +784,24 @@ def _tiny_png() -> bytes:
         return bytes(page.get_pixmap().tobytes("png"))
     finally:
         doc.close()
+
+
+async def test_locking_notes_returns_the_committed_row_not_a_cached_one(
+    engine: AsyncEngine,
+) -> None:
+    from flashcards.domain.notes import Note, NoteType
+
+    sm = create_sessionmaker(engine)
+    note = Note(
+        id="n1", owner_id="alice", deck_id="d1", note_type=NoteType.BASIC,
+        fields=(("front", "old"), ("back", "a")), created_at=_now(),
+    )
+    async with sm() as s, s.begin():
+        await SqlDeckRepository(s).add(_mk_deck())
+        await SqlNoteRepository(s).add(note)
+    async with sm() as reader, reader.begin():
+        assert await SqlNoteRepository(reader).get("n1") == note  # cached in this session
+        async with sm() as writer, writer.begin():
+            await SqlNoteRepository(writer).update(note.with_fields((("front", "new"),)))
+        locked = await SqlNoteRepository(reader).lock_many(["n1"])
+        assert locked[0].fields == (("front", "new"),)

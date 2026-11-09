@@ -327,6 +327,9 @@ class SqlNoteRepository:
                 .where(NoteRow.id.in_(ordered[start : start + _IN_CHUNK]))
                 .order_by(NoteRow.id)
                 .with_for_update()
+                # The rows as committed once the lock is ours, not as an earlier
+                # read in this session cached them (a stale copy would be written back).
+                .execution_options(populate_existing=True)
             )
             notes += [note_from_row(row) for row in rows]
         return notes

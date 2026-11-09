@@ -186,7 +186,10 @@ def build_templates(
     """Validate the requested templates and give each a stable ordinal.
 
     A spec with an ordinal keeps that existing template's ordinal (and so its
-    cards); a spec without one gets a fresh ordinal above any used before.
+    cards); a spec without one gets a fresh ordinal above every current and
+    kept template, so it never takes over the cards of another template. An
+    ordinal freed by a template removed in an earlier edit (whose cards were
+    purged with it) may be given out again.
     """
     if not 0 < len(specs) <= MAX_TEMPLATES:
         raise InvalidNoteType(f"a note type has 1 to {MAX_TEMPLATES} templates")
@@ -260,6 +263,9 @@ def field_sources(
     targets = list(renamed.values())
     if any(target not in new for target in targets) or len(set(targets)) != len(targets):
         raise InvalidNoteType("each field can be renamed to one distinct new field")
+    # Renaming onto a field that keeps its own values would silently drop them.
+    if any(target in old and target not in renamed for target in targets):
+        raise InvalidNoteType("a field cannot be renamed to another field that is kept")
     by_target = {target: source for source, target in renamed.items()}
     return {
         name: by_target.get(name, name if name in old and name not in renamed else None)
@@ -281,6 +287,8 @@ def edit_note_type(
     against the new fields, so renaming a field the templates use needs new
     templates in the same edit.
     """
+    if fields is None and renamed:
+        raise InvalidNoteType("renaming fields needs the new list of fields")
     field_names = note_type.fields if fields is None else _validate_field_names(fields)
     sources = field_sources(note_type.fields, field_names, renamed or {})
     if templates is None:

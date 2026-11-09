@@ -105,6 +105,9 @@ class NoteTypeService:
         edited, sources = edit_note_type(
             current, name=name, fields=fields, renamed=renamed, templates=templates
         )
+        if fields is None and templates is None:  # a rename leaves every card as it is
+            await self._note_types.update(edited)
+            return edited
         listed = await self._note_repo.list_for_note_type(note_type_id)
         plan: list[tuple[Note, list[int]]] = []
         for note in await self._note_repo.lock_many([n.id for n in listed]):
