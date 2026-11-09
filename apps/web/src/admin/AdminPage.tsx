@@ -16,6 +16,7 @@ import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { QuotasPanel } from "./QuotasPanel";
 import { UsagePanel } from "./UsagePanel";
+import { UserQuotaEditor } from "./UserQuota";
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -46,8 +47,14 @@ function UserRow({
   const action = useSubmit();
   const [note, setNote] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [quotaOpen, setQuotaOpen] = useState(false);
+  const quotaButton = useRef<HTMLButtonElement>(null);
+  const closeQuota = (): void => {
+    setQuotaOpen(false);
+    quotaButton.current?.focus();
+  };
 
-  const act = (run: () => Promise<AdminUser>, done: string): void => {
+  const act =(run: () => Promise<AdminUser>, done: string): void => {
     setNote(null);
     void action.run(async () => {
       onChanged(await run());
@@ -56,92 +63,120 @@ function UserRow({
   };
 
   return (
-    <tr>
-      <th scope="row">
-        {account.email}
-        {self ? <span className="muted"> (you)</span> : null}
-      </th>
-      <td>
-        <select
-          aria-label={`Role of ${account.email}`}
-          value={account.role}
-          disabled={self || action.busy}
-          onChange={(event) => {
-            const role = event.target.value as Role;
-            act(() => admin.setRole(account.id, role), `Role set to ${role}.`);
-          }}
-        >
-          <option value="member">Member</option>
-          <option value="admin">Admin</option>
-        </select>
-      </td>
-      <td>
-        {account.suspended ? "Suspended" : "Active"}
-        {account.email_verified ? "" : ", email not confirmed"}
-      </td>
-      <td>{formatDay(account.created_at)}</td>
-      <td>
-        {self ? null : (
+    <>
+      <tr>
+        <th scope="row">
+          {account.email}
+          {self ? <span className="muted"> (you)</span> : null}
+        </th>
+        <td>
+          <select
+            aria-label={`Role of ${account.email}`}
+            value={account.role}
+            disabled={self || action.busy}
+            onChange={(event) => {
+              const role = event.target.value as Role;
+              act(() => admin.setRole(account.id, role), `Role set to ${role}.`);
+            }}
+          >
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+        </td>
+        <td>
+          {account.suspended ? "Suspended" : "Active"}
+          {account.email_verified ? "" : ", email not confirmed"}
+        </td>
+        <td>{formatDay(account.created_at)}</td>
+        <td>
           <div className="row">
-            {account.suspended ? (
-              <button
-                type="button"
-                className="button"
-                disabled={action.busy}
-                aria-label={`Unsuspend ${account.email}`}
-                onClick={() => {
-                  act(() => admin.unsuspend(account.id), "Unsuspended.");
-                }}
-              >
-                Unsuspend
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="button"
-                disabled={action.busy}
-                aria-label={`Suspend ${account.email}`}
-                onClick={() => {
-                  act(() => admin.suspend(account.id), "Suspended; their sessions have ended.");
-                }}
-              >
-                Suspend
-              </button>
-            )}
             <button
               type="button"
               className="button"
-              disabled={action.busy}
-              aria-label={`Unlock sign-in for ${account.email}`}
+              ref={quotaButton}
+              aria-expanded={quotaOpen}
+              aria-controls={quotaOpen ? `quota-row-${account.id}` : undefined}
+              aria-label={`AI quota for ${account.email}`}
               onClick={() => {
-                act(() => admin.unlock(account.id), "Sign-in unlocked.");
-              }}
-            >
-              Unlock
-            </button>
-            <ConfirmButton
-              label={`Delete ${account.email}`}
-              confirmLabel="Delete account"
-              prompt={`Delete ${account.email} and all their decks, cards and history? This cannot be undone.`}
-              onConfirm={async () => {
-                setRemoveError(null);
-                try {
-                  await admin.removeUser(account.id);
-                  onRemoved(account.id);
-                } catch (failure) {
-                  setRemoveError(describeError(failure));
+                if (quotaOpen) {
+                  closeQuota();
+                } else {
+                  setQuotaOpen(true);
                 }
               }}
-            />
+            >
+              AI quota
+            </button>
+            {self ? null : (
+              <>
+                {account.suspended ? (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={action.busy}
+                    aria-label={`Unsuspend ${account.email}`}
+                    onClick={() => {
+                      act(() => admin.unsuspend(account.id), "Unsuspended.");
+                    }}
+                  >
+                    Unsuspend
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={action.busy}
+                    aria-label={`Suspend ${account.email}`}
+                    onClick={() => {
+                      act(() => admin.suspend(account.id), "Suspended; their sessions have ended.");
+                    }}
+                  >
+                    Suspend
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="button"
+                  disabled={action.busy}
+                  aria-label={`Unlock sign-in for ${account.email}`}
+                  onClick={() => {
+                    act(() => admin.unlock(account.id), "Sign-in unlocked.");
+                  }}
+                >
+                  Unlock
+                </button>
+                <ConfirmButton
+                  label={`Delete ${account.email}`}
+                  confirmLabel="Delete account"
+                  prompt={`Delete ${account.email} and all their decks, cards and history? This cannot be undone.`}
+                  onConfirm={async () => {
+                    setRemoveError(null);
+                    try {
+                      await admin.removeUser(account.id);
+                      onRemoved(account.id);
+                    } catch (failure) {
+                      setRemoveError(describeError(failure));
+                    }
+                  }}
+                />
+              </>
+            )}
           </div>
-        )}
-        <span role="status" className="muted">
-          {note}
-        </span>
-        <ErrorText message={action.error} />
-        <ErrorText message={removeError} />
-      </td>
-    </tr>
+          <span role="status" className="muted">
+            {note}
+          </span>
+          <ErrorText message={action.error} />
+          <ErrorText message={removeError} />
+        </td>
+      </tr>
+      {quotaOpen ? (
+        <tr id={`quota-row-${account.id}`}>
+          <td colSpan={5}>
+            <UserQuotaEditor account={account} onClose={closeQuota} />
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 

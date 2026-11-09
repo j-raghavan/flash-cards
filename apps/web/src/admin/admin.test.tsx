@@ -73,7 +73,7 @@ describe("admin console", () => {
     const own = (await screen.findByText("root@example.com")).closest("tr") as HTMLElement;
     expect(within(own).getByText("(you)")).toBeInTheDocument();
     expect(within(own).getByRole("combobox")).toBeDisabled();
-    expect(within(own).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(own).getAllByRole("button").map((b) => b.textContent)).toEqual(["AI quota"]);
     expect(screen.getByText("Active, email not confirmed")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Role of bob@example.com"), "admin");

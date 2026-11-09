@@ -44,9 +44,24 @@ export interface InstanceQuotas {
   monthly_spend_cap_micro_usd: number | null;
 }
 
+export interface UserQuota {
+  user_id: string;
+  period: string;
+  /** The limit in force: the override, or the instance default without one. */
+  monthly_pages: number;
+  override: number | null;
+  used_pages: number;
+}
+
+const id = encodeURIComponent;
+
 export const adminUsage = {
   quotas: () => request<InstanceQuotas>("/admin/quotas"),
   setQuotas: (quotas: InstanceQuotas) => request<InstanceQuotas>("/admin/quotas", { method: "PUT", json: quotas }),
+  userQuota: (userId: string) => request<UserQuota>(`/admin/users/${id(userId)}/quota`),
+  /** null clears the override, so the instance default applies. */
+  setUserQuota: (userId: string, monthlyPages: number | null) =>
+    request<UserQuota>(`/admin/users/${id(userId)}/quota`, { method: "PUT", json: { monthly_pages: monthlyPages } }),
   /** The month's usage; null asks for the current month. */
   usage: (period: string | null) =>
     request<UsageReport>(period === null ? "/admin/usage" : `/admin/usage?${new URLSearchParams({ period }).toString()}`),
