@@ -28,6 +28,7 @@ from flashcards.domain.ports import (
     DraftCardRepository,
     LLMProvider,
     ObjectStore,
+    UnitOfWork,
 )
 from flashcards.domain.sources import ExtractedPage, PageKind
 
@@ -43,8 +44,10 @@ class CardGenerationService:
         extractor: DocumentExtractor,
         llm: LLMProvider,
         clock: Clock,
+        unit_of_work: UnitOfWork,
         max_pages: int = 20,
     ) -> None:
+        self._uow = unit_of_work
         self._jobs = jobs
         self._drafts = drafts
         self._store = store
@@ -57,13 +60,18 @@ class CardGenerationService:
         job = await self._jobs.try_claim(job_id, self._clock.now())
         if job is None:
             return  # already running, finished, or gone: never process twice
+        # Progress is committed as it happens (ADR 0012), so progress events and
+        # GET /ai/jobs/{id} see it, and the job's row is not locked while the slow
+        # LLM calls run: a cancel or retry never has to wait for the whole job.
+        await self._uow.commit()
         try:
             await self._process(job)
         except Exception as exc:  # any failure is captured on the job, never raised
-            # Fail the latest job state, not the stale claimed one, so the progress
-            # _process persisted (completed_units, total_units) survives the failure
-            # and a retry can resume. Only a still-RUNNING job can go to FAILED, which
-            # it always is here (a job it finishes any other way returns, never raises).
+            # Discard the failed page's partial work (its drafts were not counted),
+            # then fail the latest committed state, so completed_units and
+            # total_units survive and a retry resumes without duplicating drafts.
+            # Only a still-RUNNING job can go to FAILED, which it always is here.
+            await self._uow.rollback()
             current = await self._jobs.get(job_id)
             if current is None or current.status is not JobStatus.RUNNING:
                 return  # pragma: no cover - defensive: the claimed job is RUNNING here
@@ -91,6 +99,7 @@ class CardGenerationService:
         # attempt; resume from there so their drafts are not regenerated and duplicated.
         resume_from = job.completed_units
         await self._jobs.update(job.with_total(len(pages), self._clock.now()))
+        await self._uow.commit()
 
         for index, page in enumerate(pages):
             if index < resume_from:
@@ -114,6 +123,7 @@ class CardGenerationService:
                 await self._jobs.update(latest.cancelled(self._clock.now()))
                 return  # this page's drafts are kept; later pages are not generated
             await self._jobs.update(latest.advanced(self._clock.now()))
+            await self._uow.commit()  # this page's drafts and its progress, together
 
         final = await self._jobs.get(job.id)
         if final is None:

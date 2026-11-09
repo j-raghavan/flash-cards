@@ -92,14 +92,37 @@ class FakeLLM:
         )
 
 
+class RecordingUnitOfWork:
+    """Records commits and rollbacks with the job's progress at that moment."""
+
+    def __init__(self, jobs: InMemoryAiJobRepository | None = None) -> None:
+        self.jobs = jobs
+        self.log: list[str] = []
+
+    async def _state(self) -> str:
+        if self.jobs is None:
+            return ""
+        job = (await self.jobs.list_for_owner(ALICE))[0]
+        return f"{job.status.value}:{job.completed_units}/{job.total_units}"
+
+    async def commit(self) -> None:
+        self.log.append(f"commit {await self._state()}")
+
+    async def rollback(self) -> None:
+        self.log.append(f"rollback {await self._state()}")
+
+
 def _service(
     jobs: InMemoryAiJobRepository,
     drafts: InMemoryDraftCardRepository,
     store: InMemoryObjectStore,
     extractor: FakeExtractor,
     llm: FakeLLM,
+    uow: RecordingUnitOfWork | None = None,
 ) -> CardGenerationService:
-    return CardGenerationService(jobs, drafts, store, extractor, llm, FakeClock())
+    return CardGenerationService(
+        jobs, drafts, store, extractor, llm, FakeClock(), uow or RecordingUnitOfWork()
+    )
 
 
 async def _seed_job(jobs: InMemoryAiJobRepository, store: InMemoryObjectStore) -> str:
@@ -300,3 +323,38 @@ async def test_run_is_a_noop_when_not_claimable() -> None:
     again = await jobs.get(job_id)
     assert again is not None and again.status is JobStatus.SUCCEEDED
     assert len(await drafts.list_for_job(job_id)) == 1
+
+
+async def test_progress_is_committed_as_each_page_finishes() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(), InMemoryDraftCardRepository(), InMemoryObjectStore()
+    )
+    uow = RecordingUnitOfWork(jobs)
+    pages = [_text_page(1), _text_page(2)]
+    service = _service(jobs, drafts, store, FakeExtractor(pages), FakeLLM(), uow)
+    job_id = await _seed_job(jobs, store)
+
+    await service.run(job_id)
+
+    # Claimed, sized, then each page committed with its drafts; the final state is
+    # committed by the unit of work that runs the worker.
+    assert uow.log == [
+        "commit running:0/0", "commit running:0/2", "commit running:1/2", "commit running:2/2"
+    ]
+    assert len(await drafts.list_for_job(job_id)) == 2
+
+
+async def test_a_failed_page_is_rolled_back_before_the_job_fails() -> None:
+    jobs, drafts, store = (
+        InMemoryAiJobRepository(), InMemoryDraftCardRepository(), InMemoryObjectStore()
+    )
+    uow = RecordingUnitOfWork(jobs)
+    pages = [_text_page(1), _text_page(2)]
+    service = _service(jobs, drafts, store, FakeExtractor(pages), FakeLLM(fail_on_call=2), uow)
+    job_id = await _seed_job(jobs, store)
+
+    await service.run(job_id)
+
+    assert uow.log[-1] == "rollback running:1/2"  # page 2's partial work is discarded
+    job = await jobs.get(job_id)
+    assert job is not None and job.status is JobStatus.FAILED and job.completed_units == 1

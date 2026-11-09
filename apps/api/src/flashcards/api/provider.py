@@ -42,6 +42,7 @@ from flashcards.adapters.sql import (
     SqlScheduleRepository,
     SqlSessionRepository,
     SqlShareLinkRepository,
+    SqlUnitOfWork,
     SqlUserRepository,
     SqlUserTokenRepository,
 )
@@ -56,6 +57,22 @@ from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
+
+
+class _AfterCommitQueue:
+    """Holds a unit of work's enqueued jobs until its transaction commits."""
+
+    def __init__(self, queue: InProcessJobQueue) -> None:
+        self._queue = queue
+        self._pending: list[str] = []
+
+    async def enqueue(self, job_id: str) -> None:
+        self._pending.append(job_id)
+
+    async def release(self) -> None:
+        for job_id in self._pending:
+            await self._queue.enqueue(job_id)
+        self._pending.clear()
 
 TOKEN_BYTES = 32
 
@@ -100,45 +117,58 @@ def sql_provider(
     provider_mailer = mailer or LogMailer(show_content=False)
 
     async def provider() -> AsyncIterator[Container]:
-        async with sessionmaker() as session, session.begin():
-            yield build_services(
-                Repositories(
-                    clock=clock,
-                    hasher=hasher,
-                    scheduler=scheduler,
-                    dummy_hash=dummy_hash,
-                    invites=SqlInviteRepository(session),
-                    users=SqlUserRepository(session),
-                    sessions=SqlSessionRepository(session),
-                    decks=SqlDeckRepository(session),
-                    notes=SqlNoteRepository(session),
-                    cards=SqlCardRepository(session),
-                    schedules=SqlScheduleRepository(session),
-                    review_logs=SqlReviewLogRepository(session),
-                    ai_jobs=SqlAiJobRepository(session),
-                    draft_cards=SqlDraftCardRepository(session),
-                    object_store=SqlObjectStore(session),
-                    quotas=SqlQuotaRepository(session),
-                    extractor=extractor,
-                    job_queue=job_queue,
-                    llm=provider_llm,
-                    goals=SqlGoalRepository(session),
-                    package_reader=package_reader,
-                    media=SqlMediaRepository(session),
-                    media_sniffer=media_sniffer,
-                    mock_exams=SqlMockExamRepository(session),
-                    transcripts=transcripts,
-                    passages=SqlPassageRepository(session),
-                    # Same counter table as page quota, separate daily period keys.
-                    ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
-                    share_links=SqlShareLinkRepository(session),
-                    clone_quota=SqlQuotaRepository(session, limit=DEFAULT_DAILY_CLONE_CARDS),
-                    audit_events=SqlAuditRepository(session),
-                    login_throttle=SqlLoginThrottleRepository(session),
-                    user_tokens=SqlUserTokenRepository(session),
-                    mailer=provider_mailer,
-                    public_base_url=public_base_url,
+        # One unit of work: commit on success, roll back on any error. Explicit
+        # commit/rollback (instead of session.begin()) lets long work such as the
+        # generation worker commit progress midway through SqlUnitOfWork.
+        async with sessionmaker() as session:
+            after_commit = _AfterCommitQueue(job_queue)
+            try:
+                yield build_services(
+                    Repositories(
+                        clock=clock,
+                        hasher=hasher,
+                        scheduler=scheduler,
+                        dummy_hash=dummy_hash,
+                        invites=SqlInviteRepository(session),
+                        users=SqlUserRepository(session),
+                        sessions=SqlSessionRepository(session),
+                        decks=SqlDeckRepository(session),
+                        notes=SqlNoteRepository(session),
+                        cards=SqlCardRepository(session),
+                        schedules=SqlScheduleRepository(session),
+                        review_logs=SqlReviewLogRepository(session),
+                        ai_jobs=SqlAiJobRepository(session),
+                        draft_cards=SqlDraftCardRepository(session),
+                        object_store=SqlObjectStore(session),
+                        quotas=SqlQuotaRepository(session),
+                        extractor=extractor,
+                        job_queue=after_commit,
+                        llm=provider_llm,
+                        goals=SqlGoalRepository(session),
+                        package_reader=package_reader,
+                        media=SqlMediaRepository(session),
+                        media_sniffer=media_sniffer,
+                        mock_exams=SqlMockExamRepository(session),
+                        transcripts=transcripts,
+                        passages=SqlPassageRepository(session),
+                        # Same counter table as page quota, separate daily period keys.
+                        ai_calls=SqlQuotaRepository(session, limit=DEFAULT_DAILY_AI_CALLS),
+                        share_links=SqlShareLinkRepository(session),
+                        clone_quota=SqlQuotaRepository(session, limit=DEFAULT_DAILY_CLONE_CARDS),
+                        audit_events=SqlAuditRepository(session),
+                        login_throttle=SqlLoginThrottleRepository(session),
+                        user_tokens=SqlUserTokenRepository(session),
+                        mailer=provider_mailer,
+                        public_base_url=public_base_url,
+                        unit_of_work=SqlUnitOfWork(session),
+                    )
                 )
-            )
+            except BaseException:
+                await session.rollback()
+                raise
+            await session.commit()
+            # Jobs are handed to the worker only once they are committed, so it can
+            # never look for a job its own session cannot see yet.
+            await after_commit.release()
 
     return engine, provider, job_queue

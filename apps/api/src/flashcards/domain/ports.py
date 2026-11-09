@@ -335,6 +335,14 @@ class AiJobRepository(Protocol):
         """
         ...
 
+    async def try_retry(self, job_id: str, now: datetime) -> AiJob | None:
+        """Atomically re-queue a FAILED job with attempts left (AiJob.retried).
+
+        Returns the queued job, or None when it is not retryable, so two concurrent
+        retries can never both apply. A SQL adapter uses one conditional UPDATE.
+        """
+        ...
+
     async def request_cancel(self, job_id: str, now: datetime) -> bool:
         """Flag a non-terminal job for cancellation; return whether it changed."""
         ...
@@ -364,6 +372,21 @@ class DraftCardRepository(Protocol):
     async def delete(self, record_id: str) -> None: ...
 
     async def delete_for_job(self, job_id: str) -> None: ...
+
+
+class UnitOfWork(Protocol):
+    """Lets long-running work make its progress visible before it finishes."""
+
+    async def commit(self) -> None:
+        """Make everything so far durable and visible to other sessions.
+
+        Later work continues in a new transaction of the same unit.
+        """
+        ...
+
+    async def rollback(self) -> None:
+        """Discard everything since the last commit."""
+        ...
 
 
 class JobQueue(Protocol):

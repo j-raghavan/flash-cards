@@ -7,7 +7,7 @@ providers only; nothing in the API routes or the application services moves.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from flashcards.adapters.apkg import ApkgReader
 from flashcards.adapters.extraction import PyMuPDFExtractor
@@ -37,6 +37,7 @@ from flashcards.adapters.memory import (
     InMemoryShareLinkRepository,
     InMemoryUserRepository,
     InMemoryUserTokenRepository,
+    NullUnitOfWork,
     SystemClock,
 )
 from flashcards.adapters.passwords import Argon2PasswordHasher
@@ -99,6 +100,7 @@ from flashcards.domain.ports import (
     SessionRepository,
     ShareLinkRepository,
     TranscriptProvider,
+    UnitOfWork,
     UserRepository,
     UserTokenRepository,
 )
@@ -143,6 +145,8 @@ class Repositories:
     dummy_hash: str | None = None
     # Where links in emails point (the web client).
     public_base_url: str = "http://localhost:5173"
+    # Lets the generation worker commit progress as it goes (ADR 0012).
+    unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +223,7 @@ def build_services(repos: Repositories) -> Container:
         repos.extractor,
         repos.llm,
         repos.clock,
+        repos.unit_of_work,
     )
     goal_service = GoalService(decks, repos.goals, repos.clock)
     planner = PlannerService(goal_service, repos.cards, repos.schedules, repos.clock)

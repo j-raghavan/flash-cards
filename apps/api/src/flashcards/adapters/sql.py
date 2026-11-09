@@ -503,6 +503,27 @@ class SqlAiJobRepository:
         )
         return aijob_from_row(row) if row is not None else None
 
+    async def try_retry(self, job_id: str, now: datetime) -> AiJob | None:
+        # Mirrors AiJob.retried in one conditional UPDATE, so concurrent retries
+        # cannot both re-queue the job or hand out an extra attempt.
+        row = await self._session.scalar(
+            update(AiJobRow)
+            .where(
+                AiJobRow.id == job_id,
+                AiJobRow.status == JobStatus.FAILED.value,
+                AiJobRow.attempt < AiJobRow.max_attempts,
+            )
+            .values(
+                status=JobStatus.QUEUED.value,
+                attempt=AiJobRow.attempt + 1,
+                error=None,
+                cancel_requested=False,
+                updated_at=now,
+            )
+            .returning(AiJobRow)
+        )
+        return aijob_from_row(row) if row is not None else None
+
     async def request_cancel(self, job_id: str, now: datetime) -> bool:
         result = await self._session.execute(
             update(AiJobRow)
@@ -911,3 +932,16 @@ class SqlUserTokenRepository:
 
     async def delete_for_user(self, user_id: str) -> None:
         await self._session.execute(delete(UserTokenRow).where(UserTokenRow.user_id == user_id))
+
+
+class SqlUnitOfWork:
+    """Commits or rolls back the session's current transaction mid-unit."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def commit(self) -> None:
+        await self._session.commit()
+
+    async def rollback(self) -> None:
+        await self._session.rollback()

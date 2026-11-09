@@ -7,7 +7,7 @@ import uuid
 
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.ai import Thoroughness
-from flashcards.domain.jobs import AiJob, JobNotFound, new_generation_job
+from flashcards.domain.jobs import AiJob, IllegalJobTransition, JobNotFound, new_generation_job
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
@@ -112,6 +112,19 @@ class GenerationRequestService:
         if job is None or job.owner_id != owner_id:
             raise JobNotFound(job_id)
         return job
+
+    async def retry(self, *, owner_id: str, job_id: str) -> AiJob:
+        """Queue a failed job again (ADR 0012); raises IllegalJobTransition otherwise.
+
+        The job resumes from the pages it already generated, so they are neither
+        generated nor charged again.
+        """
+        job = await self.get(owner_id=owner_id, job_id=job_id)
+        queued = await self._jobs.try_retry(job.id, self._clock.now())
+        if queued is None:
+            raise IllegalJobTransition(f"cannot retry from {job.status}")
+        await self._queue.enqueue(job.id)
+        return queued
 
     async def cancel(self, *, owner_id: str, job_id: str) -> None:
         await self.get(owner_id=owner_id, job_id=job_id)  # ownership check

@@ -174,3 +174,106 @@ async def test_quota_reserves_atomically_up_to_the_limit(engine: AsyncEngine) ->
 def test_sync_sessionmaker_type(engine: AsyncEngine) -> None:
     # create_sessionmaker returns an async_sessionmaker (guards the import wiring).
     assert isinstance(create_sessionmaker(engine), async_sessionmaker)
+
+
+async def test_try_retry_requeues_a_failed_job_once(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    job = _job()
+    async with sm() as s, s.begin():
+        await SqlAiJobRepository(s).add(job)
+        running = await SqlAiJobRepository(s).try_claim(job.id, NOW)
+        assert running is not None
+        assert await SqlAiJobRepository(s).try_retry(job.id, NOW) is None  # still running
+        await SqlAiJobRepository(s).update(running.failed("boom", NOW))
+
+    async with sm() as s, s.begin():
+        queued = await SqlAiJobRepository(s).try_retry(job.id, NOW)
+        assert queued is not None and queued.status is JobStatus.QUEUED
+        assert queued.attempt == job.attempt + 1 and queued.error is None
+        assert await SqlAiJobRepository(s).try_retry(job.id, NOW) is None  # only once
+
+    async with sm() as s, s.begin():  # out of attempts: fail the job at its last attempt
+        repo = SqlAiJobRepository(s)
+        last = await repo.get(job.id)
+        assert last is not None
+        await repo.update(_at_last_attempt(last))
+        assert await repo.try_retry(job.id, NOW) is None
+        assert await repo.try_retry("missing", NOW) is None
+
+
+def _at_last_attempt(job: AiJob) -> AiJob:
+    from dataclasses import replace
+
+    return replace(job, status=JobStatus.FAILED, attempt=job.max_attempts, error="boom")
+
+
+async def test_a_mid_unit_commit_is_visible_to_other_sessions(engine: AsyncEngine) -> None:
+    from flashcards.adapters.sql import SqlUnitOfWork
+
+    sm = create_sessionmaker(engine)
+    job = _job()
+    async with sm() as worker:
+        repo, uow = SqlAiJobRepository(worker), SqlUnitOfWork(worker)
+        await repo.add(job)
+        await uow.commit()
+        claimed = await repo.try_claim(job.id, NOW)
+        assert claimed is not None
+        await repo.update(claimed.with_total(3, NOW).advanced(NOW))
+        await uow.commit()
+
+        async with sm() as watcher:  # another session sees the committed progress
+            seen = await SqlAiJobRepository(watcher).get(job.id)
+            assert seen is not None and (seen.completed_units, seen.total_units) == (1, 3)
+
+        current = await repo.get(job.id)
+        assert current is not None
+        await repo.update(current.advanced(NOW))
+        await uow.rollback()  # uncommitted progress is discarded
+
+        async with sm() as watcher:
+            seen = await SqlAiJobRepository(watcher).get(job.id)
+            assert seen is not None and seen.completed_units == 1
+        await worker.commit()
+
+
+async def test_jobs_reach_the_worker_only_after_their_unit_commits(
+    engine: AsyncEngine, pg_url: str
+) -> None:
+    from flashcards.api.provider import sql_provider
+
+    sm = create_sessionmaker(engine)
+    failed = [_job(), _job()]
+    async with sm() as s, s.begin():
+        for job in failed:
+            await SqlAiJobRepository(s).add(job)
+            running = await SqlAiJobRepository(s).try_claim(job.id, NOW)
+            assert running is not None
+            await SqlAiJobRepository(s).update(running.failed("boom", NOW))
+
+    own_engine, provider, queue = sql_provider(pg_url)
+    seen: list[str] = []
+
+    async def record(job_id: str) -> None:
+        # The worker's own session must be able to see the job when it arrives.
+        async with sm() as s:
+            job = await SqlAiJobRepository(s).get(job_id)
+            seen.append(f"{job_id}:{job.status.value if job else 'missing'}")
+
+    queue.start(record)
+    try:
+        async for container in provider():
+            await container.generation.retry(owner_id="alice", job_id=failed[0].id)
+            await queue.join()
+            assert seen == []  # held back while the transaction is open
+        await queue.join()
+        assert seen == [f"{failed[0].id}:queued"]
+
+        with pytest.raises(RuntimeError):
+            async for container in provider():
+                await container.generation.retry(owner_id="alice", job_id=failed[1].id)
+                raise RuntimeError("the request failed")
+        await queue.join()
+        assert seen == [f"{failed[0].id}:queued"]  # a rolled-back retry never runs
+    finally:
+        await queue.stop()
+        await own_engine.dispose()
