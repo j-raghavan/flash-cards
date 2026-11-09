@@ -231,9 +231,9 @@ def test_oversized_collection_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
 # --- F-IMP-2: scheduling columns, review history and hardening -----------------
 
 FULL_CARDS = [
-    # nid, did, ord, id, type, queue, due, ivl, factor, reps, lapses, odid, flags
-    (10, 100, 0, 1000, 2, -1, 300, 20, 2300, 7, 1, 0, 0b1011),
-    (11, 100, 0, 1001, 0, 0, 1, 0, 0, 0, 0, 0, 0),
+    # nid, did, ord, id, type, queue, due, ivl, factor, reps, lapses, odid, odue, flags
+    (10, 100, 0, 1000, 2, -1, 300, 20, 2300, 7, 1, 0, 0, 0b1011),
+    (11, 100, 0, 1001, 0, 0, -99999, 0, 0, 0, 0, 200, 4, 0),
 ]
 REVLOG = [
     # id (ms), cid, ease, type
@@ -276,10 +276,10 @@ def _full_collection(
         (
             "CREATE TABLE cards (nid INTEGER, did INTEGER, ord INTEGER, id INTEGER, "
             "type INTEGER, queue INTEGER, due INTEGER, ivl INTEGER, factor INTEGER, "
-            "reps INTEGER, lapses INTEGER, odid INTEGER, flags INTEGER)",
+            "reps INTEGER, lapses INTEGER, odid INTEGER, odue INTEGER, flags INTEGER)",
             (),
         ),
-        ("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", FULL_CARDS),
+        ("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", FULL_CARDS),
     ]
     if with_row:
         statements.append(
@@ -303,6 +303,8 @@ def test_reads_scheduling_columns_history_and_creation_time() -> None:
     assert (review_card.card_type, review_card.queue, review_card.due) == (2, -1, 300)
     assert (review_card.interval, review_card.factor) == (20, 2300)
     assert (review_card.reps, review_card.lapses, review_card.flag) == (7, 1, 3)
+    borrowed = next(card for card in package.cards if card.id == 1001)
+    assert (borrowed.original_deck_id, borrowed.original_due) == (200, 4)
     # Only the history of cards in the package is kept, oldest first.
     assert [(r.card_id, r.ease, r.kind) for r in package.reviews] == [(1000, 3, 0), (1000, 1, 1)]
     assert package.history_truncated is False
@@ -370,6 +372,27 @@ def test_a_view_in_place_of_a_table_is_rejected() -> None:
     )
     with pytest.raises(UnsupportedPackage):
         ApkgReader().read(_apkg(collection))
+
+
+def test_newer_anki_format_is_refused_with_a_reason() -> None:
+    # Anki 2.1.50+ puts a stub collection.anki2 next to the real collection.anki21b.
+    data = _apkg(_collection(), name="collection.anki2", extra={"collection.anki21b": b"zstd"})
+    with pytest.raises(UnsupportedPackage, match="Support older Anki versions"):
+        ApkgReader().read(data)
+
+
+def test_meta_entry_is_not_counted_as_media() -> None:
+    package = ApkgReader().read(_apkg(_collection(), extra={"meta": b"\x08\x02", "0": b"x"}))
+    assert package.media_count == 1
+
+
+def test_deeply_nested_json_is_invalid() -> None:
+    buffer = io.BytesIO()
+    # Stored, not deflated, so the compression-ratio guard does not refuse it first.
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("collection.anki21", _collection(decks="[" * 50_000 + "]" * 50_000))
+    with pytest.raises(InvalidPackage):
+        ApkgReader().read(buffer.getvalue())
 
 
 def test_runaway_queries_are_interrupted(monkeypatch: pytest.MonkeyPatch) -> None:

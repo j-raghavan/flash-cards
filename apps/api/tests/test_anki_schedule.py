@@ -33,6 +33,7 @@ from flashcards.domain.anki_schedule import (
     factor_from_difficulty,
     rating_for,
     review_time,
+    revlog_kinds,
     schedule_from_sm2,
     sm2_from_schedule,
 )
@@ -125,6 +126,27 @@ def test_sm2_without_a_trustworthy_due_day_is_due_now(
 ) -> None:
     schedule = schedule_from_sm2("c1", card, created_at_s, NOW)
     assert schedule is not None and schedule.due_at == NOW
+
+
+def test_sm2_card_in_a_filtered_deck_uses_its_original_due() -> None:
+    # In a filtered deck `due` is a queue position; the home deck's due is `odue`.
+    card = _review_card(due=-100_000, original_deck_id=7, original_due=300)
+    schedule = schedule_from_sm2("c1", card, CRT, NOW)
+    assert schedule is not None and schedule.due_at == datetime(2026, 10, 28, tzinfo=UTC)
+
+
+def test_sm2_never_dates_a_review_before_anki_existed() -> None:
+    schedule = schedule_from_sm2("c1", _review_card(due=-99_999, interval=30), CRT, NOW)
+    assert schedule is not None
+    assert schedule.last_reviewed_at == datetime(2006, 1, 1, tzinfo=UTC)
+
+
+def test_revlog_kinds_follow_learning_review_and_relearning() -> None:
+    again, hard, good, easy = Rating.AGAIN, Rating.HARD, Rating.GOOD, Rating.EASY
+    assert revlog_kinds([]) == []
+    assert revlog_kinds([again, hard, good, hard, again, again, easy, good]) == [
+        0, 0, 0, 1, 1, 2, 2, 1,
+    ]
 
 
 def test_sm2_caps_a_huge_interval() -> None:
@@ -223,6 +245,7 @@ def test_learning_and_relearning_cards_export_a_timestamp_due() -> None:
     assert learning.card_type == TYPE_LEARNING and learning.queue == QUEUE_LEARNING
     assert learning.due == int(datetime(2026, 11, 20, 8, tzinfo=UTC).timestamp())
     assert learning.interval == 0 and learning.factor == DEFAULT_FACTOR
+    assert learning.left == 1001  # one step left, so Anki keeps it learning
 
     relearning = sm2_from_schedule(
         _schedule(ScheduleState.RELEARNING),

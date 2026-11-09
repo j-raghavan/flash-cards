@@ -237,7 +237,7 @@ async def test_selection_by_sub_deck() -> None:
 
     report = await fx.run(ImportSelection(decks=("LANGUAGES",)))
 
-    assert (report.notes_imported, report.notes_not_selected) == (2, 1)
+    assert (report.notes_imported, report.notes_not_selected) == (2, 2)  # g3, and card-less g4
     assert {deck.name for deck in await fx.decks.list_decks(ALICE)} == {"Languages", "Spanish"}
     assert report.unsupported == ()  # a card-less note cannot be in a selected deck
 
@@ -256,7 +256,7 @@ async def test_selection_by_deck_and_tag_together() -> None:
 
     report = await fx.run(ImportSelection(decks=("Biology",), tags=("verbs",)))
 
-    assert (report.notes_imported, report.notes_not_selected) == (1, 2)
+    assert (report.notes_imported, report.notes_not_selected) == (1, 3)
 
 
 def _history_package() -> AnkiPackage:
@@ -288,7 +288,7 @@ def _history_package() -> AnkiPackage:
         reviews=(
             AnkiReview(11, _ms(10), 3, 0),
             AnkiReview(11, _ms(9), 1, 1),
-            AnkiReview(11, _ms(9.5), 0, 4),  # manual: skipped
+            AnkiReview(11, _ms(9.5), 0, 4),  # manual (Forget): skipped, and a reset
             AnkiReview(11, _ms(5), 3, 2),
             AnkiReview(11, _ms(-1), 3, 1),  # in the future: skipped
             AnkiReview(14, _ms(30), 4, 0),  # history of a card reset to new
@@ -325,8 +325,9 @@ async def test_history_is_replayed_and_state_restored() -> None:
     replayed = card_of("Q1")
     assert replayed.is_suspended and replayed.flag == 3
     schedule = await fx.schedules.get(replayed.id)
-    expected = fx.scheduler.new_schedule(replayed.id, NOW - timedelta(days=10))
-    for rating, days_ago in ((Rating.GOOD, 10), (Rating.AGAIN, 9), (Rating.GOOD, 5)):
+    # Only the answers after the Forget shape the schedule; all of them are history.
+    expected = fx.scheduler.new_schedule(replayed.id, NOW - timedelta(days=9))
+    for rating, days_ago in ((Rating.AGAIN, 9), (Rating.GOOD, 5)):
         expected = fx.scheduler.review(expected, rating, NOW - timedelta(days=days_ago))
     assert schedule == expected
     logs = [log for log in await fx.logs.list_for_owner(ALICE) if log.card_id == replayed.id]
@@ -380,6 +381,52 @@ async def test_filtered_deck_without_an_original_deck_falls_back() -> None:
     assert report.unsupported == (
         UnsupportedConstruct(UnsupportedKind.FILTERED_DECK, 2, ("Cram",)),
     )
+
+
+async def test_a_card_reset_with_no_answers_since_uses_its_sm2_columns() -> None:
+    package = AnkiPackage(
+        note_types={1: BASIC},
+        decks={1: AnkiDeck(1, "Deck")},
+        notes=(AnkiNote("g1", 1, ("Q", "A"), ()),),
+        cards=(AnkiCard("g1", 1, 0, id=1, card_type=TYPE_REVIEW, interval=6, due=300),),
+        reviews=(AnkiReview(1, _ms(20), 3, 1), AnkiReview(1, _ms(10), 0, 4)),
+        created_at_s=CRT,
+    )
+    fx = _Fixture(package)
+
+    report = await fx.run()
+
+    (card,) = await fx.cards_in("Deck")
+    schedule = await fx.schedules.get(card.id)
+    assert schedule is not None and schedule.stability == 6.0  # SM-2, not the old answer
+    assert report.reviews_imported == 1 and report.cards_scheduled == 1
+
+
+async def test_duplicate_guids_and_huge_cloze_numbers_are_skipped() -> None:
+    package = AnkiPackage(
+        note_types={1: BASIC, 2: CLOZE},
+        decks={1: AnkiDeck(1, "Deck")},
+        notes=(
+            AnkiNote("g1", 1, ("Q", "A"), ()),
+            AnkiNote("g1", 1, ("same guid", "again"), ()),
+            AnkiNote("g2", 2, ("{{c1001::too many}}",), ()),
+            AnkiNote("g3", 2, ("{{c" + "9" * 5000 + "::unparseable}}",), ()),
+        ),
+        cards=(
+            AnkiCard("g1", 1, 0, id=1),
+            AnkiCard("g2", 1, 0, id=2),
+            AnkiCard("g3", 1, 0, id=3),
+        ),
+        reviews=(AnkiReview(1, _ms(2), 3, 0),),
+    )
+    for dry_run in (True, False):
+        report = await _Fixture(package).run(dry_run=dry_run)
+        assert (report.notes_imported, report.notes_skipped) == (1, 3)
+        assert report.reviews_imported == 1  # not counted twice for the duplicate
+        assert _kinds(report) == {
+            UnsupportedKind.DUPLICATE_NOTE: 1,
+            UnsupportedKind.INVALID_NOTE: 2,
+        }
 
 
 async def test_examples_are_unique_short_and_few() -> None:

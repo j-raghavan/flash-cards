@@ -12,9 +12,10 @@ than failing the whole import, so a mostly-importable deck still imports.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from flashcards.application.deck_service import DeckService
@@ -25,6 +26,7 @@ from flashcards.domain.anki import (
     AnkiNote,
     AnkiNoteType,
     AnkiPackage,
+    AnkiReview,
     ImportReport,
     ImportSelection,
     UnsupportedConstruct,
@@ -38,6 +40,7 @@ from flashcards.domain.anki import (
 )
 from flashcards.domain.anki_schedule import (
     QUEUE_SUSPENDED,
+    REVLOG_MANUAL,
     TYPE_NEW,
     rating_for,
     review_time,
@@ -67,14 +70,31 @@ _FALLBACK_DECK_NAME = "Imported"
 MAX_DECK_DEPTH = 8  # deeper Anki levels are kept in the name of the eighth
 _MAX_EXAMPLES = 3
 _MAX_EXAMPLE_LENGTH = 80
+# Our cards table stores ordinals as 32-bit integers, and no real note has anywhere
+# near this many cloze deletions; a larger number marks the note invalid.
+MAX_CLOZE_ORDINAL = 1_000
 
 History = tuple[tuple[Rating, datetime], ...]
 
 
 @dataclass(frozen=True, slots=True)
+class _CardHistory:
+    answers: History  # every valid answer, oldest first: imported as review logs
+    replay_from: int = 0  # answers before a manual reset (Forget) do not shape the schedule
+    skipped: int = 0  # revlog rows that are not answers, or have an implausible time
+
+    @property
+    def replayed(self) -> History:
+        return self.answers[self.replay_from :]
+
+
+_NO_HISTORY = _CardHistory(answers=())
+
+
+@dataclass(frozen=True, slots=True)
 class _PlannedCard:
     anki: AnkiCard
-    history: History  # valid answers, oldest first
+    history: _CardHistory
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,14 +160,19 @@ class ApkgImportService:
         selection: ImportSelection | None = None,
         dry_run: bool = False,
     ) -> ImportReport:
-        package = self._reader.read(data)
+        # Parsing, planning and replaying histories are CPU work on untrusted input;
+        # they run in a worker thread so one large import never stalls other requests.
+        package = await asyncio.to_thread(self._reader.read, data)
         now = self._clock.now()
-        plan = _plan(package, selection or ImportSelection(), now)
+        plan = await asyncio.to_thread(_plan, package, selection or ImportSelection(), now)
         if dry_run:
             return _report(plan, decks_created=len(_deck_paths(plan)), dry_run=True)
 
+        schedules = await asyncio.to_thread(
+            _schedules_for, self._scheduler, plan, package.created_at_s, now
+        )
         deck_ids = await self._create_decks(owner_id, _deck_paths(plan))
-        for planned in plan.notes:
+        for planned, planned_schedules in zip(plan.notes, schedules, strict=True):
             _note, cards = await self._notes.create_note(
                 owner_id=owner_id,
                 deck_id=deck_ids[planned.deck],
@@ -158,7 +183,8 @@ class ApkgImportService:
             for card in cards:
                 matched = planned.cards.get(card.ordinal)
                 if matched is not None:
-                    await self._restore_card(owner_id, card, matched, package, now)
+                    schedule = planned_schedules.get(card.ordinal)
+                    await self._restore_card(owner_id, card, matched, schedule, now)
         return _report(plan, decks_created=len(deck_ids), dry_run=False)
 
     async def _create_decks(
@@ -177,7 +203,7 @@ class ApkgImportService:
         owner_id: str,
         card: Card,
         matched: _PlannedCard,
-        package: AnkiPackage,
+        schedule: CardSchedule | None,
         now: datetime,
     ) -> None:
         flag = matched.anki.flag if 0 <= matched.anki.flag <= MAX_FLAG else 0
@@ -187,7 +213,7 @@ class ApkgImportService:
         if restored != card:
             await self._cards.update(restored)
 
-        for rating, reviewed_at in matched.history:
+        for rating, reviewed_at in matched.history.answers:
             await self._logs.append(
                 ReviewLog(
                     id=str(uuid.uuid4()),
@@ -197,22 +223,38 @@ class ApkgImportService:
                     reviewed_at=reviewed_at,
                 )
             )
-        schedule = self._schedule(card.id, matched, package.created_at_s, now)
         if schedule is not None:
-            await self._schedules.upsert(schedule)
+            await self._schedules.upsert(replace(schedule, card_id=card.id))
 
-    def _schedule(
-        self, card_id: str, matched: _PlannedCard, created_at_s: int | None, now: datetime
-    ) -> CardSchedule | None:
-        """Replay the history through our scheduler, or fall back to the SM-2 columns."""
-        if matched.anki.card_type == TYPE_NEW:
-            return None  # new (or reset to new) in Anki: it starts over here too
-        if not matched.history:
-            return schedule_from_sm2(card_id, matched.anki, created_at_s, now)
-        schedule = self._scheduler.new_schedule(card_id, matched.history[0][1])
-        for rating, reviewed_at in matched.history:
-            schedule = self._scheduler.review(schedule, rating, reviewed_at)
-        return schedule
+
+def _schedules_for(
+    scheduler: Scheduler, plan: _Plan, created_at_s: int | None, now: datetime
+) -> list[dict[int, CardSchedule]]:
+    """Each planned note's schedules by our ordinal (card ids are filled in later)."""
+    result: list[dict[int, CardSchedule]] = []
+    for planned in plan.notes:
+        schedules: dict[int, CardSchedule] = {}
+        for ordinal, matched in planned.cards.items():
+            schedule = _schedule(scheduler, matched, created_at_s, now)
+            if schedule is not None:
+                schedules[ordinal] = schedule
+        result.append(schedules)
+    return result
+
+
+def _schedule(
+    scheduler: Scheduler, matched: _PlannedCard, created_at_s: int | None, now: datetime
+) -> CardSchedule | None:
+    """Replay the history through our scheduler, or fall back to the SM-2 columns."""
+    if matched.anki.card_type == TYPE_NEW:
+        return None  # new (or reset to new) in Anki: it starts over here too
+    replayed = matched.history.replayed
+    if not replayed:
+        return schedule_from_sm2("", matched.anki, created_at_s, now)
+    schedule = scheduler.new_schedule("", replayed[0][1])
+    for rating, reviewed_at in replayed:
+        schedule = scheduler.review(schedule, rating, reviewed_at)
+    return schedule
 
 
 def _plan(package: AnkiPackage, selection: ImportSelection, now: datetime) -> _Plan:
@@ -220,22 +262,32 @@ def _plan(package: AnkiPackage, selection: ImportSelection, now: datetime) -> _P
     cards_by_guid: dict[str, list[AnkiCard]] = {}
     for card in package.cards:
         cards_by_guid.setdefault(card.note_guid, []).append(card)
-    history = _history_by_card(package, plan, now)
+    history = _history_by_card(package, now)
+    seen: set[str] = set()
 
     for note in package.notes:
+        if note.guid in seen:  # a hostile file could give two notes the same cards
+            plan.skipped += 1
+            plan.flag(UnsupportedKind.DUPLICATE_NOTE)
+            continue
+        seen.add(note.guid)
         tags = sanitize_tags(note.tags)
         if selection.tags and not any(has_tag(tags, wanted) for wanted in selection.tags):
             plan.not_selected += 1
             continue
         anki_cards = cards_by_guid.get(note.guid)
         if not anki_cards:
-            if not selection.decks:
+            if selection.decks:
+                plan.not_selected += 1  # in no deck, so in none of the selected ones
+            else:
                 plan.flag(UnsupportedKind.NOTE_WITHOUT_CARDS)
             continue  # a note with no card has nowhere to live
-        deck_name = _placement_deck(package, anki_cards[0], plan)
+        deck_name, borrowed_from = _placement_deck(package, anki_cards[0])
         if not in_selected_decks(deck_name, selection.decks):
             plan.not_selected += 1
             continue
+        if borrowed_from is not None:
+            plan.flag(UnsupportedKind.FILTERED_DECK, borrowed_from)
         note_type = package.note_types.get(note.note_type_id)
         if note_type is None:
             plan.skipped += 1
@@ -258,7 +310,7 @@ def _plan_note(
     tags: Tags,
     deck_name: str,
     anki_cards: list[AnkiCard],
-    history: dict[int, History],
+    history: dict[int, _CardHistory],
     plan: _Plan,
     now: datetime,
 ) -> _PlannedNote | None:
@@ -270,7 +322,9 @@ def _plan_note(
         return None
     try:
         ordinals = set(card_ordinals(our_type, fields))
-    except InvalidNote:
+        if max(ordinals) > MAX_CLOZE_ORDINAL:
+            raise InvalidNote("too many cloze deletions")
+    except (InvalidNote, ValueError):  # ValueError: a cloze number too long to parse
         plan.skipped += 1
         plan.flag(UnsupportedKind.INVALID_NOTE, note_type.name)
         return None
@@ -281,13 +335,15 @@ def _plan_note(
     extra = 0
     for anki_card in anki_cards:
         ordinal = our_ordinal(note_type, anki_card.ordinal)
+        card_history = history.get(anki_card.id, _NO_HISTORY)
         if ordinal is None or ordinal not in ordinals or ordinal in matched:
             extra += 1
-            plan.flag(UnsupportedKind.SKIPPED_REVIEWS, count=len(history.get(anki_card.id, ())))
+            dropped = len(card_history.answers) + card_history.skipped
+            plan.flag(UnsupportedKind.SKIPPED_REVIEWS, count=dropped)
             continue
-        card_history = history.get(anki_card.id, ())
         matched[ordinal] = _PlannedCard(anki_card, card_history)
-        plan.reviews += len(card_history)
+        plan.reviews += len(card_history.answers)
+        plan.flag(UnsupportedKind.SKIPPED_REVIEWS, count=card_history.skipped)
         plan.scheduled += _will_be_scheduled(anki_card, card_history, now)
     if extra:
         plan.flag(UnsupportedKind.EXTRA_CARDS, note_type.name, count=extra)
@@ -300,40 +356,53 @@ def _plan_note(
     )
 
 
-def _will_be_scheduled(card: AnkiCard, history: History, now: datetime) -> bool:
-    # Mirrors ApkgImportService._schedule without running the scheduler: a replay
-    # always yields a schedule, and the SM-2 fallback is pure and cheap.
+def _will_be_scheduled(card: AnkiCard, history: _CardHistory, now: datetime) -> bool:
+    # Mirrors _schedule without running the scheduler: a replay always yields a
+    # schedule, and the SM-2 fallback is pure and cheap.
     if card.card_type == TYPE_NEW:
         return False
-    return bool(history) or schedule_from_sm2("", card, None, now) is not None
+    return bool(history.replayed) or schedule_from_sm2("", card, None, now) is not None
 
 
-def _history_by_card(package: AnkiPackage, plan: _Plan, now: datetime) -> dict[int, History]:
-    """Each card's valid answers, oldest first. Other revlog rows are counted as skipped."""
-    answers: dict[int, list[tuple[Rating, datetime]]] = {}
+def _history_by_card(package: AnkiPackage, now: datetime) -> dict[int, _CardHistory]:
+    """Each card's answers, oldest first, and where its last manual reset falls.
+
+    A manual revlog row (Forget, or an old-style set due date) is a reset: the
+    answers before it stay in the history but are not replayed, so a relearned
+    card never looks better known than its latest learning shows.
+    """
+    rows: dict[int, list[AnkiReview]] = {}
     for review in package.reviews:
-        rating = rating_for(review)
-        reviewed_at = review_time(review, now)
-        if rating is None or reviewed_at is None:
-            plan.flag(UnsupportedKind.SKIPPED_REVIEWS)
-            continue
-        answers.setdefault(review.card_id, []).append((rating, reviewed_at))
-    return {
-        card_id: tuple(sorted(entries, key=lambda entry: entry[1]))
-        for card_id, entries in answers.items()
-    }
+        rows.setdefault(review.card_id, []).append(review)
+    result: dict[int, _CardHistory] = {}
+    for card_id, card_rows in rows.items():
+        answers: list[tuple[Rating, datetime]] = []
+        replay_from = skipped = 0
+        for review in sorted(card_rows, key=lambda row: row.reviewed_at_ms):
+            rating = rating_for(review)
+            reviewed_at = review_time(review, now)
+            if rating is None or reviewed_at is None:
+                skipped += 1
+                if review.kind == REVLOG_MANUAL:
+                    replay_from = len(answers)
+                continue
+            answers.append((rating, reviewed_at))
+        result[card_id] = _CardHistory(tuple(answers), replay_from, skipped)
+    return result
 
 
-def _placement_deck(package: AnkiPackage, card: AnkiCard, plan: _Plan) -> str:
-    """The name of the deck a note lands in: its first card's (home) deck.
+def _placement_deck(package: AnkiPackage, card: AnkiCard) -> tuple[str, str | None]:
+    """The name of the deck a note lands in (its first card's home deck), and the
+    filtered deck it was borrowed by, if any.
 
     A card borrowed by a filtered deck goes back to the deck it came from.
     """
     deck = package.decks.get(card.deck_id)
+    borrowed_from: str | None = None
     if card.original_deck_id or (deck is not None and deck.is_filtered):
-        plan.flag(UnsupportedKind.FILTERED_DECK, deck.name if deck is not None else "")
+        borrowed_from = deck.name if deck is not None else ""
         deck = package.decks.get(card.original_deck_id)
-    return deck.name if deck is not None else ""
+    return (deck.name if deck is not None else ""), borrowed_from
 
 
 def _clean_path(name: str) -> tuple[str, ...]:

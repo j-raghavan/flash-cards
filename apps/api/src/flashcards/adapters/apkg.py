@@ -55,11 +55,15 @@ MAX_SQL_STEPS = 1_000_000
 FIELD_SEPARATOR = "\x1f"
 # Newer packages carry collection.anki21; older ones collection.anki2. Prefer the newer.
 _COLLECTION_NAMES = ("collection.anki21", "collection.anki2")
-_NOT_MEDIA = frozenset({*_COLLECTION_NAMES, "collection.anki21b", "media"})
+# Anki 2.1.50+ writes its own zstd-compressed collection.anki21b by default, next to
+# a stub collection.anki2 that only holds a "please update Anki" note. Importing the
+# stub would look like success, so such a package is refused with a clear reason.
+_NEW_FORMAT_COLLECTION = "collection.anki21b"
+_NOT_MEDIA = frozenset({*_COLLECTION_NAMES, _NEW_FORMAT_COLLECTION, "media", "meta"})
 # A real collection has these; minimal or very old ones may not, and then every
 # card is read as new and no history is kept.
 _SCHEDULING_COLUMNS = frozenset(
-    {"id", "type", "queue", "due", "ivl", "factor", "reps", "lapses", "odid", "flags"}
+    {"id", "type", "queue", "due", "ivl", "factor", "reps", "lapses", "odid", "odue", "flags"}
 )
 _REVLOG_COLUMNS = frozenset({"id", "cid", "ease", "type"})
 _FLAG_BITS = 0b111  # the low three bits of cards.flags are the flag colour
@@ -108,6 +112,11 @@ def _guard_archive(archive: zipfile.ZipFile) -> None:
 
 def _read_collection(archive: zipfile.ZipFile) -> bytes:
     names = set(archive.namelist())
+    if _NEW_FORMAT_COLLECTION in names:
+        raise UnsupportedPackage(
+            "exported in Anki's newer format: export again with "
+            '"Support older Anki versions" ticked'
+        )
     for candidate in _COLLECTION_NAMES:
         if candidate in names:
             # Bound the ACTUAL decompressed output, rather than trusting the zip's
@@ -217,8 +226,8 @@ def _read_rows(connection: sqlite3.Connection) -> AnkiPackage:
 def _read_cards(connection: sqlite3.Connection, guid_by_nid: dict[int, str]) -> list[AnkiCard]:
     with_state = _columns(connection, "cards") >= _SCHEDULING_COLUMNS
     query = (
-        "SELECT nid, did, ord, id, type, queue, due, ivl, factor, reps, lapses, odid, flags "
-        "FROM cards LIMIT ?"
+        "SELECT nid, did, ord, id, type, queue, due, ivl, factor, reps, lapses, odid, odue, "
+        "flags FROM cards ORDER BY id LIMIT ?"
         if with_state
         else "SELECT nid, did, ord FROM cards LIMIT ?"
     )
@@ -229,9 +238,8 @@ def _read_cards(connection: sqlite3.Connection, guid_by_nid: dict[int, str]) -> 
             continue  # a card with no matching note; skip it
         values = [_require_int(value, "card column") for value in row[1:]]
         if with_state:
-            did, ordinal, card_id, kind, queue, due, ivl, factor, reps, lapses, odid, flags = (
-                values
-            )
+            (did, ordinal, card_id, kind, queue, due, ivl, factor, reps, lapses, odid, odue,
+             flags) = values
             cards.append(
                 AnkiCard(
                     note_guid=card_guid,
@@ -246,6 +254,7 @@ def _read_cards(connection: sqlite3.Connection, guid_by_nid: dict[int, str]) -> 
                     reps=reps,
                     lapses=lapses,
                     original_deck_id=odid,
+                    original_due=odue,
                     flag=flags & _FLAG_BITS,
                 )
             )
@@ -321,7 +330,7 @@ def _load_json_object(value: object, what: str) -> dict[str, object]:
         raise InvalidPackage(f"{what} is not text")
     try:
         parsed = json.loads(value)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:  # deeply nested JSON recurses
         raise InvalidPackage(f"bad {what} json") from exc
     if not isinstance(parsed, dict):
         raise InvalidPackage(f"{what} is not an object")

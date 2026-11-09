@@ -80,6 +80,7 @@ class AnkiCard:
     reps: int = 0
     lapses: int = 0
     original_deck_id: int = 0  # set while the card sits in a filtered deck
+    original_due: int = 0  # the home deck's due while in a filtered deck (`due` is a position)
     flag: int = 0
 
 
@@ -125,6 +126,7 @@ class UnsupportedKind(enum.StrEnum):
     UNKNOWN_NOTE_TYPE = "unknown_note_type"  # the note's type is missing from the package
     UNMAPPABLE_NOTE = "unmappable_note"  # too few fields for Basic, or a cloze with no text
     INVALID_NOTE = "invalid_note"  # fails our note validation (length, cloze markers)
+    DUPLICATE_NOTE = "duplicate_note"  # a second note with the same guid
     DROPPED_FIELDS = "dropped_fields"  # non-empty fields beyond the ones we map
     EXTRA_CARDS = "extra_cards"  # further templates or empty cloze deletions: no card here
     FILTERED_DECK = "filtered_deck"  # cards placed in their original deck instead

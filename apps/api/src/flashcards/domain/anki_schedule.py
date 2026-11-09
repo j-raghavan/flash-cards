@@ -103,16 +103,20 @@ def schedule_from_sm2(
     other card arrives as new. Stability is the interval in days (at our 90%
     target retention an FSRS interval roughly equals stability). The due date is
     the card's Anki due day when the collection's creation day is known, but
-    never later than one interval from now; otherwise the card is due now.
+    never later than one interval from now; otherwise the card is due now. A card
+    borrowed by a filtered deck keeps its real due day in `original_due` (its `due`
+    is a queue position there). No review is dated before Anki existed.
     """
     if card.card_type != TYPE_REVIEW or card.interval <= 0:
         return None
     interval_days = min(card.interval, MAX_INTERVAL_DAYS)
     interval = timedelta(days=interval_days)
     origin = day_zero(created_at_s) if created_at_s is not None else None
+    due_day = card.original_due if card.original_deck_id else card.due
     due_at = now
-    if origin is not None and abs(card.due) <= _MAX_DUE_DAYS:
-        due_at = min(origin + timedelta(days=card.due), now + interval)
+    if origin is not None and abs(due_day) <= _MAX_DUE_DAYS:
+        due_at = min(origin + timedelta(days=due_day), now + interval)
+        due_at = max(due_at, ANKI_EPOCH_START + interval)
     return CardSchedule(
         card_id=card_id,
         state=ScheduleState.REVIEW,
@@ -135,6 +139,37 @@ class Sm2Fields:
     factor: int
     reps: int
     lapses: int
+    left: int = 0  # learning steps left: 1001 is one step, due today
+
+
+# A learning card exported with no steps left would graduate on its next Good in
+# Anki; one step left keeps it learning, the conservative reading.
+_ONE_STEP_LEFT = 1001
+REVLOG_LEARN, REVLOG_REVIEW, REVLOG_RELEARN = 0, 1, 2
+REVLOG_MANUAL = 4  # Forget, or a due date set by hand: no answer, and a reset
+
+
+def revlog_kinds(ratings: Sequence[Rating]) -> list[int]:
+    """Anki revlog kinds for a card's answers, in order.
+
+    Answers are learning until the first Good or Easy, then reviews. An Again on
+    a review starts relearning, which lasts until the next Good or Easy. Our logs
+    do not keep the state, so this approximates it from the answers alone.
+    """
+    kinds: list[int] = []
+    phase = REVLOG_LEARN
+    for rating in ratings:
+        passed = rating in (Rating.GOOD, Rating.EASY)
+        if phase == REVLOG_LEARN:
+            kinds.append(REVLOG_LEARN)
+            phase = REVLOG_REVIEW if passed else REVLOG_LEARN
+        elif phase == REVLOG_REVIEW:
+            kinds.append(REVLOG_REVIEW)
+            phase = REVLOG_RELEARN if rating is Rating.AGAIN else REVLOG_REVIEW
+        else:
+            kinds.append(REVLOG_RELEARN)
+            phase = REVLOG_REVIEW if passed else REVLOG_RELEARN
+    return kinds
 
 
 def sm2_from_schedule(
@@ -175,7 +210,7 @@ def sm2_from_schedule(
     interval = 0 if learning else max(1, min(MAX_INTERVAL_DAYS, round(schedule.stability or 1.0)))
     due = int((schedule.due_at - _UNIX_EPOCH).total_seconds())
     queue = QUEUE_SUSPENDED if suspended else QUEUE_LEARNING
-    return Sm2Fields(card_type, queue, due, interval, factor, reps, lapses)
+    return Sm2Fields(card_type, queue, due, interval, factor, reps, lapses, _ONE_STEP_LEFT)
 
 
 def _lapses(ratings: Sequence[Rating]) -> int:
