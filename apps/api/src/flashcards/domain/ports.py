@@ -121,7 +121,7 @@ class SessionRepository(Protocol):
         ...
 
     async def revoke_others(self, user_id: str, keep_session_id: str, now: datetime) -> int:
-        """Revoke every active session of the user except one; return how many."""
+        """Revoke every live (unrevoked, unexpired) session of the user but one; return how many."""
         ...
 
     async def touch(self, session_id: str, now: datetime) -> None:

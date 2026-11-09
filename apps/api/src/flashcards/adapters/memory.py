@@ -153,7 +153,7 @@ class InMemorySessionRepository:
         others = [
             s.id
             for s in self._by_id.values()
-            if s.user_id == user_id and s.id != keep_session_id and s.revoked_at is None
+            if s.user_id == user_id and s.id != keep_session_id and s.is_valid(now)
         ]
         for session_id in others:
             self._by_id[session_id] = self._by_id[session_id].with_revoked(now)

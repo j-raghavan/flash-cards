@@ -310,6 +310,7 @@ class SqlSessionRepository:
                 SessionRow.user_id == user_id,
                 SessionRow.id != keep_session_id,
                 SessionRow.revoked_at.is_(None),
+                SessionRow.expires_at > now,
             )
             .values(revoked_at=now)
             .returning(SessionRow.id)

@@ -186,6 +186,10 @@ async def test_revoke_others_keeps_the_current_session() -> None:
     for sid in ("current", "laptop", "phone"):
         await sessions.add(_session(sid))
     await sessions.add(_session("gone", revoked_at=START))
+    await sessions.add(
+        Session(id="expired", user_id="u1", token_hash="h-exp",
+                created_at=START - timedelta(days=30), expires_at=START - timedelta(days=16))
+    )
     await sessions.add(_session("theirs", user_id="u2"))
 
     assert await service.revoke_others(user_id="u1", current_session_id="current") == 2
