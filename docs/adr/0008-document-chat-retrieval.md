@@ -32,6 +32,13 @@ A vector-only design would leave document chat broken in the default configurati
 - When no passage shares a term with the question, the answer is a plain "not found"
   without calling the model.
 - Passages are removed on account deletion.
+- Each citation also carries `file_name`: the uploaded file's name (folders,
+  control and format characters removed, at most 120 characters), "YouTube video
+  <id>" or "Pasted transcript". The name is stored beside the source in the object
+  store under `<source_id>.name`, so no table changes, and is deleted with it. A
+  name is read only for a source that belongs to one of the caller's own jobs;
+  sources stored before this change have no name and cite as `null`, which the web
+  shows as "Document N".
 
 ## Consequences
 

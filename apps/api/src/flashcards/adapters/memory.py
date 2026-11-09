@@ -541,6 +541,9 @@ class InMemoryQuotaRepository:
     async def used(self, owner_id: str, period: str) -> int:
         return self._used.get((owner_id, period), 0)
 
+    async def used_by_owner(self, period: str) -> dict[str, int]:
+        return {owner: used for (owner, p), used in self._used.items() if p == period and used}
+
     async def delete_for_owner(self, owner_id: str) -> None:
         for key in [k for k in self._used if k[0] == owner_id]:
             del self._used[key]

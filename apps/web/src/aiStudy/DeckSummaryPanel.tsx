@@ -61,7 +61,7 @@ export function DeckSummaryPanel({ deckId }: { deckId: string }) {
       ) : (
         <div className="stack">
           <AiLabel />
-          <CardContent markdown={summary.summary} />
+          <CardContent aiOutput markdown={summary.summary} />
           {summary.key_points.length > 0 ? (
             <>
               <h3>Key points</h3>
@@ -69,7 +69,7 @@ export function DeckSummaryPanel({ deckId }: { deckId: string }) {
                 {summary.key_points.map((point, index) => (
                   // Model text may repeat, so the position is the key.
                   <li key={index}>
-                    <CardContent markdown={point} className="inline" />
+                    <CardContent aiOutput markdown={point} className="inline" />
                   </li>
                 ))}
               </ul>

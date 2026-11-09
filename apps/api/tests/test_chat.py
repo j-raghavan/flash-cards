@@ -42,6 +42,7 @@ from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.jobs import new_generation_job
 from flashcards.domain.ports import Clock
 from flashcards.domain.quotas import InstanceQuotas
+from flashcards.domain.sources import source_name_key
 from flashcards.domain.transcripts import encode_transcript, pasted_transcript
 from flashcards.domain.usage import TokenPrices
 
@@ -194,6 +195,51 @@ async def test_ask_answers_with_citations_and_indexes_once() -> None:
     before = len(await rig.passages.list_for_deck(deck_id))
     await rig.service.ask(owner_id="alice", deck_id=deck_id, question="ATP?")
     assert len(await rig.passages.list_for_deck(deck_id)) == before  # not re-indexed
+
+
+async def test_citations_carry_the_file_name_when_it_was_kept() -> None:
+    llm = _FakeLLM({"answer": "Both.", "citations": [1, 2]})
+    rig = _Rig(llm)
+    deck_id = await rig.deck()
+    named = await rig.source(deck_id, _text_source("Mitochondria make ATP."))
+    unnamed = await rig.source(deck_id, _text_source("ATP stores energy."))
+    await rig.store.put(source_name_key(named), "Cell \u202ebiology.pdf".encode(), "text/plain")
+
+    answer = await rig.service.ask(owner_id="alice", deck_id=deck_id, question="ATP?")
+
+    assert {c.file_id: c.file_name for c in answer.citations} == {
+        named: "Cell biology.pdf",
+        unnamed: None,
+    }
+
+
+async def test_citation_names_come_only_from_the_callers_own_sources() -> None:
+    rig = _Rig(_FakeLLM())
+    deck_id = await rig.deck("alice")
+    await rig.source(deck_id, _text_source("unrelated words"))
+    bob_job = new_generation_job(
+        owner_id="bob",
+        source_id="bob-src",
+        draft_deck_id=await rig.deck("bob"),
+        thoroughness=Thoroughness.STANDARD,
+        now=NOW,
+    )
+    await rig.jobs.add(bob_job)
+    bob_source = bob_job.source_id
+    await rig.store.put(source_name_key(bob_source), b"Bob's secret.pdf", "text/plain")
+    # A passage in Alice's deck that points at Bob's file must not reveal its name.
+    await rig.passages.add_many(
+        [
+            Passage(
+                id="stray", owner_id="alice", deck_id=deck_id, file_id=bob_source,
+                page=1, ordinal=0, text="Mitochondria make ATP.",
+            )
+        ]
+    )
+
+    answer = await rig.service.ask(owner_id="alice", deck_id=deck_id, question="ATP?")
+
+    assert answer.citations == (Citation(bob_source, 1, None),)
 
 
 async def test_ask_only_indexes_the_decks_own_sources() -> None:

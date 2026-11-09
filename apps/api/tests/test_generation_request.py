@@ -30,7 +30,15 @@ from flashcards.domain.ai import Thoroughness
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.jobs import JobNotFound, JobStatus, new_generation_job
 from flashcards.domain.quotas import InstanceQuotas, QuotaExceeded
-from flashcards.domain.sources import ExtractedPage, TooManyPages, UnsupportedMediaType
+from flashcards.domain.sources import (
+    MAX_SOURCE_NAME,
+    ExtractedPage,
+    TooManyPages,
+    UnsupportedMediaType,
+    clean_source_name,
+    source_name_key,
+)
+from flashcards.domain.transcripts import Transcript, TranscriptSegment, pasted_transcript
 from flashcards.domain.usage import TokenPrices
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
@@ -143,6 +151,59 @@ async def test_start_stores_file_reserves_quota_and_enqueues() -> None:
     assert job.draft_deck_id == deck.id
     assert queue.enqueued == [job.id]
     assert await store.get(job.source_id) == b"%PDF"
+    # No name was given, so none is kept.
+    assert await store.get(source_name_key(job.source_id)) is None
+
+
+async def test_start_keeps_the_cleaned_file_name_beside_the_source() -> None:
+    service, decks, _queue, store = _service(FakeExtractor())
+    deck = await decks.create(owner_id=ALICE, name="Deck")
+
+    job = await service.start(
+        owner_id=ALICE,
+        deck_id=deck.id,
+        data=b"%PDF",
+        thoroughness=Thoroughness.STANDARD,
+        source_name="C:\\Users\\a\\Cell\u202e  biology.pdf",
+    )
+
+    assert await store.get(source_name_key(job.source_id)) == b"Cell biology.pdf"
+
+
+async def test_transcripts_are_named_by_their_kind() -> None:
+    service, decks, _queue, store = _service(FakeExtractor())
+    deck = await decks.create(owner_id=ALICE, name="Deck")
+    video = Transcript(video_id="abc123", segments=(TranscriptSegment(start=0.0, text="Hi"),))
+
+    from_video = await service.start_transcript(
+        owner_id=ALICE, deck_id=deck.id, transcript=video, thoroughness=Thoroughness.STANDARD
+    )
+    pasted = await service.start_transcript(
+        owner_id=ALICE,
+        deck_id=deck.id,
+        transcript=pasted_transcript("Hello"),
+        thoroughness=Thoroughness.STANDARD,
+    )
+
+    assert await store.get(source_name_key(from_video.source_id)) == b"YouTube video abc123"
+    assert await store.get(source_name_key(pasted.source_id)) == b"Pasted transcript"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        ("notes.pdf", "notes.pdf"),
+        ("a/b/c.pdf", "c.pdf"),
+        ("dir\\x.png", "x.png"),
+        ("tab\there\nand\x00 nul", "tab here and nul"),
+        ("   ", None),
+        ("folder/", None),
+        ("x" * 500, "x" * MAX_SOURCE_NAME),
+    ],
+)
+def test_clean_source_name(raw: str | None, expected: str | None) -> None:
+    assert clean_source_name(raw) == expected
 
 
 async def test_start_on_foreign_deck_is_not_found() -> None:

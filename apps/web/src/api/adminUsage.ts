@@ -16,6 +16,8 @@ export interface UserUsage {
   input_tokens: number;
   output_tokens: number;
   cost_micro_usd: number;
+  /** AI generation pages used against the monthly quota this month. */
+  pages: number;
 }
 
 export interface ProviderUsage {
