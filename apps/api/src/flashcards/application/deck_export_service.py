@@ -83,6 +83,7 @@ class DeckExportService:
         for card in cards:
             cards_by_note.setdefault(card.note_id, []).append(card)
 
+        carried = [note for note in notes if export_format.carries(note.note_type)]
         exported = DeckExport(
             decks=tuple(paths[tree_id] for tree_id in subtree),
             notes=tuple(
@@ -100,7 +101,7 @@ class DeckExportService:
                         )
                     ),
                 )
-                for note in notes
+                for note in carried
             ),
             exported_at=self._clock.now(),
         )
@@ -108,4 +109,5 @@ class DeckExportService:
             filename=export_filename(by_id[deck_id].name, export_format),
             media_type=export_format.media_type,
             data=self._writer.write(exported, export_format),
+            omitted_notes=len(notes) - len(carried),
         )

@@ -39,7 +39,7 @@ from flashcards.domain.deck_export import (
     export_filename,
 )
 from flashcards.domain.decks import DeckNotFound
-from flashcards.domain.notes import Card, Note, NoteType
+from flashcards.domain.notes import Card, Mask, Note, NoteType, Occlusion
 from flashcards.domain.scheduling import Rating, ReviewLog
 
 START = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
@@ -253,6 +253,47 @@ async def test_export_is_limited_to_the_owner() -> None:
     )
     document = json.loads(await world.export(root_id, ExportFormat.JSON))
     assert all(note["fields"].get("front") != "secret" for note in document["notes"])
+
+
+async def test_custom_and_occlusion_notes_travel_in_json_only() -> None:
+    world = _World()
+    root_id = await _library(world)
+    mask = Mask(id=1, left=0.1, top=0.2, width=0.3, height=0.4)
+    occlusion = Occlusion(image_id="img1", masks=(mask,))
+    for note in (
+        Note(id="io", owner_id=ALICE, deck_id=root_id, note_type=NoteType.IMAGE_OCCLUSION,
+             fields=(), created_at=START, occlusion=occlusion),
+        Note(id="cu", owner_id=ALICE, deck_id=root_id, note_type=NoteType.CUSTOM,
+             fields=(("Word", "gato"),), created_at=START, note_type_id="nt1"),
+    ):
+        await world.note_repo.add(note)
+        await world.card_repo.add(
+            Card(id=f"{note.id}-c", owner_id=ALICE, deck_id=root_id, note_id=note.id,
+                 ordinal=1, created_at=START)
+        )
+
+    as_json = await world.exporter.export(
+        owner_id=ALICE, deck_id=root_id, export_format=ExportFormat.JSON
+    )
+    document = json.loads(as_json.data)
+    by_type = {note["note_type"]: note for note in document["notes"]}
+    assert as_json.omitted_notes == 0
+    assert by_type["image_occlusion"]["occlusion"] == {
+        "image_id": "img1",
+        "masks": [{"id": 1, "left": 0.1, "top": 0.2, "width": 0.3, "height": 0.4}],
+    }
+    assert by_type["custom"]["note_type_id"] == "nt1"
+    assert "occlusion" not in by_type["custom"] and "note_type_id" not in by_type["basic"]
+
+    for fmt in (ExportFormat.APKG, ExportFormat.CSV):
+        exported = await world.exporter.export(owner_id=ALICE, deck_id=root_id, export_format=fmt)
+        assert exported.omitted_notes == 2
+    package = ApkgReader().read(
+        (await world.exporter.export(
+            owner_id=ALICE, deck_id=root_id, export_format=ExportFormat.APKG
+        )).data
+    )
+    assert len(package.notes) == 3  # the Basic and Cloze notes only
 
 
 async def test_subdeck_export_starts_at_that_deck() -> None:

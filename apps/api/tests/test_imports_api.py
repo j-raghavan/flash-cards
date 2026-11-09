@@ -173,6 +173,7 @@ def test_export_downloads_the_deck(member: TestClient, fmt: str, media_type: str
     assert resp.headers["content-type"] == media_type
     assert resp.headers["content-disposition"] == f'attachment; filename="Spanish-Verbs.{fmt}"'
     assert resp.headers["cache-control"] == "no-store"
+    assert resp.headers["x-omitted-notes"] == "0"
     assert resp.content
 
 

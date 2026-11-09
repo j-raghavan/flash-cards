@@ -74,6 +74,7 @@ The mapping is conservative: it never makes a card look better known than its hi
 ### Export (F-IMP-4)
 
 - `GET /decks/{deck_id}/export?format=apkg|csv|json` (default `apkg`) downloads the deck with all its subdecks. It answers 404 for a deck that is missing or not the caller's, 413 above 200,000 cards, and 422 for an unknown format. Responses are attachments with a sanitised ASCII file name and `Cache-Control: no-store`.
+- **Note types:** JSON carries every note, including a custom note's type id and an image occlusion note's image id and masks (ADR 0013). `.apkg` and CSV carry Basic and Cloze notes only: a custom or occlusion note's card ordinals are template indexes or mask ids, which the two bundled Anki note types and the CSV columns cannot represent. Those notes are left out, and the `X-Omitted-Notes` response header says how many.
 - **Ownership:** the root's ownership is checked, the tree is built from the caller's decks only, and notes, cards and review logs are filtered by owner again, so an export never carries another user's data.
 - **`.apkg`:** an Anki 2.1 legacy collection (`collection.anki2`, schema 11) with an empty media manifest, the format genanki writes and every Anki version imports.
   - Two bundled note types: `Basic (Flash-Cards)` (Front, Back) and `Cloze (Flash-Cards)` (Text, Back Extra).

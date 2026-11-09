@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from flashcards.domain.notes import Card, Note
+from flashcards.domain.notes import Card, Note, NoteType
 from flashcards.domain.scheduling import CardSchedule, ReviewLog
 
 MAX_EXPORT_CARDS = 200_000  # the same bound the .apkg reader puts on an import
@@ -32,6 +32,15 @@ class ExportFormat(enum.StrEnum):
     @property
     def media_type(self) -> str:
         return _MEDIA_TYPES[self]
+
+    def carries(self, note_type: NoteType) -> bool:
+        """Whether notes of this type fit the format.
+
+        Only JSON is lossless. An .apkg bundles Basic and Cloze note types only, and
+        a CSV row has their columns, so custom and image occlusion notes (whose card
+        ordinals are template indexes or mask ids) are left out of both.
+        """
+        return self is ExportFormat.JSON or note_type in (NoteType.BASIC, NoteType.CLOZE)
 
 
 _MEDIA_TYPES = {
@@ -67,6 +76,7 @@ class ExportFile:
     filename: str
     media_type: str
     data: bytes
+    omitted_notes: int = 0  # notes of a type the format cannot carry
 
 
 def export_filename(deck_name: str, export_format: ExportFormat) -> str:

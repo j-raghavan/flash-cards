@@ -158,13 +158,30 @@ def _card_json(exported: ExportedCard) -> dict[str, object]:
 
 def _note_json(exported: ExportedNote) -> dict[str, object]:
     note = exported.note
-    return {
+    document: dict[str, object] = {
         "deck": list(exported.deck),
         "note_type": note.note_type.value,
         "fields": dict(note.fields),
         "tags": list(note.tags),
         "cards": [_card_json(card) for card in exported.cards],
     }
+    if note.note_type_id is not None:
+        document["note_type_id"] = note.note_type_id
+    if note.occlusion is not None:
+        document["occlusion"] = {
+            "image_id": note.occlusion.image_id,
+            "masks": [
+                {
+                    "id": mask.id,
+                    "left": mask.left,
+                    "top": mask.top,
+                    "width": mask.width,
+                    "height": mask.height,
+                }
+                for mask in note.occlusion.masks
+            ],
+        }
+    return document
 
 
 def _json(export: DeckExport) -> bytes:
