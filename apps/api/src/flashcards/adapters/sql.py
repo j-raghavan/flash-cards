@@ -616,6 +616,19 @@ class SqlAiJobRepository:
         )
         return [aijob_from_row(row) for row in rows]
 
+    async def list_recent(
+        self, owner_id: str, *, deck_id: str | None, limit: int, offset: int
+    ) -> list[AiJob]:
+        query = select(AiJobRow).where(AiJobRow.owner_id == owner_id)
+        if deck_id is not None:
+            query = query.where(AiJobRow.draft_deck_id == deck_id)
+        rows = await self._session.scalars(
+            query.order_by(AiJobRow.created_at.desc(), AiJobRow.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return [aijob_from_row(row) for row in rows]
+
     async def delete(self, job_id: str) -> None:
         await self._session.execute(delete(AiJobRow).where(AiJobRow.id == job_id))
 

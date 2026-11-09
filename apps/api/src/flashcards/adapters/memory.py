@@ -382,6 +382,17 @@ class InMemoryAiJobRepository:
     async def list_for_owner(self, owner_id: str) -> list[AiJob]:
         return [j for j in self._by_id.values() if j.owner_id == owner_id]
 
+    async def list_recent(
+        self, owner_id: str, *, deck_id: str | None, limit: int, offset: int
+    ) -> list[AiJob]:
+        jobs = [
+            j
+            for j in self._by_id.values()
+            if j.owner_id == owner_id and (deck_id is None or j.draft_deck_id == deck_id)
+        ]
+        jobs.sort(key=lambda j: (j.created_at, j.id), reverse=True)
+        return jobs[offset : offset + limit]
+
     async def delete(self, job_id: str) -> None:
         self._by_id.pop(job_id, None)
 

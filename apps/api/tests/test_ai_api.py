@@ -148,6 +148,41 @@ def test_job_status_and_cancel(member: tuple[TestClient, str]) -> None:
     assert client.post("/ai/jobs/missing/cancel").status_code == 404
 
 
+def test_list_jobs_is_owner_scoped_paged_and_filtered(
+    app: FastAPI, seed_invite: Callable[..., str], member: tuple[TestClient, str]
+) -> None:
+    client, _ = member
+    first_deck = _make_deck(client)
+    second_deck = _make_deck(client)
+    first = _upload(client, first_deck, _pdf()).json()["id"]
+    second = _upload(client, second_deck, _pdf()).json()["id"]
+
+    listed = client.get("/ai/jobs")
+    assert listed.status_code == 200
+    # Newest first, each entry the same body as GET /ai/jobs/{id}.
+    assert [job["id"] for job in listed.json()] == [second, first]
+    assert listed.json()[1] == client.get(f"/ai/jobs/{first}").json()
+
+    by_deck = client.get("/ai/jobs", params={"deck_id": first_deck}).json()
+    assert [job["id"] for job in by_deck] == [first]
+    assert [j["id"] for j in client.get("/ai/jobs", params={"limit": 1}).json()] == [second]
+    paged = client.get("/ai/jobs", params={"limit": 1, "offset": 1}).json()
+    assert [job["id"] for job in paged] == [first]
+    assert client.get("/ai/jobs", params={"offset": 2}).json() == []
+
+    assert client.get("/ai/jobs", params={"limit": 0}).status_code == 422
+    assert client.get("/ai/jobs", params={"limit": 51}).status_code == 422
+    assert client.get("/ai/jobs", params={"offset": -1}).status_code == 422
+
+    other, _ = _signup(app, seed_invite, "other@example.com")
+    assert other.get("/ai/jobs").json() == []
+    assert other.get("/ai/jobs", params={"deck_id": first_deck}).json() == []
+
+
+def test_list_jobs_requires_auth(client: TestClient) -> None:
+    assert client.get("/ai/jobs").status_code == 401
+
+
 def test_list_drafts_empty_and_missing(member: tuple[TestClient, str]) -> None:
     client, _ = member
     deck_id = _make_deck(client)

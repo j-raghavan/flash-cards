@@ -16,6 +16,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -34,6 +35,7 @@ from flashcards.api.schemas import (
     TranscriptGenerateRequest,
     YouTubeGenerateRequest,
 )
+from flashcards.application.generation_request_service import DEFAULT_JOB_PAGE, MAX_JOB_PAGE
 from flashcards.domain.ai import Thoroughness
 from flashcards.domain.jobs import AiJob, JobNotFound
 
@@ -93,6 +95,21 @@ async def start_transcript_generation(
         thoroughness=body.thoroughness,
     )
     return JobOut.from_job(job)
+
+
+@router.get("/jobs", response_model=list[JobOut])
+async def list_jobs(
+    deck_id: str | None = Query(default=None, description="Only jobs for this deck."),
+    limit: int = Query(default=DEFAULT_JOB_PAGE, ge=1, le=MAX_JOB_PAGE),
+    offset: int = Query(default=0, ge=0),
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> list[JobOut]:
+    """The caller's generation jobs, newest first, one page at a time."""
+    jobs = await container.generation.list_recent(
+        owner_id=caller.user.id, deck_id=deck_id, limit=limit, offset=offset
+    )
+    return [JobOut.from_job(job) for job in jobs]
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
