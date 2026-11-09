@@ -2,22 +2,38 @@
 // One typed function per API route the client uses.
 
 import { request } from "./client";
+import type { ReviewResult } from "./studyProgress";
 import type {
+  AdminUser,
+  AuditEvent,
   BrowserPage,
   BrowserQuery,
   BulkRequest,
   BulkResult,
   Card,
   CardDetail,
-  CardSchedule,
+  CreatedInvite,
+  CreatedShareLink,
   Deck,
   DeckStats,
   Draft,
   Fields,
+  Goal,
+  GoalInput,
+  ImportReport,
+  Invite,
   Job,
+  MediaAsset,
   Note,
   NoteType,
+  NoteTypeDef,
+  NoteTypeInput,
+  Occlusion,
   Rating,
+  Role,
+  SharedDeck,
+  ShareLink,
+  StudyPlan,
   Thoroughness,
   User,
 } from "./types";
@@ -62,7 +78,7 @@ export const decks = {
 export const cards = {
   get: (cardId: string) => request<CardDetail>(`/cards/${id(cardId)}`),
   review: (cardId: string, rating: Rating, idempotencyKey: string) =>
-    request<CardSchedule>(`/cards/${id(cardId)}/review`, {
+    request<ReviewResult>(`/cards/${id(cardId)}/review`, {
       method: "POST",
       json: { rating, idempotency_key: idempotencyKey },
     }),
@@ -84,15 +100,24 @@ export function browserParams(query: BrowserQuery): string {
   return params.toString();
 }
 
+/** What a custom or image occlusion note carries besides its fields. */
+export interface NoteExtras {
+  note_type_id?: string;
+  occlusion?: Occlusion;
+}
+
 export const notes = {
-  create: (deckId: string, noteType: NoteType, fields: Fields, tags: string[]) =>
+  create: (deckId: string, noteType: NoteType, fields: Fields, tags: string[], extras: NoteExtras = {}) =>
     request<Card[]>(`/decks/${id(deckId)}/notes`, {
       method: "POST",
-      json: { note_type: noteType, fields, tags },
+      json: { note_type: noteType, fields, tags, ...extras },
     }),
   get: (noteId: string) => request<Note>(`/notes/${id(noteId)}`),
-  update: (noteId: string, fields: Fields, tags: string[]) =>
-    request<Note>(`/notes/${id(noteId)}`, { method: "PATCH", json: { fields, tags } }),
+  update: (noteId: string, fields: Fields, tags: string[], occlusion?: Occlusion) =>
+    request<Note>(`/notes/${id(noteId)}`, {
+      method: "PATCH",
+      json: occlusion === undefined ? { fields, tags } : { fields, tags, occlusion },
+    }),
   remove: (noteId: string) => request<undefined>(`/notes/${id(noteId)}`, { method: "DELETE" }),
 };
 
@@ -116,4 +141,82 @@ export const ai = {
       json: { draft_ids: draftIds },
     }),
   eventsPath: (jobId: string) => `/ai/jobs/${id(jobId)}/events`,
+};
+
+// --- goals and plans ---
+
+export const goals = {
+  list: () => request<Goal[]>("/goals"),
+  get: (goalId: string) => request<Goal>(`/goals/${id(goalId)}`),
+  create: (input: GoalInput) => request<Goal>("/goals", { method: "POST", json: input }),
+  update: (goalId: string, input: Partial<GoalInput>) =>
+    request<Goal>(`/goals/${id(goalId)}`, { method: "PATCH", json: input }),
+  remove: (goalId: string) => request<undefined>(`/goals/${id(goalId)}`, { method: "DELETE" }),
+  plan: (goalId: string) => request<StudyPlan>(`/goals/${id(goalId)}/plan`),
+};
+
+// --- sharing ---
+
+export const shares = {
+  list: (deckId: string) => request<ShareLink[]>(`/decks/${id(deckId)}/shares`),
+  create: (deckId: string, allowClone: boolean) =>
+    request<CreatedShareLink>(`/decks/${id(deckId)}/shares`, { method: "POST", json: { allow_clone: allowClone } }),
+  setAllowClone: (shareId: string, allowClone: boolean) =>
+    request<ShareLink>(`/shares/${id(shareId)}`, { method: "PATCH", json: { allow_clone: allowClone } }),
+  revoke: (shareId: string) => request<ShareLink>(`/shares/${id(shareId)}/revoke`, { method: "POST" }),
+  preview: (token: string) => request<SharedDeck>(`/shared/${id(token)}`),
+  clone: (token: string) => request<Deck>(`/shared/${id(token)}/clone`, { method: "POST" }),
+};
+
+// --- import ---
+
+export const imports = {
+  apkg: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<ImportReport>("/import/apkg", { method: "POST", form });
+  },
+};
+
+// --- admin ---
+
+export const admin = {
+  invites: () => request<Invite[]>("/admin/invites"),
+  createInvite: (email: string | null, role: Role, ttlDays: number) =>
+    request<CreatedInvite>("/admin/invites", { method: "POST", json: { email, role, ttl_days: ttlDays } }),
+  revokeInvite: (inviteId: string) =>
+    request<undefined>(`/admin/invites/${id(inviteId)}/revoke`, { method: "POST" }),
+  users: () => request<AdminUser[]>("/admin/users"),
+  suspend: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/suspend`, { method: "POST" }),
+  unsuspend: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/unsuspend`, { method: "POST" }),
+  unlock: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/unlock`, { method: "POST" }),
+  setRole: (userId: string, role: Role) =>
+    request<AdminUser>(`/admin/users/${id(userId)}`, { method: "PATCH", json: { role } }),
+  removeUser: (userId: string) => request<undefined>(`/admin/users/${id(userId)}`, { method: "DELETE" }),
+  audit: (limit: number, before: string | null) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (before !== null) {
+      params.set("before", before);
+    }
+    return request<AuditEvent[]>(`/admin/audit?${params.toString()}`);
+  },
+};
+
+// --- custom note types and media ---
+
+export const noteTypes = {
+  list: () => request<NoteTypeDef[]>("/note-types"),
+  get: (noteTypeId: string) => request<NoteTypeDef>(`/note-types/${id(noteTypeId)}`),
+  create: (input: NoteTypeInput) => request<NoteTypeDef>("/note-types", { method: "POST", json: input }),
+  update: (noteTypeId: string, input: NoteTypeInput & { renamed: Record<string, string> }) =>
+    request<NoteTypeDef>(`/note-types/${id(noteTypeId)}`, { method: "PATCH", json: input }),
+  remove: (noteTypeId: string) => request<undefined>(`/note-types/${id(noteTypeId)}`, { method: "DELETE" }),
+};
+
+export const media = {
+  upload: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<MediaAsset>("/media", { method: "POST", form });
+  },
 };
