@@ -11,6 +11,7 @@ from flashcards.domain.ai import DraftCardRecord, StructuredRequest, StructuredR
 from flashcards.domain.anki import AnkiPackage
 from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
+from flashcards.domain.deck_export import DeckExport, ExportFormat
 from flashcards.domain.decks import Deck
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
@@ -474,6 +475,12 @@ class PackageReader(Protocol):
         The archive is untrusted: implementations guard against path traversal and
         zip bombs and never execute embedded content (NF-SEC-2).
         """
+        ...
+
+
+class DeckExportWriter(Protocol):
+    def write(self, export: DeckExport, export_format: ExportFormat) -> bytes:
+        """Serialize a gathered deck tree as an .apkg, CSV or JSON file (F-IMP-4)."""
         ...
 
 

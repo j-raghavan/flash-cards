@@ -805,3 +805,45 @@ async def test_locking_notes_returns_the_committed_row_not_a_cached_one(
             await SqlNoteRepository(writer).update(note.with_fields((("front", "new"),)))
         locked = await SqlNoteRepository(reader).lock_many(["n1"])
         assert locked[0].fields == (("front", "new"),)
+
+
+async def test_sql_apkg_round_trip_keeps_history_and_schedule(engine: AsyncEngine) -> None:
+    from flashcards.domain.deck_export import ExportFormat
+    from flashcards.domain.notes import NoteType
+    from flashcards.domain.scheduling import Rating
+
+    sm = create_sessionmaker(engine)
+    hasher = Argon2PasswordHasher()
+    async with sm() as s, s.begin():
+        services = build_services(_sql_repositories(s, hasher))
+        root = await services.decks.create(owner_id="alice", name="Spanish")
+        child = await services.decks.create(owner_id="alice", name="Verbs", parent_id=root.id)
+        _note, (card,) = await services.notes.create_note(
+            owner_id="alice",
+            deck_id=child.id,
+            note_type=NoteType.BASIC,
+            fields={"front": "ser", "back": "to be"},
+            tags=["verbs"],
+        )
+        await services.reviews.submit(owner_id="alice", card_id=card.id, rating=Rating.GOOD)
+        await services.notes.suspend_card(owner_id="alice", card_id=card.id)
+    async with sm() as s, s.begin():
+        services = build_services(_sql_repositories(s, hasher))
+        exported = await services.deck_export.export(
+            owner_id="alice", deck_id=root.id, export_format=ExportFormat.APKG
+        )
+        dry = await services.apkg_import.import_package(
+            owner_id="bob", data=exported.data, dry_run=True
+        )
+        assert await services.decks.list_decks("bob") == []  # a dry run writes nothing
+        report = await services.apkg_import.import_package(owner_id="bob", data=exported.data)
+    assert dry.notes_imported == report.notes_imported == 1
+    assert (report.decks_created, report.reviews_imported, report.cards_scheduled) == (2, 1, 1)
+    async with sm() as s:
+        bob_cards = await SqlCardRepository(s).list_for_owner("bob")
+        assert len(bob_cards) == 1 and bob_cards[0].is_suspended
+        assert await SqlScheduleRepository(s).get(bob_cards[0].id) is not None
+        logs = await SqlReviewLogRepository(s).list_for_owner("bob")
+        assert [log.rating for log in logs] == [Rating.GOOD]
+        bob_decks = await SqlDeckRepository(s).list_for_owner("bob")
+        assert sorted(deck.name for deck in bob_decks) == ["Spanish", "Verbs"]

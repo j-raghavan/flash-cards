@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from flashcards.adapters.apkg import ApkgReader
+from flashcards.adapters.deck_export import FileDeckExportWriter
 from flashcards.adapters.extraction import PyMuPDFExtractor
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
@@ -54,6 +55,7 @@ from flashcards.application.bulk_card_service import BulkCardService
 from flashcards.application.card_browser_service import CardBrowserService
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.application.chat_service import ChatService
+from flashcards.application.deck_export_service import DeckExportService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.draft_review_service import DraftReviewService
 from flashcards.application.evaluation_service import EvaluationService
@@ -78,6 +80,7 @@ from flashcards.domain.ports import (
     AuditRepository,
     CardRepository,
     Clock,
+    DeckExportWriter,
     DeckRepository,
     DocumentExtractor,
     DraftCardRepository,
@@ -151,6 +154,8 @@ class Repositories:
     public_base_url: str = "http://localhost:5173"
     # Lets the generation worker commit progress as it goes (ADR 0012).
     unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
+    # Serializes deck exports (F-IMP-4); stateless, so every provider shares it.
+    deck_export_writer: DeckExportWriter = field(default_factory=FileDeckExportWriter)
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +179,7 @@ class Container:
     goal_service: GoalService
     planner: PlannerService
     apkg_import: ApkgImportService
+    deck_export: DeckExportService
     account: AccountService
     media: MediaService
     evaluation: EvaluationService
@@ -243,6 +249,15 @@ def build_services(repos: Repositories) -> Container:
         repos.schedules,
         repos.review_logs,
         repos.scheduler,
+        repos.clock,
+    )
+    deck_export = DeckExportService(
+        decks,
+        repos.notes,
+        repos.cards,
+        repos.schedules,
+        repos.review_logs,
+        repos.deck_export_writer,
         repos.clock,
     )
     account = AccountService(
@@ -357,6 +372,7 @@ def build_services(repos: Repositories) -> Container:
         goal_service=goal_service,
         planner=planner,
         apkg_import=apkg_import,
+        deck_export=deck_export,
         account=account,
         media=media,
         evaluation=evaluation,

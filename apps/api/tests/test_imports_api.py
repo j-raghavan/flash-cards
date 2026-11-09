@@ -144,3 +144,69 @@ def test_import_rejects_a_bad_selection(member: TestClient, data: dict[str, list
     )
     assert resp.status_code == 422
 
+
+# --- F-IMP-4: export ----------------------------------------------------------
+
+
+def _deck_with_note(client: TestClient) -> str:
+    deck_id: str = client.post("/decks", json={"name": "Spanish Verbs"}).json()["id"]
+    resp = client.post(
+        f"/decks/{deck_id}/notes",
+        json={"note_type": "basic", "fields": {"front": "ser", "back": "to be"}},
+    )
+    assert resp.status_code == 201
+    return deck_id
+
+
+@pytest.mark.parametrize(
+    ("fmt", "media_type"),
+    [
+        ("apkg", "application/octet-stream"),
+        ("csv", "text/csv; charset=utf-8"),
+        ("json", "application/json"),
+    ],
+)
+def test_export_downloads_the_deck(member: TestClient, fmt: str, media_type: str) -> None:
+    deck_id = _deck_with_note(member)
+    resp = member.get(f"/decks/{deck_id}/export", params={"format": fmt})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == media_type
+    assert resp.headers["content-disposition"] == f'attachment; filename="Spanish-Verbs.{fmt}"'
+    assert resp.headers["cache-control"] == "no-store"
+    assert resp.content
+
+
+def test_export_defaults_to_apkg_and_reimports(member: TestClient) -> None:
+    deck_id = _deck_with_note(member)
+    resp = member.get(f"/decks/{deck_id}/export")
+    assert resp.status_code == 200
+    report = _upload(member, resp.content).json()
+    assert report["notes_imported"] == 1 and report["decks_created"] == 1
+
+
+def test_export_requires_auth_and_ownership(
+    member: TestClient, app: FastAPI, seed_invite: Callable[..., str]
+) -> None:
+    deck_id = _deck_with_note(member)
+    assert TestClient(app).get(f"/decks/{deck_id}/export").status_code == 401
+
+    other = TestClient(app)
+    token = seed_invite(role=Role.MEMBER)
+    other.post(
+        "/auth/signup", json={"token": token, "email": "o@example.com", "password": PASSWORD}
+    )
+    assert other.get(f"/decks/{deck_id}/export").status_code == 404
+    assert member.get("/decks/missing/export").status_code == 404
+
+
+def test_export_rejects_an_unknown_format(member: TestClient) -> None:
+    deck_id = _deck_with_note(member)
+    assert member.get(f"/decks/{deck_id}/export", params={"format": "xlsx"}).status_code == 422
+
+
+def test_export_over_the_limit_is_413(
+    member: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deck_id = _deck_with_note(member)
+    monkeypatch.setattr("flashcards.application.deck_export_service.MAX_EXPORT_CARDS", 0)
+    assert member.get(f"/decks/{deck_id}/export").status_code == 413

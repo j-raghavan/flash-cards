@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, ai_slot, current_user, get_container
@@ -14,6 +14,7 @@ from flashcards.api.schemas import (
     DeckRenameRequest,
     DeckSummaryOut,
 )
+from flashcards.domain.deck_export import MAX_EXPORT_CARDS, ExportFormat, ExportTooLarge
 
 router = APIRouter(prefix="/decks", tags=["decks"])
 
@@ -92,3 +93,34 @@ async def delete_deck(
 ) -> Response:
     await container.library.delete_deck(owner_id=caller.user.id, deck_id=deck_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{deck_id}/export",
+    response_class=Response,
+    responses={200: {"content": {"application/octet-stream": {}, "text/csv": {}}}},
+)
+async def export_deck(
+    deck_id: str,
+    export_format: ExportFormat = Query(default=ExportFormat.APKG, alias="format"),
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> Response:
+    """Download the deck and its subdecks as an Anki .apkg, CSV or JSON (F-IMP-4)."""
+    try:
+        exported = await container.deck_export.export(
+            owner_id=caller.user.id, deck_id=deck_id, export_format=export_format
+        )
+    except ExportTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"A deck export holds at most {MAX_EXPORT_CARDS} cards.",
+        ) from exc
+    return Response(
+        content=exported.data,
+        media_type=exported.media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{exported.filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
