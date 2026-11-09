@@ -7,7 +7,7 @@ import { startTransition, useEffect, useId, useRef, useState, type SubmitEvent }
 import { useLocation, useNavigate } from "react-router";
 
 import { account, forgetAiNotice, legal, safeTermsUrl, sessions, type AiQuota, type DeviceSession } from "../api/account";
-import { ApiError, describeError } from "../api/client";
+import { ApiError, NetworkError, describeError } from "../api/client";
 import { auth } from "../api/endpoints";
 import type { User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -136,15 +136,21 @@ function SessionsPanel() {
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const others = (list.data ?? []).filter((session) => !session.current);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   const revoked = (message: string): void => {
+    setError(null);
     setNote(message);
     list.reload();
+    // The control that was used is about to disappear; keep focus in this section.
+    headingRef.current?.focus();
   };
 
   return (
     <section className="panel" aria-labelledby="sessions-heading">
-      <h2 id="sessions-heading">Signed-in devices</h2>
+      <h2 id="sessions-heading" tabIndex={-1} ref={headingRef}>
+        Signed-in devices
+      </h2>
       {list.data === undefined && list.error === null ? <Loading /> : null}
       <ErrorText message={list.error} />
       {list.data === undefined ? null : (
@@ -165,6 +171,7 @@ function SessionsPanel() {
               const result = await sessions.revokeOthers();
               revoked(`Signed out ${String(result.revoked)} other ${result.revoked === 1 ? "device" : "devices"}.`);
             } catch (failure) {
+              setNote(null);
               setError(describeError(failure));
             }
           }}
@@ -258,6 +265,8 @@ function DisclosurePanel() {
 
 // --- data export ---
 
+const EXPORT_URL_LIFETIME_MS = 60_000;
+
 function exportFileName(now: Date): string {
   return `flash-cards-export-${now.toISOString().slice(0, 10)}.json`;
 }
@@ -272,10 +281,10 @@ function saveJson(data: unknown, fileName: string): void {
   document.body.append(link);
   link.click();
   link.remove();
-  // Revoked on the next turn, once the download has started.
+  // Some browsers cancel a download whose URL is revoked straight away.
   window.setTimeout(() => {
     URL.revokeObjectURL(url);
-  }, 0);
+  }, EXPORT_URL_LIFETIME_MS);
 }
 
 function ExportPanel() {
@@ -296,7 +305,11 @@ function ExportPanel() {
           setDone(false);
           void submit.run(async () => {
             // Only a successful answer becomes a file; an error is shown here.
-            saveJson(await account.export(), exportFileName(new Date()));
+            const data = await account.export();
+            if (typeof data !== "object" || data === null) {
+              throw new Error("The server sent an empty export. Try again.");
+            }
+            saveJson(data, exportFileName(new Date()));
             setDone(true);
           });
         }}
@@ -324,12 +337,20 @@ function DeleteDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const submit = useSubmit();
   const inputId = useId();
   const matches = sameEmail(typed, user.email);
+  const running = useRef(false);
+  // Once the request is on its way the dialog stays open, so its outcome is seen.
+  const close = (): void => {
+    if (!running.current) {
+      onClose();
+    }
+  };
 
   const onSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
-    if (!matches) {
+    if (!matches || running.current) {
       return;
     }
+    running.current = true;
     void submit.run(async () => {
       try {
         await account.remove();
@@ -339,7 +360,19 @@ function DeleteDialog({ user, onClose }: { user: User; onClose: () => void }) {
             cause: failure,
           });
         }
-        throw failure;
+        if (failure instanceof NetworkError) {
+          throw new Error(
+            "Could not reach the server, so the account may not be deleted. Check your connection and try again.",
+            { cause: failure },
+          );
+        }
+        // 401: the session is gone, as after a deletion whose answer was lost
+        // on the way back. The data on this device is cleared all the same.
+        if (!(failure instanceof ApiError && failure.status === 401)) {
+          throw failure;
+        }
+      } finally {
+        running.current = false;
       }
       // The server has deleted the account and ended the session. Nothing of
       // it stays on this device: answers waiting to sync, the AI notice flag,
@@ -360,7 +393,7 @@ function DeleteDialog({ user, onClose }: { user: User; onClose: () => void }) {
   };
 
   return (
-    <Dialog title="Delete your account" onClose={onClose}>
+    <Dialog title="Delete your account" onClose={close}>
       <form onSubmit={onSubmit} className="stack">
         <p>
           This permanently deletes your account with all its decks, cards, review history, goals, media and share
@@ -388,7 +421,7 @@ function DeleteDialog({ user, onClose }: { user: User; onClose: () => void }) {
           <button type="submit" className="button danger" disabled={!matches || submit.busy}>
             {submit.busy ? "Deleting…" : "Delete my account permanently"}
           </button>
-          <button type="button" className="button" onClick={onClose}>
+          <button type="button" className="button" disabled={submit.busy} onClick={close}>
             Cancel
           </button>
         </div>

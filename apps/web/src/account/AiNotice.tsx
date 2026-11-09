@@ -20,7 +20,9 @@ function NoticeText() {
   return (
     <p>
       Files you upload here are sent to {disclosure.provider.name} to draft cards.
-      {disclosure.trains_on_user_content ? null : " Your content is never used to train AI models."}
+      {disclosure.trains_on_user_content
+        ? " Your content may be used to train AI models; read the full notice before uploading."
+        : " Your content is never used to train AI models."}
     </p>
   );
 }

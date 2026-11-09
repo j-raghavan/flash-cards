@@ -103,7 +103,17 @@ export function LoginPage() {
   const submit = useSubmit();
   const location = useLocation();
   const next = safeNextPath(params.get("next") ?? new URLSearchParams(location.hash.replace(/^#/, "")).get("next"));
-  const accountDeleted = (location.state as { accountDeleted?: unknown } | null)?.accountDeleted === true;
+  const [accountDeleted] = useState(
+    () => (location.state as { accountDeleted?: unknown } | null)?.accountDeleted === true,
+  );
+  useEffect(() => {
+    // Shown once: a reload or Back does not repeat it.
+    if (accountDeleted) {
+      void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    }
+    // Only on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (user !== null) {
     return <Navigate to={next} replace />;

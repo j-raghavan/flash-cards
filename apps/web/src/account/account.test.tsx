@@ -95,6 +95,7 @@ describe("signed-in devices", () => {
     expect(buttons).toHaveLength(1);
     await userEvent.setup().click(buttons[0] as HTMLElement);
     expect(await within(devices).findByRole("status")).toHaveTextContent("Signed out Safari on iPhone.");
+    expect(within(devices).getByRole("heading", { name: "Signed-in devices" })).toHaveFocus();
     await waitFor(() => {
       expect(within(devices).queryByText("Safari on iPhone")).toBeNull();
     });
@@ -149,6 +150,8 @@ describe("signed-in devices", () => {
     expect(await within(panel("Signed-in devices")).findByRole("alert")).toHaveTextContent(
       "Something went wrong on the server.",
     );
+    // The earlier success message does not linger next to the failure.
+    expect(screen.queryByText("Signed out 2 other devices.")).toBeNull();
   });
 
   it("shows when the device list cannot load", async () => {
@@ -281,6 +284,7 @@ describe("data export", () => {
   }
 
   it("downloads the export as a JSON file", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const downloads = stubDownloads();
     let downloadName = "";
     downloads.click.mockImplementation(function (this: HTMLAnchorElement) {
@@ -288,14 +292,19 @@ describe("data export", () => {
     });
     accountApi({ "GET /account/export": { body: { user: { id: "u1" }, decks: [] } } });
     await openAccount();
-    await userEvent.setup().click(screen.getByRole("button", { name: "Download my data" }));
+    await userEvent
+      .setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) })
+      .click(screen.getByRole("button", { name: "Download my data" }));
     expect(await screen.findByText("Your data has been downloaded.")).toBeInTheDocument();
     expect(downloads.click).toHaveBeenCalledTimes(1);
     expect(downloadName).toMatch(/^flash-cards-export-\d{4}-\d{2}-\d{2}\.json$/);
     expect(JSON.parse(await (downloads.blobs[0] as Blob).text())).toEqual({ user: { id: "u1" }, decks: [] });
-    await waitFor(() => {
-      expect(downloads.revoke).toHaveBeenCalledWith("blob:export");
+    // Kept long enough for the browser to start the download.
+    expect(downloads.revoke).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
     });
+    expect(downloads.revoke).toHaveBeenCalledWith("blob:export");
     expect(document.querySelector("a[download]")).toBeNull();
   });
 
@@ -307,6 +316,15 @@ describe("data export", () => {
     expect(await within(panel("Download your data")).findByRole("alert")).toHaveTextContent("Export failed.");
     expect(downloads.click).not.toHaveBeenCalled();
     expect(downloads.blobs).toEqual([]);
+  });
+
+  it("refuses to save an empty answer", async () => {
+    const downloads = stubDownloads();
+    accountApi({ "GET /account/export": { status: 200 } });
+    await openAccount();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Download my data" }));
+    expect(await within(panel("Download your data")).findByRole("alert")).toHaveTextContent("empty export");
+    expect(downloads.click).not.toHaveBeenCalled();
   });
 });
 
@@ -373,8 +391,56 @@ describe("account deletion", () => {
     const user = await openDialog();
     await user.type(screen.getByLabelText("Type your email address to confirm"), USER.email);
     await user.click(screen.getByRole("button", { name: "Delete my account permanently" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server, so the account may not be deleted.");
     expect(screen.getByRole("heading", { name: "Account", level: 1 })).toBeInTheDocument();
+  });
+
+  it("shows a server failure and keeps the account", async () => {
+    accountApi({ "DELETE /account": { status: 500 } });
+    const user = await openDialog();
+    await user.type(screen.getByLabelText("Type your email address to confirm"), USER.email);
+    await user.click(screen.getByRole("button", { name: "Delete my account permanently" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong on the server.");
+    expect(localStorage.getItem("flashcards.lastUser")).not.toBeNull();
+  });
+
+  it("stays open, without Cancel, Close or Escape, while the request runs", async () => {
+    let answer: (reply: { status: number; body?: unknown }) => void = () => undefined;
+    accountApi({
+      "DELETE /account": () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const user = await openDialog();
+    await user.type(screen.getByLabelText("Type your email address to confirm"), USER.email);
+    await user.click(screen.getByRole("button", { name: "Delete my account permanently" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete your account" });
+    expect(within(dialog).getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Delete your account" })).toBeInTheDocument();
+    answer({ status: 409, body: { detail: "At least one active admin must remain." } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("At least one active admin must remain.");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("clears this device when the session is already gone, as after a lost answer", async () => {
+    setOnline(false);
+    await enqueue({ idempotency_key: "k1", user_id: USER.id, card_id: "c1", deck_id: "d1", rating: 3, queued_at: 1 });
+    rememberAiNoticeSeen(USER.id);
+    accountApi({ "DELETE /account": { status: 401, body: { detail: "Not authenticated." } } });
+    const user = await openDialog();
+    await user.type(screen.getByLabelText("Type your email address to confirm"), USER.email);
+    await user.click(screen.getByRole("button", { name: "Delete my account permanently" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    await waitFor(async () => {
+      expect(await pending(USER.id)).toEqual([]);
+    });
+    expect(aiNoticeSeen(USER.id)).toBe(false);
+    expect(localStorage.getItem("flashcards.lastUser")).toBeNull();
   });
 
   it("still signs out when this browser has no offline storage", async () => {
@@ -451,7 +517,7 @@ describe("AI notice on the generate page", () => {
     expect(await screen.findByText(/sent to this server's AI provider/)).toBeInTheDocument();
   });
 
-  it("repeats the server's statements when AI is off, and says nothing about training it does not promise", async () => {
+  it("repeats the server's statements when AI is off, and warns when content may be used for training", async () => {
     mockApi(
       generateRoutes({
         body: { ai_enabled: false, trains_on_user_content: false, statements: ["AI is off.", "Nothing is sent."], provider: null },
@@ -464,6 +530,7 @@ describe("AI notice on the generate page", () => {
     renderApp("/decks/d1/generate");
     const text = await screen.findByText(/sent to Anthropic to draft cards/);
     expect(text).not.toHaveTextContent("never used to train");
+    expect(text).toHaveTextContent("Your content may be used to train AI models");
   });
 
   it("still shows and hides when storage is blocked", async () => {
