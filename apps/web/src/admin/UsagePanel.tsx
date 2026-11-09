@@ -276,6 +276,9 @@ export function UsagePanel() {
         </p>
       ) : null}
       <h2>{periodLabel(period)}</h2>
+      {users.error === null ? null : (
+        <p className="muted">The user list could not be loaded, so users are shown by id. ({users.error})</p>
+      )}
       <ErrorText message={report.error} />
       {report.data === undefined ? (
         report.error === null ? (

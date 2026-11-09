@@ -201,6 +201,8 @@ describe("admin console", () => {
         body: { id: "i1", token: "fresh", role: "member", email: "new@example.com", expires_at: "2026-11-08T00:00:00Z" },
       },
       "POST /admin/invites": { status: 201, body: { id: "i4", token: "tok", role: "member", email: null, expires_at: "2026-11-15T00:00:00Z" } },
+      "POST /admin/invites/i1/revoke": { status: 204 },
+      "POST /admin/invites/i2/revoke": { status: 204 },
     });
     renderApp("/admin");
     const user = userEvent.setup();
@@ -217,7 +219,25 @@ describe("admin console", () => {
     expect(await screen.findByRole("textbox", { name: "New invite link" })).toHaveValue(inviteUrl("fresh"));
     expect(screen.getByText(/Invite emailed again to new@example.com\./)).toBeInTheDocument();
     expect(calls.filter((c) => c.path === "/admin/invites/i1/resend")).toHaveLength(1);
+    // Revoking another invite keeps the link; revoking this one removes it.
+    const revokeIn = async (email: string): Promise<void> => {
+      const row = screen.getByText(email).closest("tr") as HTMLElement;
+      await user.click(within(row).getByRole("button", { name: "Revoke" }));
+      await user.click(within(row).getByRole("button", { name: "Revoke invite" }));
+    };
+    await revokeIn("Anyone with the link");
+    await waitFor(() => {
+      expect(calls.filter((c) => c.path === "/admin/invites/i2/revoke")).toHaveLength(1);
+    });
+    expect(screen.getByRole("textbox", { name: "New invite link" })).toBeInTheDocument();
+    await revokeIn("new@example.com");
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "New invite link" })).not.toBeInTheDocument();
+    });
     // A new invite replaces the resent link on screen.
+    await user.click(screen.getByRole("button", { name: "Resend" }));
+    await user.click(screen.getByRole("button", { name: "Resend invite" }));
+    expect(await screen.findByRole("textbox", { name: "New invite link" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create invite" }));
     expect(await screen.findByRole("textbox", { name: "Invite link" })).toHaveValue(inviteUrl("tok"));
     expect(screen.queryByRole("textbox", { name: "New invite link" })).not.toBeInTheDocument();

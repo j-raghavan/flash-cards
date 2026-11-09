@@ -151,10 +151,20 @@ describe("instance quotas", () => {
     expect(cap).toHaveFocus();
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
 
+    // A cap equal to this month's spend is reached at once, so it asks too.
+    await user.clear(cap);
+    await user.type(cap, "12.5");
+    await user.click(screen.getByRole("button", { name: "Save quotas" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("A cap of $12.50 refuses all new AI work");
+    // Editing a field while the confirmation is open withdraws it.
+    await user.clear(cap);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await user.type(cap, "10");
+
     await user.click(screen.getByRole("button", { name: "Save quotas" }));
     await user.click(screen.getByRole("button", { name: "Set the cap" }));
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save quotas" })).toHaveFocus();
+    expect(cap).toHaveFocus();
     expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
       default_monthly_pages: 10,
       monthly_spend_cap_micro_usd: 10_000_000,
@@ -189,10 +199,12 @@ describe("instance quotas", () => {
       "GET /admin/usage": { status: 500 },
     });
     const second = renderApp("/admin");
-    await openQuotas();
+    const again = await openQuotas();
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
-    // Without this month's spend there is nothing to compare a cap with, so it saves directly.
-    expect(screen.getByLabelText("Monthly spend cap (US dollars)")).toBeInTheDocument();
+    // Without this month's spend a new cap cannot be compared with it, so it asks.
+    await again.type(screen.getByLabelText("Monthly spend cap (US dollars)"), "5");
+    await again.click(screen.getByRole("button", { name: "Save quotas" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("This month's spend could not be loaded.");
     second.unmount();
 
     mockApi({ ...asAdmin, "GET /admin/quotas": { status: 403, body: { detail: "Admins only." } } });

@@ -53,18 +53,22 @@ function QuotaForm({
   const save = (value: number | null): void => {
     setPending(null);
     setNote(null);
-    void submit.run(async () => {
-      const saved = await adminUsage.setUserQuota(account.id, value);
-      onSaved(saved);
-      setText(saved.override === null ? "" : String(saved.override));
-      setChecked(false);
-      setNote(
-        saved.override === null
-          ? `Override cleared: the instance default of ${pagesText(saved.monthly_pages)} applies.`
-          : `Saved: ${pagesText(saved.monthly_pages)} a month.`,
-      );
-      inputRef.current?.focus();
-    });
+    void submit
+      .run(async () => {
+        const saved = await adminUsage.setUserQuota(account.id, value);
+        onSaved(saved);
+        setText(saved.override === null ? "" : String(saved.override));
+        setChecked(false);
+        setNote(
+          saved.override === null
+            ? `Override cleared: the instance default of ${pagesText(saved.monthly_pages)} applies.`
+            : `Saved: ${pagesText(saved.monthly_pages)} a month.`,
+        );
+      })
+      .then(() => {
+        // After a save or a failure, focus returns to the field (the confirm that had it is gone).
+        inputRef.current?.focus();
+      });
   };
 
   const onSubmit = (event: SubmitEvent): void => {
@@ -74,8 +78,8 @@ function QuotaForm({
       inputRef.current?.focus();
       return;
     }
-    // A limit below what they have already used stops their generation at once.
-    if (pages !== null && pages < quota.used_pages && pages !== quota.override) {
+    // A limit at or below what they have already used stops their generation at once.
+    if (pages !== null && pages <= quota.used_pages && pages !== quota.override) {
       setPending(pages);
       return;
     }
@@ -92,15 +96,17 @@ function QuotaForm({
         <span>Monthly AI pages for {account.email} (pages)</span>
         <input
           ref={inputRef}
-          type="number"
+          // Text, not a number input: a number input reports unparseable text as
+          // empty, which here would silently clear the override.
+          type="text"
           inputMode="numeric"
-          min={0}
-          step={1}
+          autoComplete="off"
           value={text}
           aria-invalid={error !== null}
           aria-describedby={error === null ? `${base}-use ${base}-hint` : `${base}-use ${base}-hint ${base}-error`}
           onChange={(event) => {
             setText(event.target.value);
+            setPending(null);
           }}
         />
       </label>

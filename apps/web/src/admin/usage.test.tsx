@@ -119,6 +119,7 @@ describe("usage report", () => {
     await openUsage();
     expect(await screen.findByText("Prices are not configured.")).toBeInTheDocument();
     expect(screen.getByText("No cap")).toBeInTheDocument();
+    expect(screen.getByText(/The user list could not be loaded, so users are shown by id\./)).toBeInTheDocument();
     // Without the user list, ids stand in for emails.
     expect(screen.getByText(/1 entry by tokens; the largest is u2 with 6,000 tokens/)).toBeInTheDocument();
   });

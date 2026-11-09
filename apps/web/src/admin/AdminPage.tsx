@@ -55,7 +55,7 @@ function UserRow({
     quotaButton.current?.focus();
   };
 
-  const act =(run: () => Promise<AdminUser>, done: string): void => {
+  const act = (run: () => Promise<AdminUser>, done: string): void => {
     setNote(null);
     void action.run(async () => {
       onChanged(await run());
@@ -372,6 +372,9 @@ function InvitesPanel() {
                             setRevokeError(null);
                             try {
                               await admin.revokeInvite(invite.id);
+                              // A link shown for this invite no longer works.
+                              setCreated((shown) => (shown?.id === invite.id ? null : shown));
+                              setResent((shown) => (shown?.id === invite.id ? null : shown));
                               invites.reload();
                             } catch (failure) {
                               setRevokeError(describeError(failure));

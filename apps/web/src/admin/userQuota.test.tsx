@@ -47,7 +47,7 @@ describe("per-user AI quota", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     const input = await screen.findByLabelText("Monthly AI pages for bob@example.com (pages)");
     expect(input).toHaveFocus();
-    expect(input).toHaveValue(null);
+    expect(input).toHaveValue("");
     expect(screen.getByText(/8 pages used of 10 pages in November 2026\. The instance default applies\./)).toBeInTheDocument();
     expect(input).toHaveAccessibleDescription(/8 pages used of 10 pages.*Leave empty to use the instance default\./);
     expect(screen.queryByRole("button", { name: "Use the default" })).not.toBeInTheDocument();
@@ -56,12 +56,12 @@ describe("per-user AI quota", () => {
     await user.click(screen.getByRole("button", { name: "Save quota" }));
     expect(await screen.findByText("Saved: 50 pages a month.")).toBeInTheDocument();
     expect(screen.getByText(/This is an override of the instance default\./)).toBeInTheDocument();
-    expect(input).toHaveValue(50);
+    expect(input).toHaveValue("50");
     expect(input).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "Use the default" }));
     expect(await screen.findByText("Override cleared: the instance default of 10 pages applies.")).toBeInTheDocument();
-    expect(input).toHaveValue(null);
+    expect(input).toHaveValue("");
     expect(calls.filter((c) => c.method === "PUT").map((c) => c.body)).toEqual([{ monthly_pages: 50 }, { monthly_pages: null }]);
 
     // Saving an empty field also clears the override.
@@ -83,37 +83,48 @@ describe("per-user AI quota", () => {
   it("refuses a malformed limit and asks before a limit below this month's use", async () => {
     const calls = mockApi({
       ...base,
-      "GET /admin/users/a1/quota": { body: quota({ user_id: "a1", override: 1, monthly_pages: 1, used_pages: 1 }) },
-      "PUT /admin/users/a1/quota": (call) => ({
-        body: quota({ user_id: "a1", override: (call.body as { monthly_pages: number }).monthly_pages, monthly_pages: 1 }),
-      }),
+      "GET /admin/users/a1/quota": { body: quota({ user_id: "a1", override: 3, monthly_pages: 3, used_pages: 2 }) },
+      "PUT /admin/users/a1/quota": (call) => {
+        const pages = (call.body as { monthly_pages: number }).monthly_pages;
+        return { body: quota({ user_id: "a1", override: pages, monthly_pages: pages, used_pages: 2 }) };
+      },
     });
     renderApp("/admin");
     const user = userEvent.setup();
     // Admins can set their own limit too.
     await user.click(await screen.findByRole("button", { name: "AI quota for root@example.com" }));
     const input = await screen.findByLabelText("Monthly AI pages for root@example.com (pages)");
-    expect(screen.getByText(/1 page used of 1 page/)).toBeInTheDocument();
-    await user.clear(input);
-    await user.type(input, "100001");
-    await user.click(screen.getByRole("button", { name: "Save quota" }));
-    expect(input).toHaveAttribute("aria-invalid", "true");
-    expect(input).toHaveAccessibleDescription(expect.stringContaining(PAGES_ERROR));
-    expect(input).toHaveFocus();
+    expect(screen.getByText(/2 pages used of 3 pages/)).toBeInTheDocument();
+    for (const bad of ["100001", "12a", "1.5"]) {
+      await user.clear(input);
+      await user.type(input, bad);
+      await user.click(screen.getByRole("button", { name: "Save quota" }));
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(input).toHaveAccessibleDescription(expect.stringContaining(PAGES_ERROR));
+      expect(input).toHaveFocus();
+    }
 
+    // A limit equal to the pages already used stops generation too.
     await user.clear(input);
-    await user.type(input, "0");
+    await user.type(input, "2");
     await user.click(screen.getByRole("button", { name: "Save quota" }));
     const confirm = screen.getByRole("alertdialog", { name: "Confirm the quota" });
-    expect(confirm).toHaveTextContent("root@example.com has already used 1 page this month. A limit of 0 pages stops");
+    expect(confirm).toHaveTextContent("root@example.com has already used 2 pages this month. A limit of 2 pages stops");
     expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
     expect(input).toHaveFocus();
+    // Editing the field while the confirmation is open withdraws it.
+    await user.click(screen.getByRole("button", { name: "Save quota" }));
+    await user.clear(input);
+    await user.type(input, "1");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
     await user.click(screen.getByRole("button", { name: "Save quota" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("A limit of 1 page stops");
     await user.click(screen.getByRole("button", { name: "Set the limit" }));
     expect(await screen.findByText("Saved: 1 page a month.")).toBeInTheDocument();
-    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ monthly_pages: 0 });
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ monthly_pages: 1 });
+    expect(input).toHaveFocus();
   });
 
   it("shows a quota that cannot load or save", async () => {
@@ -135,5 +146,6 @@ describe("per-user AI quota", () => {
     await user.type(await screen.findByLabelText(/Monthly AI pages/), "20");
     await user.click(screen.getByRole("button", { name: "Save quota" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong on the server.");
+    expect(screen.getByLabelText(/Monthly AI pages/)).toHaveFocus();
   });
 });

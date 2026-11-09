@@ -63,7 +63,8 @@ function SpendThisMonth({ report, cap }: { report: UsageReport; cap: number | nu
 interface Pending {
   quotas: InstanceQuotas;
   cap: number;
-  spent: number;
+  /** null: this month's spend could not be loaded. */
+  spent: number | null;
 }
 
 function QuotasForm({
@@ -86,7 +87,6 @@ function QuotasForm({
   const submit = useSubmit();
   const pagesRef = useRef<HTMLInputElement>(null);
   const capRef = useRef<HTMLInputElement>(null);
-  const saveRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   const pageCount = parsePages(pages);
@@ -121,9 +121,15 @@ function QuotasForm({
       return;
     }
     const quotas = { default_monthly_pages: pageCount, monthly_spend_cap_micro_usd: capValue };
-    // A new cap below what this month has already spent stops all AI work at once.
-    if (capValue !== null && capValue !== saved.monthly_spend_cap_micro_usd && spent !== undefined && capValue < spent) {
-      setPending({ quotas, cap: capValue, spent });
+    // A new cap at or below what this month has already spent stops all AI work
+    // at once (the server refuses work once spend >= cap). Without this month's
+    // spend there is nothing to compare with, so that asks too.
+    if (
+      capValue !== null &&
+      capValue !== saved.monthly_spend_cap_micro_usd &&
+      (spent === undefined || capValue <= spent)
+    ) {
+      setPending({ quotas, cap: capValue, spent: spent ?? null });
       return;
     }
     save(quotas);
@@ -145,6 +151,7 @@ function QuotasForm({
           aria-describedby={pagesError === null ? "quota-pages-hint" : "quota-pages-hint quota-pages-error"}
           onChange={(event) => {
             setPages(event.target.value);
+            setPending(null);
           }}
         />
       </label>
@@ -168,6 +175,7 @@ function QuotasForm({
           aria-describedby={capError === null ? "quota-cap-hint" : "quota-cap-hint quota-cap-error"}
           onChange={(event) => {
             setCap(event.target.value);
+            setPending(null);
           }}
         />
       </label>
@@ -181,7 +189,7 @@ function QuotasForm({
         </p>
       )}
       <div className="row">
-        <button type="submit" className="button primary" disabled={submit.busy} ref={saveRef}>
+        <button type="submit" className="button primary" disabled={submit.busy}>
           Save quotas
         </button>
         <span role="status" className="muted">
@@ -190,17 +198,25 @@ function QuotasForm({
       </div>
       {pending === null ? null : (
         <div className="confirm" role="alertdialog" aria-label="Confirm the spend cap">
-          <p>
-            This month has already spent {formatUsd(pending.spent)}. A cap of {formatUsd(pending.cap)} refuses all new
-            AI work for everyone until next month.
-          </p>
+          {pending.spent === null ? (
+            <p>
+              This month&apos;s spend could not be loaded. If it is already {formatUsd(pending.cap)} or more, this cap
+              refuses all new AI work for everyone until next month.
+            </p>
+          ) : (
+            <p>
+              This month has already spent {formatUsd(pending.spent)}. A cap of {formatUsd(pending.cap)} refuses all new
+              AI work for everyone until next month.
+            </p>
+          )}
           <div className="row">
             <button
               type="button"
               className="button danger"
               onClick={() => {
                 save(pending.quotas);
-                saveRef.current?.focus();
+                // The confirm goes away and the save button is busy: the field keeps focus.
+                capRef.current?.focus();
               }}
             >
               Set the cap
