@@ -132,15 +132,48 @@ describe("edit card", () => {
     expect(await screen.findByRole("heading", { name: "Deck not found" })).toBeInTheDocument();
   });
 
-  it("explains that custom and image occlusion notes are not edited here yet", async () => {
-    mockApi({ ...me, "GET /notes/n1": { body: note({ note_type: "custom", fields: { Word: "x" } }) } });
+  it("edits the fields of custom and image occlusion notes as plain fields", async () => {
+    const calls = mockApi({
+      ...me,
+      "GET /notes/n1": { body: note({ note_type: "custom", fields: { Word: "chat", Meaning: "" } }) },
+      "PATCH /notes/n1": { body: note() },
+    });
     const { unmount } = renderApp("/notes/n1/edit");
-    expect(await screen.findByText(/Custom notes can be studied here/)).toBeInTheDocument();
+    const user = userEvent.setup();
+    const meaning = await screen.findByLabelText("Meaning");
+    expect(screen.getByRole("radio", { name: "Custom" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Custom" })).toBeDisabled();
+    expect(screen.queryByRole("complementary", { name: "Preview" })).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Word"));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await user.type(meaning, "cat");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
+      fields: { Word: "", Meaning: "cat" },
+      tags: ["bio", "ch::1"],
+    });
     unmount();
-    mockApi({ ...me, "GET /notes/n1": { body: note({ note_type: "image_occlusion", fields: {} }) } });
+    const occlusion = { image_id: "m1", masks: [{ id: 1, left: 0.1, top: 0.1, width: 0.2, height: 0.2 }] };
+    const second = mockApi({
+      ...me,
+      "GET /notes/n1": {
+        body: note({ note_type: "image_occlusion", fields: { header: "Heart", back_extra: "" }, occlusion }),
+      },
+      "PATCH /notes/n1": { body: note() },
+    });
     renderApp("/notes/n1/edit");
-    expect(await screen.findByText(/Image occlusion notes can be studied here/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Header")).toHaveValue("Heart");
+    expect(screen.getByLabelText("Back extra")).toHaveValue("");
     expect(screen.queryByLabelText("Front")).not.toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "The image to hide parts of" })).toHaveAttribute("src", "/api/media/m1");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(second.find((c) => c.method === "PATCH")?.body).toEqual({
+      fields: { header: "Heart", back_extra: "" },
+      tags: ["bio", "ch::1"],
+      occlusion,
+    });
   });
 
   it("shows a note that cannot load", async () => {

@@ -81,6 +81,8 @@ export interface Note {
   tags: string[];
   created_at: string;
   cards: Card[];
+  note_type_id?: string | null;
+  occlusion?: Occlusion | null;
 }
 
 export type Rating = 1 | 2 | 3 | 4;
@@ -180,3 +182,139 @@ export interface Draft {
 }
 
 export const TERMINAL_JOB_STATUSES: readonly JobStatus[] = ["succeeded", "failed", "cancelled"];
+
+// --- goals and plans (F-PLAN-1, F-PLAN-2) ---
+
+export interface Goal {
+  id: string;
+  name: string;
+  deck_ids: string[];
+  exam_date: string;
+  target_retention: number;
+  created_at: string;
+}
+
+export interface GoalInput {
+  name: string;
+  deck_ids: string[];
+  exam_date: string;
+  /** The desired-grade slider, 0 to 1; the server maps it onto a retention target. */
+  desired_grade: number;
+}
+
+export interface StudyPlan {
+  days_until_exam: number;
+  total_cards: number;
+  new_cards: number;
+  scheduled_cards: number;
+  new_per_day: number;
+  reviews_per_day: number;
+  readiness: number;
+  on_track: boolean;
+}
+
+// --- sharing (F-SHARE-1..3) ---
+
+export interface ShareLink {
+  id: string;
+  deck_id: string;
+  allow_clone: boolean;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+/** A new link; its token is shown once, since only a hash of it is stored. */
+export interface CreatedShareLink extends ShareLink {
+  token: string;
+}
+
+export interface SharedNote {
+  deck_index: number;
+  note_type: NoteType;
+  fields: Fields;
+}
+
+export interface SharedDeck {
+  name: string;
+  decks: { name: string; depth: number }[];
+  deck_count: number;
+  notes: SharedNote[];
+  note_count: number;
+  allow_clone: boolean;
+}
+
+// --- import (F-IMP-1) ---
+
+export interface ImportReport {
+  decks_created: number;
+  notes_imported: number;
+  notes_skipped: number;
+}
+
+// --- admin (F-ADMIN-1, F-ADMIN-2, F-ADMIN-5) ---
+
+export type InviteStatus = "active" | "redeemed" | "revoked" | "expired";
+
+export interface Invite {
+  id: string;
+  role: Role;
+  email: string | null;
+  status: InviteStatus;
+  created_at: string;
+  expires_at: string;
+}
+
+export interface CreatedInvite {
+  id: string;
+  token: string;
+  role: Role;
+  email: string | null;
+  expires_at: string;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: Role;
+  email_verified: boolean;
+  suspended: boolean;
+  created_at: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  action: string;
+  created_at: string;
+  actor_id: string | null;
+  target_id: string | null;
+  detail: Record<string, string>;
+}
+
+// --- custom note types and media (F-CARD-3, F-CARD-4, F-CARD-5) ---
+
+export interface NoteTypeDef {
+  id: string;
+  name: string;
+  fields: string[];
+  templates: CardTemplate[];
+  created_at: string;
+}
+
+/** A template to save; an ordinal keeps an existing template and its cards. */
+export interface TemplateInput {
+  ordinal?: number;
+  name: string;
+  front: string;
+  back: string;
+}
+
+export interface NoteTypeInput {
+  name: string;
+  fields: string[];
+  templates: TemplateInput[];
+}
+
+export interface MediaAsset {
+  id: string;
+  content_type: string;
+}

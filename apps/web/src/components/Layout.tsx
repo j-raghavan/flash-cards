@@ -50,8 +50,10 @@ export function Layout() {
     return <Loading />;
   }
   if (user === null) {
-    const next = `${location.pathname}${location.search}`;
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+    // A page whose fragment carries a token (a shared-deck link) passes it on
+    // in the login page's fragment too, which is never sent to a server.
+    const next = encodeURIComponent(`${location.pathname}${location.search}${location.hash}`);
+    return <Navigate to={location.hash === "" ? `/login?next=${next}` : `/login#next=${next}`} replace />;
   }
 
   return (
@@ -68,6 +70,9 @@ export function Layout() {
             Decks
           </NavLink>
           <NavLink to="/cards">Browse</NavLink>
+          <NavLink to="/goals">Goals</NavLink>
+          <NavLink to="/progress">Progress</NavLink>
+          {user.role === "admin" ? <NavLink to="/admin">Admin</NavLink> : null}
         </nav>
         <button
           type="button"
