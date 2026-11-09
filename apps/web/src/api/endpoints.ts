@@ -20,7 +20,6 @@ import type {
   Fields,
   Goal,
   GoalInput,
-  ImportReport,
   Invite,
   Job,
   MediaAsset,
@@ -166,16 +165,6 @@ export const shares = {
   revoke: (shareId: string) => request<ShareLink>(`/shares/${id(shareId)}/revoke`, { method: "POST" }),
   preview: (token: string) => request<SharedDeck>(`/shared/${id(token)}`),
   clone: (token: string) => request<Deck>(`/shared/${id(token)}/clone`, { method: "POST" }),
-};
-
-// --- import ---
-
-export const imports = {
-  apkg: (file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    return request<ImportReport>("/import/apkg", { method: "POST", form });
-  },
 };
 
 // --- admin ---

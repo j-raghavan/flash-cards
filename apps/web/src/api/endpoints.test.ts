@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mockApi } from "../test/helpers";
-import { admin, ai, auth, browserParams, cards, decks, goals, imports, media, notes, noteTypes, shares } from "./endpoints";
+import { admin, ai, auth, browserParams, cards, decks, goals, media, notes, noteTypes, shares } from "./endpoints";
 import { plans, progress, reviews } from "./studyProgress";
 
 describe("browserParams", () => {
@@ -105,7 +105,6 @@ describe("endpoints", () => {
       shares.revoke("s1"),
       shares.preview("t/1"),
       shares.clone("t1"),
-      imports.apkg(file),
       admin.invites(),
       admin.createInvite(null, "member", 7),
       admin.revokeInvite("i1"),
@@ -147,7 +146,6 @@ describe("endpoints", () => {
       "POST /shares/s1/revoke",
       "GET /shared/t%2F1",
       "POST /shared/t1/clone",
-      "POST /import/apkg",
       "GET /admin/invites",
       "POST /admin/invites",
       "POST /admin/invites/i1/revoke",
@@ -177,8 +175,8 @@ describe("endpoints", () => {
     expect(calls[0]?.body).toEqual({ note_type: "image_occlusion", fields: { header: "" }, tags: [], occlusion });
     expect(calls[1]?.body).toEqual({ fields: { header: "h" }, tags: [], occlusion });
     expect(calls[9]?.body).toEqual({ allow_clone: true });
-    expect(calls[16]?.body).toEqual({ email: null, role: "member", ttl_days: 7 });
-    expect(calls[22]?.body).toEqual({ role: "admin" });
-    expect(calls[29]?.body).toEqual({ ...types, renamed: { B: "A" } });
+    expect(calls[15]?.body).toEqual({ email: null, role: "member", ttl_days: 7 });
+    expect(calls[21]?.body).toEqual({ role: "admin" });
+    expect(calls[28]?.body).toEqual({ ...types, renamed: { B: "A" } });
   });
 });

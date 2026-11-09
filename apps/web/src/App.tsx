@@ -11,6 +11,7 @@ import { DeckDetailPage } from "./pages/DeckDetailPage";
 import { DeckListPage } from "./pages/DeckListPage";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GoalPage, GoalsPage } from "./pages/GoalsPage";
+import { ImportPage } from "./pages/ImportPage";
 import { SharedDeckPage, SharePage } from "./pages/SharePage";
 import { JobPage } from "./pages/JobPage";
 import { EditNotePage, NewNotePage } from "./pages/NoteEditorPage";
@@ -55,6 +56,7 @@ export function AppRoutes() {
         <Route path="/jobs/:jobId" element={<JobPage />} />
         <Route path="/decks/:deckId/share" element={<SharePage />} />
         <Route path="/shared" element={<SharedDeckPage />} />
+        <Route path="/import" element={<ImportPage />} />
         <Route path="/goals" element={<GoalsPage />} />
         <Route path="/goals/:goalId" element={<GoalPage />} />
         <Route

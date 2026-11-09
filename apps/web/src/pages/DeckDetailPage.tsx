@@ -6,6 +6,7 @@ import { useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { describeError } from "../api/client";
+import { exportUrl } from "../api/ankiRoundTrip";
 import { decks } from "../api/endpoints";
 import type { Deck, DeckStats } from "../api/types";
 import { ConfirmButton, ErrorText, Loading, ProficiencyRing } from "../components/ui";
@@ -208,6 +209,21 @@ export function DeckDetailPage() {
         />
       </div>
       <ErrorText message={deleteError} />
+      <p className="muted">
+        Download this deck with its sub-decks:{" "}
+        <a href={exportUrl(deckId, "apkg")} download>
+          Anki package
+        </a>
+        ,{" "}
+        <a href={exportUrl(deckId, "csv")} download>
+          CSV
+        </a>{" "}
+        or{" "}
+        <a href={exportUrl(deckId, "json")} download>
+          JSON
+        </a>{" "}
+        (keeps everything, including custom and image occlusion notes).
+      </p>
     </section>
   );
 }

@@ -106,6 +106,9 @@ export function DeckListPage() {
             <DeckTree nodes={buildDeckTree(list.data)} />
           )}
           <CreateDeckForm all={list.data} onCreated={list.reload} />
+          <p>
+            <Link to="/import">Import decks from Anki</Link>
+          </p>
         </>
       )}
     </section>

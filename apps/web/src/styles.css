@@ -734,6 +734,41 @@ progress {
   font-variant-numeric: tabular-nums;
 }
 
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.steps [aria-current="step"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.report {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px 20px;
+}
+
+.report dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.report dd {
+  margin: 0;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+h1:focus,
+h2:focus {
+  outline: none;
+}
+
 .small {
   font-size: 0.85rem;
   margin: 0 0 4px;
