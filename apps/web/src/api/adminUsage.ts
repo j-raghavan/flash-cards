@@ -34,7 +34,19 @@ export interface UsageReport {
   by_provider: ProviderUsage[];
 }
 
+/** The server's bounds (domain/quotas.py and api/ai_schemas.py). */
+export const MAX_MONTHLY_PAGES = 100_000;
+export const MAX_SPEND_CAP_MICRO_USD = 10_000_000 * 1_000_000;
+
+export interface InstanceQuotas {
+  default_monthly_pages: number;
+  /** null: no cap. */
+  monthly_spend_cap_micro_usd: number | null;
+}
+
 export const adminUsage = {
+  quotas: () => request<InstanceQuotas>("/admin/quotas"),
+  setQuotas: (quotas: InstanceQuotas) => request<InstanceQuotas>("/admin/quotas", { method: "PUT", json: quotas }),
   /** The month's usage; null asks for the current month. */
   usage: (period: string | null) =>
     request<UsageReport>(period === null ? "/admin/usage" : `/admin/usage?${new URLSearchParams({ period }).toString()}`),
@@ -53,6 +65,39 @@ export function formatUsd(micro: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: small ? 6 : 2,
   }).format(micro / MICRO_PER_USD);
+}
+
+/**
+ * Dollars typed by a person ("25", "12.50", "$0.005") as micro-USD, or null when
+ * the text is not an amount. Parsed digit by digit, so there is no float rounding.
+ */
+export function parseUsd(text: string): number | null {
+  const match = /^\$?(\d{1,8})(?:\.(\d{0,6}))?$/.exec(text.trim());
+  if (match === null) {
+    return null;
+  }
+  const whole = Number(match[1]);
+  const fraction = Number((match[2] ?? "").padEnd(6, "0"));
+  return whole * MICRO_PER_USD + fraction;
+}
+
+/** Micro-USD as plain dollars for an input, e.g. 12_500_000 as "12.5". */
+export function usdInput(micro: number): string {
+  const whole = Math.floor(micro / MICRO_PER_USD);
+  const fraction = String(micro % MICRO_PER_USD)
+    .padStart(6, "0")
+    .replace(/0+$/, "");
+  return fraction === "" ? String(whole) : `${String(whole)}.${fraction}`;
+}
+
+/** A whole page count within the server's bounds (0 to MAX_MONTHLY_PAGES), or null. */
+export function parsePages(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d{1,6}$/.test(trimmed)) {
+    return null;
+  }
+  const pages = Number(trimmed);
+  return pages <= MAX_MONTHLY_PAGES ? pages : null;
 }
 
 // --- billing months ---

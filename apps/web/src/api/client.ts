@@ -68,7 +68,7 @@ export function onUnauthorized(handler: (() => void) | null): void {
 }
 
 export interface RequestOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   json?: unknown;
   form?: FormData;
   signal?: AbortSignal;

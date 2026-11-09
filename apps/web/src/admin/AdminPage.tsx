@@ -14,6 +14,7 @@ import { ConfirmButton, CopyField, ErrorText, Loading } from "../components/ui";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { QuotasPanel } from "./QuotasPanel";
 import { UsagePanel } from "./UsagePanel";
 
 function formatTime(iso: string): string {
@@ -413,6 +414,7 @@ function AuditPanel() {
 const TABS = [
   { id: "users", label: "Users" },
   { id: "invites", label: "Invites" },
+  { id: "quotas", label: "Quotas" },
   { id: "usage", label: "Usage" },
   { id: "audit", label: "Audit log" },
 ] as const;
@@ -484,6 +486,7 @@ export function AdminPage() {
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="tab-panel" tabIndex={0}>
         {tab === "users" ? <UsersPanel selfId={user.id} /> : null}
         {tab === "invites" ? <InvitesPanel /> : null}
+        {tab === "quotas" ? <QuotasPanel /> : null}
         {tab === "usage" ? <UsagePanel /> : null}
         {tab === "audit" ? <AuditPanel /> : null}
       </div>
