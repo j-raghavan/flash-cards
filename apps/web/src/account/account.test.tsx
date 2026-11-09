@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AiDisclosure, AiQuota, DeviceSession } from "../api/account";
-import { aiNoticeSeen, rememberAiNoticeSeen, safeTermsUrl } from "../api/account";
+import { aiNoticeSeen, forgetAiNotice, rememberAiNoticeSeen, safeTermsUrl } from "../api/account";
 import { enqueue, pending, resetForTests } from "../offline/reviewQueue";
 import { USER, mockApi, renderApp, type Call } from "../test/helpers";
 import { formatPeriod } from "./AccountPage";
@@ -401,5 +401,88 @@ describe("account deletion", () => {
     await user.click(opener);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("AI notice on the generate page", () => {
+  const generateRoutes = (disclosure: Routes[string]): Routes => ({
+    "GET /auth/me": { body: USER },
+    "GET /legal/ai-disclosure": disclosure,
+  });
+
+  function notice(): HTMLElement {
+    return screen.getByRole("complementary", { name: "How your files are used" });
+  }
+
+  it("names the provider before the first upload and stays dismissed for this user", async () => {
+    mockApi(generateRoutes({ body: DISCLOSURE }));
+    const first = renderApp("/decks/d1/generate");
+    expect(await screen.findByText(/sent to Anthropic to draft cards/)).toHaveTextContent(
+      "Your content is never used to train AI models.",
+    );
+    await userEvent.setup().click(within(notice()).getByRole("button", { name: "Got it" }));
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(aiNoticeSeen(USER.id)).toBe(true);
+    expect(aiNoticeSeen("someone-else")).toBe(false);
+    first.unmount();
+    renderApp("/decks/d1/generate");
+    expect(await screen.findByRole("heading", { name: "Generate cards from a file" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
+  it("links to the full notice on the account page and scrolls to it", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    accountApi();
+    renderApp("/decks/d1/generate");
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("link", { name: "Read the full AI data-use notice" }));
+    expect(await screen.findByRole("heading", { name: "Account", level: 1 })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(scroll).toHaveBeenCalledTimes(1);
+    });
+    expect(scroll.mock.contexts[0]).toBe(document.getElementById("ai-data"));
+  });
+
+  it("says something useful while or when the disclosure cannot load", async () => {
+    mockApi(generateRoutes({ status: 500 }));
+    renderApp("/decks/d1/generate");
+    expect(await screen.findByText(/sent to this server's AI provider/)).toBeInTheDocument();
+  });
+
+  it("repeats the server's statements when AI is off, and says nothing about training it does not promise", async () => {
+    mockApi(
+      generateRoutes({
+        body: { ai_enabled: false, trains_on_user_content: false, statements: ["AI is off.", "Nothing is sent."], provider: null },
+      }),
+    );
+    const view = renderApp("/decks/d1/generate");
+    expect(await screen.findByText("AI is off. Nothing is sent.")).toBeInTheDocument();
+    view.unmount();
+    mockApi(generateRoutes({ body: { ...DISCLOSURE, trains_on_user_content: true } }));
+    renderApp("/decks/d1/generate");
+    const text = await screen.findByText(/sent to Anthropic to draft cards/);
+    expect(text).not.toHaveTextContent("never used to train");
+  });
+
+  it("still shows and hides when storage is blocked", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    mockApi(generateRoutes({ body: DISCLOSURE }));
+    renderApp("/decks/d1/generate");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Got it" }));
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(aiNoticeSeen(USER.id)).toBe(false);
+    expect(() => {
+      forgetAiNotice(USER.id);
+    }).not.toThrow();
   });
 });

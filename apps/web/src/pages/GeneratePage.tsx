@@ -5,6 +5,7 @@
 import { useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { AiNotice } from "../account/AiNotice";
 import { ai } from "../api/endpoints";
 import type { JobStatus, Thoroughness } from "../api/types";
 import { ErrorText } from "../components/ui";
@@ -69,6 +70,7 @@ export function GeneratePage() {
         Upload lecture slides, a PDF or a photo of your notes. The AI drafts cards; nothing is added to the deck until
         you approve it.
       </p>
+      <AiNotice />
       <form onSubmit={onSubmit} className="stack">
         <label className="field">
           <span>File (PDF, PNG or JPEG, up to 25 MB)</span>

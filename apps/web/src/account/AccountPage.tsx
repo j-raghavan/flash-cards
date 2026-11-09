@@ -3,8 +3,8 @@
 // page quota, the AI data-use disclosure (F-LEGAL-2), data export and account
 // deletion (F-IMP-5, NF-PRIV-1). Loaded on first visit.
 
-import { startTransition, useEffect, useId, useState, type SubmitEvent } from "react";
-import { useNavigate } from "react-router";
+import { startTransition, useEffect, useId, useRef, useState, type SubmitEvent } from "react";
+import { useLocation, useNavigate } from "react-router";
 
 import { account, forgetAiNotice, legal, safeTermsUrl, sessions, type AiQuota, type DeviceSession } from "../api/account";
 import { ApiError, describeError } from "../api/client";
@@ -225,8 +225,17 @@ function DisclosurePanel() {
   const disclosure = useResource(legal.aiDisclosure, "ai-disclosure");
   const provider = disclosure.data?.provider ?? null;
   const terms = safeTermsUrl(provider?.terms_url ?? null);
+  const { hash } = useLocation();
+  const ref = useRef<HTMLElement>(null);
+  const loaded = disclosure.data !== undefined;
+  useEffect(() => {
+    // Arriving from the notice on the generate page: bring this section into view.
+    if (loaded && hash === "#ai-data") {
+      ref.current?.scrollIntoView();
+    }
+  }, [loaded, hash]);
   return (
-    <section className="panel" id="ai-data" aria-labelledby="ai-data-heading">
+    <section className="panel" id="ai-data" aria-labelledby="ai-data-heading" ref={ref}>
       <h2 id="ai-data-heading">How AI features use your content</h2>
       {disclosure.loading ? <Loading /> : null}
       <ErrorText message={disclosure.error} />
