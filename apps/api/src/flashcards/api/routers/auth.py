@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Authentication routes: signup, login, logout, current user, sessions, email
-verification and password reset (F-AUTH-1, F-AUTH-2)."""
+verification, password reset and optional public sign-up (F-AUTH-1, F-AUTH-2,
+F-AUTH-7)."""
 
 from __future__ import annotations
 
@@ -20,9 +21,11 @@ from flashcards.api.deps import (
     set_session_cookie,
 )
 from flashcards.api.schemas import (
+    InstanceInfoOut,
     LoginRequest,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
+    RegisterRequest,
     SessionOut,
     SessionsRevokedOut,
     SignupRequest,
@@ -44,6 +47,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _INVALID_LINK = "This link is invalid or has expired."
+_REGISTER_ACCEPTED = (
+    "If the address can be registered, an email is on its way. Follow it, then sign in."
+)
 
 
 def _device(request: Request) -> str:
@@ -73,6 +79,12 @@ async def _send_quietly(mailer: Mailer, email: OutgoingEmail) -> None:
         logger.exception("could not send email: %s", email.subject)
 
 
+@router.get("/options", response_model=InstanceInfoOut)
+def auth_options(settings: Settings = Depends(get_settings)) -> InstanceInfoOut:
+    """Whether sign-up needs an invite, so a client knows which form to show."""
+    return InstanceInfoOut(invite_only=settings.invite_only)
+
+
 @router.post("/signup", status_code=status.HTTP_201_CREATED, response_model=UserOut)
 async def signup(
     body: SignupRequest,
@@ -99,6 +111,50 @@ async def signup(
     set_session_cookie(response, issued.raw_token, settings)
     _send_later(tasks, container.mailer, await container.account_email.verification_email(user))
     return UserOut.from_user(user)
+
+
+@router.post("/register", status_code=status.HTTP_202_ACCEPTED)
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    tasks: BackgroundTasks,
+    container: Container = Depends(get_container, scope="function"),
+    settings: Settings = Depends(get_settings),
+) -> JSONResponse:
+    """Public sign-up, only when INVITE_ONLY is false (F-AUTH-7).
+
+    Answers 202 whether or not the email already has an account, and does not
+    sign in: the new account's owner follows the verification email, then signs
+    in. Every outcome is returned rather than raised, so the attempt counted
+    against the client is committed even when the request is refused.
+    """
+    if settings.invite_only:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
+    # Behind a reverse proxy this is the proxy's address unless the server trusts
+    # its forwarded headers (uvicorn --proxy-headers --forwarded-allow-ips).
+    client: str = getattr(request.client, "host", "unknown")
+    try:
+        outcome = await container.public_signup.register(
+            email=body.email, password=body.password, client=client
+        )
+    except LoginLocked as exc:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"detail": "Too many sign-up attempts. Try again later."},
+            headers={"Retry-After": _retry_after(exc)},
+        )
+    except (WeakPassword, InvalidEmail) as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(exc)}
+        )
+    if outcome.created:
+        email = await container.account_email.verification_email(outcome.user)
+    else:
+        email = container.account_email.account_exists_email(outcome.user)
+    _send_later(tasks, container.mailer, email)
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED, content={"detail": _REGISTER_ACCEPTED}
+    )
 
 
 @router.post("/login", response_model=UserOut)

@@ -66,6 +66,7 @@ from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
 from flashcards.application.note_type_service import NoteTypeService
 from flashcards.application.planner_service import PlannerService
+from flashcards.application.public_signup_service import PublicSignupService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.session_service import SessionService
@@ -188,6 +189,7 @@ class Container:
     sign_in: SignInService
     account_email: AccountEmailService
     sessions: SessionService
+    public_signup: PublicSignupService
     mailer: Mailer
 
 
@@ -363,6 +365,9 @@ def build_services(repos: Repositories) -> Container:
         sign_in=sign_in,
         account_email=account_email,
         sessions=SessionService(repos.sessions, audit, repos.clock),
+        public_signup=PublicSignupService(
+            repos.users, repos.hasher, repos.login_throttle, audit, repos.clock
+        ),
         mailer=repos.mailer,
     )
 

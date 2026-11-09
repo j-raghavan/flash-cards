@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FLASHCARDS_", env_file=".env", extra="ignore")
 
     environment: str = "development"
+    # F-AUTH-7: with false, anyone can create a member account at POST /auth/register
+    # (throttled per client, verification email sent). Invites keep working either way.
     invite_only: bool = True
     max_upload_pages: int = 20
     # Session cookie is marked Secure by default; turn off only for HTTP in tests.

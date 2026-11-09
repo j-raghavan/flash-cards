@@ -44,6 +44,19 @@ class SignupRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    """Public sign-up (F-AUTH-7), offered only when INVITE_ONLY is false."""
+
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=1024)
+
+
+class InstanceInfoOut(BaseModel):
+    """Public facts a client needs before sign-in."""
+
+    invite_only: bool
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str

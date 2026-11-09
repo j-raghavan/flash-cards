@@ -321,6 +321,8 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
     app.state.container = container
     app.state.services_provider = provider
     app.state.event_stream_slots = StreamSlots()
+    if not settings.invite_only:
+        logger.warning("INVITE_ONLY is off: anyone can create an account at /auth/register.")
     app.state.bootstrap_invite_token = _maybe_bootstrap_invite(settings, container)
 
     _register_error_handlers(app)
