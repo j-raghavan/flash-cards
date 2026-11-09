@@ -22,7 +22,7 @@ describe("document chat", () => {
   it("asks with Enter, keeps Shift+Enter for new lines, and cites file and page", async () => {
     const answers: ChatAnswer[] = [
       {
-        answer: "ATP is made in the **mitochondria**. <img src=x onerror=alert(1)>",
+        answer: "ATP is made in the **mitochondria**. <img src=x onerror=alert(1)> [Sign in](https://evil.example/login)",
         citations: [
           { file_id: "f-a", page: 3 },
           { file_id: "f-b", page: 1 },
@@ -49,6 +49,9 @@ describe("document chat", () => {
     const log = within(region).getByRole("log", { name: "Conversation" });
     expect(await within(log).findByText("mitochondria")).toBeInTheDocument();
     expect(log.querySelector("img[onerror]")).toBeNull();
+    // A link the model repeats from a document is text, never something to click.
+    expect(log.querySelector("a")).toBeNull();
+    expect(log).toHaveTextContent("Sign in (https://evil.example/login)");
     expect(within(log).getByText(/Where is ATP made\?/)).toBeInTheDocument();
     expect(within(log).getByText(/AI-generated answer/)).toBeInTheDocument();
     const first = within(log).getAllByRole("list", { name: "Sources" })[0] as HTMLElement;

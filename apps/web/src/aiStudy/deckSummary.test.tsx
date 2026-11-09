@@ -19,8 +19,9 @@ describe("deck summary", () => {
       ...page,
       "POST /decks/d1/summary": {
         body: {
-          summary: "Cells make **energy**. <img src=x onerror=alert(1)><a href=\"javascript:alert(1)\">x</a>",
-          key_points: ["ATP stores energy", "<script>alert(1)</script>Mitochondria"],
+          summary:
+            "Cells make **energy**. <img src=x onerror=alert(1)><a href=\"javascript:alert(1)\">x</a> [more](https://evil.example/s)",
+          key_points: ["ATP stores energy", "<script>alert(1)</script>Mitochondria", "See https://evil.example/kp"],
         },
       },
     });
@@ -36,6 +37,10 @@ describe("deck summary", () => {
     expect(within(region).getByRole("heading", { name: "Key points" })).toBeInTheDocument();
     expect(within(region).getByText("ATP stores energy")).toBeInTheDocument();
     expect(region.querySelector("img[onerror], script, a[href^='javascript']")).toBeNull();
+    // Links in the summary and its key points are text showing the address.
+    expect(region.querySelector(".card-content a")).toBeNull();
+    expect(region).toHaveTextContent("more (https://evil.example/s)");
+    expect(within(region).getByText("See https://evil.example/kp")).toBeInTheDocument();
     expect(within(region).getByRole("button", { name: "Summarize again" })).toBeEnabled();
   });
 

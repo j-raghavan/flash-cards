@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Card text is Markdown with KaTeX math. It comes from users, imports, shared
 // decks and AI output, so it is untrusted: the Markdown is rendered to HTML and
-// sanitized with DOMPurify before it reaches the DOM.
+// sanitized with DOMPurify before it reaches the DOM. AI output is
+// rendered with its links turned into plain text.
 
 import DOMPurify from "dompurify";
 import katex from "katex";
@@ -126,12 +127,35 @@ function insertMath(root: Node, parts: MathPart[]): void {
 }
 
 /**
+ * Replace every link with plain text that shows where it pointed: the link
+ * text, then the address in brackets when it differs. Model output can repeat
+ * text planted in a source document, so an AI answer must not hand the reader
+ * a clickable phishing link.
+ */
+function linksToText(root: DocumentFragment): void {
+  for (const anchor of Array.from(root.querySelectorAll("a, area"))) {
+    const href = anchor.getAttribute("href");
+    const label = anchor.textContent.trim();
+    const parts: Node[] = Array.from(anchor.childNodes);
+    if (href !== null && href !== "" && href !== label && `mailto:${label}` !== href) {
+      parts.push(document.createTextNode(` (${href})`));
+    }
+    anchor.replaceWith(...parts);
+  }
+}
+
+export interface RenderOptions {
+  /** Render links as text showing their address, for AI output. */
+  linksAsText?: boolean;
+}
+
+/**
  * Markdown and math to sanitized HTML. The Markdown is sanitized on its own,
  * with no style or id and no class but the cloze marks, so card text cannot
  * restyle or imitate the app. KaTeX output is then put into text positions
  * and keeps the inline styles it needs.
  */
-export function renderMarkdown(source: string): string {
+export function renderMarkdown(source: string, options: RenderOptions = {}): string {
   installHooks();
   const { text, parts } = extractMath(source);
   const fragment = DOMPurify.sanitize(marked.parse(text, { async: false }), {
@@ -140,6 +164,9 @@ export function renderMarkdown(source: string): string {
     FORBID_ATTR: ["style", "id", "srcset"],
     RETURN_DOM_FRAGMENT: true,
   });
+  if (options.linksAsText === true) {
+    linksToText(fragment);
+  }
   insertMath(fragment, parts);
   const container = document.createElement("div");
   container.append(fragment);

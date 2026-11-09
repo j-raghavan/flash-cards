@@ -141,7 +141,7 @@ export function DeckChatPanel({ deckId }: { deckId: string }) {
             {turn.answer !== undefined ? (
               <div className="chat-answer">
                 <AiLabel>AI-generated answer. Check the cited pages.</AiLabel>
-                <CardContent markdown={turn.answer} />
+                <CardContent aiOutput markdown={turn.answer} />
                 {turn.citations !== undefined && turn.citations.length > 0 ? (
                   <ul className="citations" aria-label="Sources">
                     {distinctCitations(turn.citations).map((c) => (

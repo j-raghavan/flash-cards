@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 
-import { Dialog } from "./ui";
+import { CardContent, Dialog } from "./ui";
 
 function Harness({ withField = true }: { withField?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -66,5 +66,18 @@ describe("Dialog", () => {
     await user.click(screen.getByRole("button", { name: "Open" }));
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("CardContent", () => {
+  it("keeps links in card text clickable", () => {
+    render(<CardContent markdown="[site](https://example.com)" />);
+    expect(screen.getByRole("link", { name: "site" })).toHaveAttribute("href", "https://example.com");
+  });
+
+  it("shows links in AI output as text with their address", () => {
+    const { container } = render(<CardContent aiOutput markdown="[site](https://evil.example)" />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container).toHaveTextContent("site (https://evil.example)");
   });
 });

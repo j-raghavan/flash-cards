@@ -268,9 +268,9 @@ function ExamForm({
           <li key={question.id} className="exam-question">
             <div className="muted exam-topic">
               <span>Topic: </span>
-              <CardContent markdown={question.topic} className="inline" />
+              <CardContent aiOutput markdown={question.topic} className="inline" />
             </div>
-            <CardContent markdown={question.prompt} />
+            <CardContent aiOutput markdown={question.prompt} />
             <label className="field">
               <span>Answer to question {index + 1}</span>
               <textarea
@@ -349,7 +349,7 @@ function ExamResultView({
               // Topics are model text and may repeat; the row order is stable.
               <tr key={index}>
                 <td>
-                  <CardContent markdown={topic.topic} className="inline" />
+                  <CardContent aiOutput markdown={topic.topic} className="inline" />
                 </td>
                 <td>{topic.question_count}</td>
                 <td>{percent(topic.score)}</td>
@@ -364,7 +364,7 @@ function ExamResultView({
           const given = (answers[question.id] ?? "").trim();
           return (
             <li key={question.id} className="exam-question">
-              <CardContent markdown={question.prompt} />
+              <CardContent aiOutput markdown={question.prompt} />
               <p className="muted">Your answer:</p>
               {given === "" ? <p className="muted">No answer</p> : <p className="typed-answer">{given}</p>}
               <p>Score: {percent(scores.get(question.id) ?? 0)}</p>
