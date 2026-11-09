@@ -16,13 +16,14 @@ from flashcards.adapters.memory import (
     InMemoryQuotaRepository,
     InMemoryQuotaSettingsRepository,
     InMemoryUsageRepository,
+    NullUnitOfWork,
 )
 from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_spend import AiSpend
 from flashcards.application.deck_service import DeckService
 from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
-from flashcards.domain.ai import StructuredRequest, StructuredResult, TokenUsage
+from flashcards.domain.ai import InvalidModelOutput, StructuredRequest, StructuredResult, TokenUsage
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.mock_exam import (
     SUBMIT_GRACE_SECONDS,
@@ -171,7 +172,12 @@ def _service(
     exams_repo = InMemoryMockExamRepository()
     decks = DeckService(decks_repo, clock)
     notes = NoteService(decks, notes_repo, cards_repo, clock)
-    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock, _spend(clock))
+    budget = AiCallBudget(
+        InMemoryQuotaRepository(limit=100),
+        clock,
+        _spend(clock),
+        NullUnitOfWork(),
+    )
     service = MockExamService(
         decks, notes_repo, cards_repo, exams_repo, llm, budget, clock, unlock_cards=unlock_cards
     )
@@ -376,10 +382,34 @@ async def test_a_concurrent_submission_wins() -> None:
     )
     decks = DeckService(decks_repo, clock)
     exams = _LosesTheRace()
-    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock, _spend(clock))
+    budget = AiCallBudget(
+        InMemoryQuotaRepository(limit=100),
+        clock,
+        _spend(clock),
+        NullUnitOfWork(),
+    )
     service = MockExamService(
         decks, notes_repo, cards_repo, exams, _ScriptedLLM([]), budget, clock, unlock_cards=1
     )
     await exams.add(_exam())
     with pytest.raises(ExamClosed, match="already submitted"):
         await service.grade(owner_id="alice", exam_id="e1", answers={})
+
+
+async def test_unusable_grading_reopens_the_exam_and_still_counts_the_call() -> None:
+    llm = _ScriptedLLM([NOW_QUESTIONS])
+    service, decks, notes = _service(llm, unlock_cards=1)
+    deck_id = await _deck_with_cards(decks, notes, "alice", 1)
+    exam = await service.create(
+        owner_id="alice", deck_id=deck_id, question_count=2, time_limit_seconds=None
+    )
+    first = exam.questions[0].id
+    llm.queue({"grades": "not a list"})
+    with pytest.raises(InvalidModelOutput):
+        await service.grade(owner_id="alice", exam_id=exam.id, answers={first: "x"})
+    calls = service._budget._calls
+    assert await calls.used("alice", "calls:2026-11-08") == 2  # create and the failed grade
+    # Reopened: the user can submit again.
+    llm.queue({"grades": [{"question": 1, "score": 1.0}]})
+    result = await service.grade(owner_id="alice", exam_id=exam.id, answers={first: "x"})
+    assert result.overall_score == 0.5

@@ -161,7 +161,7 @@ async def test_the_spend_cap_stops_new_ai_work_once_reached() -> None:
     with pytest.raises(SpendCapReached):
         await q.spend.ensure_available()
 
-    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), q.clock, q.spend)
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), q.clock, q.spend, NullUnitOfWork())
     with pytest.raises(SpendCapReached):
         await budget.charge("u2")
     assert await budget._calls.used("u2", "calls:2026-11-08") == 0  # not counted

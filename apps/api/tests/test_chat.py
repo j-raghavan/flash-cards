@@ -17,6 +17,7 @@ from flashcards.adapters.memory import (
     InMemoryQuotaRepository,
     InMemoryQuotaSettingsRepository,
     InMemoryUsageRepository,
+    NullUnitOfWork,
     SystemClock,
 )
 from flashcards.adapters.transcripts import TranscriptAwareExtractor
@@ -148,7 +149,9 @@ class _Rig:
             TranscriptAwareExtractor(PyMuPDFExtractor()),
             self.passages,
             llm,
-            AiCallBudget(InMemoryQuotaRepository(limit=100), clock, _spend(clock)),
+            AiCallBudget(
+                InMemoryQuotaRepository(limit=100), clock, _spend(clock), NullUnitOfWork()
+            ),
         )
 
     async def deck(self, owner: str = "alice") -> str:

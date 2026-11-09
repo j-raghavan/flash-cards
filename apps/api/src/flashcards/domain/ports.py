@@ -569,6 +569,10 @@ class MockExamRepository(Protocol):
         """Record the one submission atomically; False if it was already submitted."""
         ...
 
+    async def reopen(self, exam_id: str) -> None:
+        """Clear a submission whose grading produced no result, so it can be retried."""
+        ...
+
     async def delete_for_deck(self, deck_id: str) -> None:
         """Delete a deck's mock exams (deck deletion)."""
         ...

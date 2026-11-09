@@ -299,7 +299,7 @@ def build_services(repos: Repositories) -> Container:
         repos.note_types,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
-    ai_budget = AiCallBudget(repos.ai_calls, repos.clock, spend)
+    ai_budget = AiCallBudget(repos.ai_calls, repos.clock, spend, repos.unit_of_work)
     evaluation = EvaluationService(notes, repos.llm, ai_budget)
     summary = SummaryService(
         decks,

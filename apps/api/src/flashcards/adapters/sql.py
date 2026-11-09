@@ -968,6 +968,11 @@ class SqlMockExamRepository:
         )
         return marked is not None
 
+    async def reopen(self, exam_id: str) -> None:
+        await self._session.execute(
+            update(MockExamRow).where(MockExamRow.id == exam_id).values(submitted_at=None)
+        )
+
     async def delete_for_deck(self, deck_id: str) -> None:
         await self._session.execute(delete(MockExamRow).where(MockExamRow.deck_id == deck_id))
 

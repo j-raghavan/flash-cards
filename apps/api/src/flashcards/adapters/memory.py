@@ -584,6 +584,11 @@ class InMemoryMockExamRepository:
         self._by_id[exam_id] = replace(exam, submitted_at=now)
         return True
 
+    async def reopen(self, exam_id: str) -> None:
+        exam = self._by_id.get(exam_id)
+        if exam is not None:
+            self._by_id[exam_id] = replace(exam, submitted_at=None)
+
     async def delete_for_deck(self, deck_id: str) -> None:
         for exam_id in [e.id for e in self._by_id.values() if e.deck_id == deck_id]:
             del self._by_id[exam_id]

@@ -18,6 +18,7 @@ from flashcards.adapters.db import (
 )
 from flashcards.adapters.sql import (
     SqlInviteRepository,
+    SqlMockExamRepository,
     SqlQuotaRepository,
     SqlQuotaSettingsRepository,
     SqlSessionRepository,
@@ -25,6 +26,7 @@ from flashcards.adapters.sql import (
     SqlUserRepository,
 )
 from flashcards.domain.invites import Invite, Role
+from flashcards.domain.mock_exam import ExamQuestion, MockExam
 from flashcards.domain.quotas import InstanceQuotas
 from flashcards.domain.sessions import Session
 from flashcards.domain.usage import AiFeature, AiUsage, ProviderUsage, UserUsage
@@ -222,3 +224,23 @@ async def test_usage_totals_by_user_and_provider(engine: AsyncEngine) -> None:
             ProviderUsage("anthropic", "m1", 2, 200, 20, 150),
         ]
         assert await usage.by_user("2026-09") == []
+
+
+async def test_a_reopened_exam_can_be_submitted_again(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    exam = MockExam(
+        id="e1", owner_id="alice", deck_id="d1", created_at=NOW, time_limit_seconds=None,
+        questions=(ExamQuestion(id="q1", prompt="p", reference="r", topic="t"),),
+    )
+    async with sm() as s, s.begin():
+        exams = SqlMockExamRepository(s)
+        await exams.add(exam)
+        assert await exams.try_mark_submitted("e1", NOW) is True
+        await exams.reopen("e1")
+        await exams.reopen("missing")  # nothing to reopen, no error
+
+    async with sm() as s, s.begin():
+        exams = SqlMockExamRepository(s)
+        loaded = await exams.get("e1")
+        assert loaded is not None and loaded.submitted_at is None
+        assert await exams.try_mark_submitted("e1", NOW) is True
