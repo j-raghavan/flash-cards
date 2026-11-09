@@ -45,6 +45,7 @@ from flashcards.domain.ports import (
     MockExamRepository,
     NoteRepository,
 )
+from flashcards.domain.usage import AiFeature
 
 
 class MockExamService:
@@ -94,6 +95,7 @@ class MockExamService:
         )
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
         questions = tuple(
             ExamQuestion(id=str(uuid.uuid4()), prompt=prompt, reference=answer, topic=topic)
             for prompt, answer, topic in parse_exam_questions(result.data, limit=limit)
@@ -147,6 +149,7 @@ class MockExamService:
         )
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.MOCK_EXAM, result)
         return grade_exam(exam, scores_for_answered(exam, answered, parse_grades(result.data)))
 
 

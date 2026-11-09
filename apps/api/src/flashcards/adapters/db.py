@@ -46,6 +46,7 @@ from flashcards.domain.notes import Card, Mask, Note, NoteType, Occlusion
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog, ScheduleState
 from flashcards.domain.sessions import UNKNOWN_DEVICE, Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.usage import AiUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
@@ -844,6 +845,58 @@ def user_token_from_row(row: UserTokenRow) -> UserToken:
         expires_at=row.expires_at,
         used_at=row.used_at,
     )
+
+
+class AiUsageRow(Base):
+    __tablename__ = "ai_usage"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # No foreign key: usage is kept for cost accounting after an account is deleted.
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+    provider: Mapped[str] = mapped_column(String)
+    model: Mapped[str] = mapped_column(String)
+    feature: Mapped[str] = mapped_column(String)
+    input_tokens: Mapped[int] = mapped_column(BigInteger)
+    output_tokens: Mapped[int] = mapped_column(BigInteger)
+    cost_micro_usd: Mapped[int] = mapped_column(BigInteger)
+    period: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+def usage_to_row(usage: AiUsage) -> AiUsageRow:
+    return AiUsageRow(
+        id=usage.id,
+        owner_id=usage.owner_id,
+        provider=usage.provider,
+        model=usage.model,
+        feature=usage.feature.value,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cost_micro_usd=usage.cost_micro_usd,
+        period=usage.period,
+        created_at=usage.created_at,
+    )
+
+
+class InstanceQuotaRow(Base):
+    """The instance's AI limits: a single row (id = 1) once an admin sets them."""
+
+    __tablename__ = "instance_quotas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    default_monthly_pages: Mapped[int] = mapped_column(Integer)
+    monthly_spend_cap_micro_usd: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class UserQuotaRow(Base):
+    """A user's monthly page limit, overriding the instance default."""
+
+    __tablename__ = "user_quotas"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    monthly_pages: Mapped[int] = mapped_column(Integer)
 
 
 def normalize_async_url(database_url: str) -> str:

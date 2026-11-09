@@ -40,6 +40,9 @@ APP_TABLES = {
     "user_tokens",
     "note_types",
     "session_activity",
+    "ai_usage",
+    "instance_quotas",
+    "user_quotas",
 }
 
 

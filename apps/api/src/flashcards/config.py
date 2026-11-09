@@ -5,7 +5,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, MAX_MONTHLY_PAGES
 
 
 class Settings(BaseSettings):
@@ -44,6 +47,14 @@ class Settings(BaseSettings):
     # Keep it below the database pool size: each holds a connection while it waits
     # on the model.
     max_concurrent_ai_calls: int = 4
+    # What the provider charges, in US dollars per million input and output tokens.
+    # Every AI call's cost is recorded at these prices (F-ADMIN-4), and the monthly
+    # spend cap compares against that cost. Zero (the default) records no cost.
+    ai_input_usd_per_mtok: float = Field(default=0.0, ge=0)
+    ai_output_usd_per_mtok: float = Field(default=0.0, ge=0)
+    # Initial quotas, used until an admin sets them at PUT /admin/quotas.
+    ai_default_monthly_pages: int = Field(default=DEFAULT_MONTHLY_PAGES, ge=0, le=MAX_MONTHLY_PAGES)
+    ai_monthly_spend_cap_usd: float | None = Field(default=None, ge=0)
     # Where the web client lives; links in emails point here.
     public_base_url: str = "http://localhost:5173"
     # Outgoing mail. Without smtp_host, mail is not sent: in development it is

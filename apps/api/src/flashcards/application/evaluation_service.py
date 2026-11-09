@@ -20,6 +20,7 @@ from flashcards.domain.evaluation import (
 )
 from flashcards.domain.notes import Fields, InvalidNote, NoteType
 from flashcards.domain.ports import LLMProvider
+from flashcards.domain.usage import AiFeature
 
 
 class EvaluationService:
@@ -50,6 +51,7 @@ class EvaluationService:
         )
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.GRADING, result)
         return parse_evaluation(result.data)
 
 

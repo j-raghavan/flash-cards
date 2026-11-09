@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 
 from flashcards.application.ai_prompts import prompt_for
+from flashcards.application.ai_spend import AiSpend
 from flashcards.domain.ai import (
     DRAFT_CARDS_SCHEMA,
     DraftCardRecord,
@@ -31,6 +32,7 @@ from flashcards.domain.ports import (
     UnitOfWork,
 )
 from flashcards.domain.sources import ExtractedPage, PageKind
+from flashcards.domain.usage import AiFeature
 
 MAX_OUTPUT_TOKENS = 4096
 
@@ -45,9 +47,11 @@ class CardGenerationService:
         llm: LLMProvider,
         clock: Clock,
         unit_of_work: UnitOfWork,
+        spend: AiSpend,
         max_pages: int = 20,
     ) -> None:
         self._uow = unit_of_work
+        self._spend = spend
         self._jobs = jobs
         self._drafts = drafts
         self._store = store
@@ -138,6 +142,10 @@ class CardGenerationService:
             max_output_tokens=MAX_OUTPUT_TOKENS,
         )
         result = await self._llm.generate_structured(request)
+        # Recorded and committed before the output is parsed: the provider has
+        # charged for the call even if its output turns out to be unusable.
+        await self._spend.record(job.owner_id, AiFeature.GENERATION, result)
+        await self._uow.commit()
         drafts = parse_draft_cards(result.data, source_page=page.ref.page)
         now = self._clock.now()
         return [

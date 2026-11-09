@@ -10,21 +10,39 @@ from flashcards.adapters.memory import (
     InMemoryDeckRepository,
     InMemoryNoteRepository,
     InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
+    InMemoryUsageRepository,
     SystemClock,
 )
 from flashcards.application.ai_budget import AiCallBudget
+from flashcards.application.ai_spend import AiSpend
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
 from flashcards.application.summary_service import SummaryService
 from flashcards.domain.ai import StructuredRequest, StructuredResult, TokenUsage
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.notes import NoteType
+from flashcards.domain.ports import Clock
+from flashcards.domain.quotas import InstanceQuotas
 from flashcards.domain.summary import (
     DeckSummary,
     InvalidSummary,
     SummaryLocked,
     parse_summary,
 )
+from flashcards.domain.usage import TokenPrices
+
+
+def _spend(clock: Clock) -> AiSpend:
+    return AiSpend(
+        InMemoryUsageRepository(),
+        InMemoryQuotaSettingsRepository(),
+        clock,
+        provider="test",
+        prices=TokenPrices(),
+        defaults=InstanceQuotas(),
+    )
+
 
 
 def test_parse_summary_reads_text_and_points() -> None:
@@ -73,7 +91,7 @@ def _service(
     cards_repo = InMemoryCardRepository()
     decks = DeckService(decks_repo, clock)
     notes = NoteService(decks, notes_repo, cards_repo, clock)
-    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock)
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock, _spend(clock))
     service = SummaryService(
         decks, notes_repo, cards_repo, llm, budget, unlock_cards=unlock_cards
     )

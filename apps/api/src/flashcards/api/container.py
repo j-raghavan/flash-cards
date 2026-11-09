@@ -32,10 +32,12 @@ from flashcards.adapters.memory import (
     InMemoryObjectStore,
     InMemoryPassageRepository,
     InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemorySessionRepository,
     InMemoryShareLinkRepository,
+    InMemoryUsageRepository,
     InMemoryUserRepository,
     InMemoryUserTokenRepository,
     NullUnitOfWork,
@@ -47,6 +49,7 @@ from flashcards.application.account_email_service import AccountEmailService
 from flashcards.application.account_service import AccountService
 from flashcards.application.admin_service import AdminService
 from flashcards.application.ai_budget import AiCallBudget
+from flashcards.application.ai_spend import AiSpend
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import AuthService
@@ -67,6 +70,7 @@ from flashcards.application.note_service import NoteService
 from flashcards.application.note_type_service import NoteTypeService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.public_signup_service import PublicSignupService
+from flashcards.application.quota_service import QuotaService
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.session_service import SessionService
@@ -99,6 +103,7 @@ from flashcards.domain.ports import (
     PassageRepository,
     PasswordHasher,
     QuotaRepository,
+    QuotaSettingsRepository,
     ReviewLogRepository,
     Scheduler,
     ScheduleRepository,
@@ -106,11 +111,13 @@ from flashcards.domain.ports import (
     ShareLinkRepository,
     TranscriptProvider,
     UnitOfWork,
+    UsageRepository,
     UserRepository,
     UserTokenRepository,
 )
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
 from flashcards.domain.summary import DEFAULT_SUMMARY_UNLOCK_CARDS
+from flashcards.domain.usage import AiMetering
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,8 +154,12 @@ class Repositories:
     audit_events: AuditRepository
     login_throttle: LoginThrottleRepository
     user_tokens: UserTokenRepository
+    quota_settings: QuotaSettingsRepository
+    usage: UsageRepository
     mailer: Mailer
     dummy_hash: str | None = None
+    # Provider name, token prices and default quotas, from configuration.
+    metering: AiMetering = field(default_factory=AiMetering)
     # Where links in emails point (the web client).
     public_base_url: str = "http://localhost:5173"
     # Lets the generation worker commit progress as it goes (ADR 0012).
@@ -190,6 +201,7 @@ class Container:
     account_email: AccountEmailService
     sessions: SessionService
     public_signup: PublicSignupService
+    quotas: QuotaService
     mailer: Mailer
 
 
@@ -215,6 +227,24 @@ def build_services(repos: Repositories) -> Container:
         repos.mock_exams,
         repos.share_links,
     )
+    audit = AuditService(repos.audit_events, repos.clock)
+    quotas = QuotaService(
+        repos.quota_settings,
+        repos.quotas,
+        repos.usage,
+        repos.users,
+        audit,
+        repos.clock,
+        defaults=repos.metering.default_quotas,
+    )
+    spend = AiSpend(
+        repos.usage,
+        repos.quota_settings,
+        repos.clock,
+        provider=repos.metering.provider,
+        prices=repos.metering.prices,
+        defaults=repos.metering.default_quotas,
+    )
     generation = GenerationRequestService(
         decks,
         repos.extractor,
@@ -223,6 +253,8 @@ def build_services(repos: Repositories) -> Container:
         repos.ai_jobs,
         repos.job_queue,
         repos.clock,
+        quotas,
+        spend,
     )
     draft_review = DraftReviewService(repos.ai_jobs, repos.draft_cards, notes)
     card_generation = CardGenerationService(
@@ -233,6 +265,7 @@ def build_services(repos: Repositories) -> Container:
         repos.llm,
         repos.clock,
         repos.unit_of_work,
+        spend,
     )
     note_types = NoteTypeService(
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock
@@ -266,7 +299,7 @@ def build_services(repos: Repositories) -> Container:
         repos.note_types,
     )
     media = MediaService(repos.media, repos.media_sniffer, repos.clock)
-    ai_budget = AiCallBudget(repos.ai_calls, repos.clock)
+    ai_budget = AiCallBudget(repos.ai_calls, repos.clock, spend)
     evaluation = EvaluationService(notes, repos.llm, ai_budget)
     summary = SummaryService(
         decks,
@@ -308,7 +341,6 @@ def build_services(repos: Repositories) -> Container:
         repos.note_types,
         repos.media,
     )
-    audit = AuditService(repos.audit_events, repos.clock)
     admin = AdminService(
         invites,
         audit,
@@ -369,6 +401,7 @@ def build_services(repos: Repositories) -> Container:
         public_signup=PublicSignupService(
             repos.users, repos.hasher, repos.login_throttle, audit, repos.clock
         ),
+        quotas=quotas,
         mailer=repos.mailer,
     )
 
@@ -380,6 +413,7 @@ def build_container(
     transcripts: TranscriptProvider | None = None,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    metering: AiMetering | None = None,
 ) -> Container:
     """Build an in-memory container (default for dev and tests).
 
@@ -420,7 +454,10 @@ def build_container(
             audit_events=InMemoryAuditRepository(),
             login_throttle=InMemoryLoginThrottleRepository(),
             user_tokens=InMemoryUserTokenRepository(),
+            quota_settings=InMemoryQuotaSettingsRepository(),
+            usage=InMemoryUsageRepository(),
             mailer=mailer or LogMailer(show_content=True),
             public_base_url=public_base_url,
+            metering=metering or AiMetering(),
         )
     )

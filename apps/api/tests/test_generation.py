@@ -8,7 +8,10 @@ from flashcards.adapters.memory import (
     InMemoryAiJobRepository,
     InMemoryDraftCardRepository,
     InMemoryObjectStore,
+    InMemoryQuotaSettingsRepository,
+    InMemoryUsageRepository,
 )
+from flashcards.application.ai_spend import AiSpend
 from flashcards.application.card_generation_service import CardGenerationService
 from flashcards.domain.ai import (
     LlmError,
@@ -18,10 +21,24 @@ from flashcards.domain.ai import (
     TokenUsage,
 )
 from flashcards.domain.jobs import JobStatus, new_generation_job
+from flashcards.domain.ports import Clock
+from flashcards.domain.quotas import InstanceQuotas
 from flashcards.domain.sources import ExtractedPage, PageKind, SourceRef, TooManyPages
+from flashcards.domain.usage import TokenPrices
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 ALICE = "alice"
+
+def _spend(clock: Clock) -> AiSpend:
+    return AiSpend(
+        InMemoryUsageRepository(),
+        InMemoryQuotaSettingsRepository(),
+        clock,
+        provider="test",
+        prices=TokenPrices(),
+        defaults=InstanceQuotas(),
+    )
+
 
 
 class FakeClock:
@@ -120,8 +137,9 @@ def _service(
     llm: FakeLLM,
     uow: RecordingUnitOfWork | None = None,
 ) -> CardGenerationService:
+    clock = FakeClock()
     return CardGenerationService(
-        jobs, drafts, store, extractor, llm, FakeClock(), uow or RecordingUnitOfWork()
+        jobs, drafts, store, extractor, llm, clock, uow or RecordingUnitOfWork(), _spend(clock)
     )
 
 
@@ -336,10 +354,16 @@ async def test_progress_is_committed_as_each_page_finishes() -> None:
 
     await service.run(job_id)
 
-    # Claimed, sized, then each page committed with its drafts; the final state is
-    # committed by the unit of work that runs the worker.
+    # Claimed, sized, then for each page its usage as soon as the model answers and
+    # then the page with its drafts; the final state is committed by the unit of
+    # work that runs the worker.
     assert uow.log == [
-        "commit running:0/0", "commit running:0/2", "commit running:1/2", "commit running:2/2"
+        "commit running:0/0",
+        "commit running:0/2",
+        "commit running:0/2",
+        "commit running:1/2",
+        "commit running:1/2",
+        "commit running:2/2",
     ]
     assert len(await drafts.list_for_job(job_id)) == 2
 

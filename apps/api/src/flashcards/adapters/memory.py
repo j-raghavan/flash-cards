@@ -24,10 +24,11 @@ from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
-from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
+from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, InstanceQuotas
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -443,17 +444,83 @@ class InMemoryQuotaRepository:
         self._limit = limit
         self._used: dict[tuple[str, str], int] = {}
 
-    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+    async def try_reserve_pages(
+        self, owner_id: str, pages: int, period: str, limit: int | None = None
+    ) -> bool:
         key = (owner_id, period)
         used = self._used.get(key, 0)
-        if used + pages > self._limit:
+        if used + pages > (self._limit if limit is None else limit):
             return False
         self._used[key] = used + pages
         return True
 
+    async def used(self, owner_id: str, period: str) -> int:
+        return self._used.get((owner_id, period), 0)
+
     async def delete_for_owner(self, owner_id: str) -> None:
         for key in [k for k in self._used if k[0] == owner_id]:
             del self._used[key]
+
+
+class InMemoryQuotaSettingsRepository:
+    def __init__(self) -> None:
+        self._instance: InstanceQuotas | None = None
+        self._user_pages: dict[str, int] = {}
+
+    async def get_instance(self) -> InstanceQuotas | None:
+        return self._instance
+
+    async def put_instance(self, quotas: InstanceQuotas) -> None:
+        self._instance = quotas
+
+    async def get_user_pages(self, user_id: str) -> int | None:
+        return self._user_pages.get(user_id)
+
+    async def set_user_pages(self, user_id: str, pages: int | None) -> None:
+        if pages is None:
+            self._user_pages.pop(user_id, None)
+        else:
+            self._user_pages[user_id] = pages
+
+
+class InMemoryUsageRepository:
+    def __init__(self) -> None:
+        self._records: list[AiUsage] = []
+
+    async def add(self, usage: AiUsage) -> None:
+        self._records.append(usage)
+
+    async def total_cost(self, period: str) -> int:
+        return sum(r.cost_micro_usd for r in self._records if r.period == period)
+
+    async def by_user(self, period: str) -> list[UserUsage]:
+        groups: dict[str, list[AiUsage]] = {}
+        for record in self._records:
+            if record.period == period:
+                groups.setdefault(record.owner_id, []).append(record)
+        totals = [UserUsage(owner_id, *_sums(records)) for owner_id, records in groups.items()]
+        return sorted(totals, key=lambda t: (-t.cost_micro_usd, t.owner_id))
+
+    async def by_provider(self, period: str) -> list[ProviderUsage]:
+        groups: dict[tuple[str, str], list[AiUsage]] = {}
+        for record in self._records:
+            if record.period == period:
+                groups.setdefault((record.provider, record.model), []).append(record)
+        totals = [
+            ProviderUsage(provider, model, *_sums(records))
+            for (provider, model), records in groups.items()
+        ]
+        return sorted(totals, key=lambda t: (-t.cost_micro_usd, t.provider, t.model))
+
+
+def _sums(records: list[AiUsage]) -> tuple[int, int, int, int]:
+    """Calls, input tokens, output tokens and cost of a group of records."""
+    return (
+        len(records),
+        sum(r.input_tokens for r in records),
+        sum(r.output_tokens for r in records),
+        sum(r.cost_micro_usd for r in records),
+    )
 
 
 class InMemoryGoalRepository:

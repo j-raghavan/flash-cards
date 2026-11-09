@@ -11,17 +11,35 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from flashcards.adapters.memory import InMemoryQuotaRepository
+from flashcards.adapters.memory import (
+    InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
+    InMemoryUsageRepository,
+)
 from flashcards.api.app import create_app
 from flashcards.api.container import Container
 from flashcards.application.ai_budget import AiCallBudget
+from flashcards.application.ai_spend import AiSpend
 from flashcards.config import Settings
 from flashcards.domain.ai import StructuredRequest, StructuredResult, TokenUsage
 from flashcards.domain.invites import Role
-from flashcards.domain.quotas import AiCallLimitReached, ai_call_period
+from flashcards.domain.ports import Clock
+from flashcards.domain.quotas import AiCallLimitReached, InstanceQuotas, ai_call_period
+from flashcards.domain.usage import TokenPrices
 
 PASSWORD = "correct-horse-battery"
 NOW = datetime(2026, 11, 8, 23, 59, tzinfo=UTC)
+
+def _spend(clock: Clock) -> AiSpend:
+    return AiSpend(
+        InMemoryUsageRepository(),
+        InMemoryQuotaSettingsRepository(),
+        clock,
+        provider="test",
+        prices=TokenPrices(),
+        defaults=InstanceQuotas(),
+    )
+
 
 
 class _Clock:
@@ -34,7 +52,7 @@ def test_the_daily_period_never_collides_with_a_monthly_one() -> None:
 
 
 async def test_the_budget_allows_up_to_the_limit_then_refuses() -> None:
-    budget = AiCallBudget(InMemoryQuotaRepository(limit=2), _Clock())
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=2), _Clock(), _spend(_Clock()))
     await budget.charge("alice")
     await budget.charge("alice")
     with pytest.raises(AiCallLimitReached):

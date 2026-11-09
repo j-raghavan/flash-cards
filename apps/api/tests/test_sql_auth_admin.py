@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Postgres tests for session activity and invite rotation (needs Docker)."""
+"""Postgres tests for session activity, invite rotation, quotas and usage (needs Docker)."""
 
 from __future__ import annotations
 
@@ -18,10 +18,17 @@ from flashcards.adapters.db import (
 )
 from flashcards.adapters.sql import (
     SqlInviteRepository,
+    SqlQuotaRepository,
+    SqlQuotaSettingsRepository,
     SqlSessionRepository,
+    SqlUsageRepository,
+    SqlUserRepository,
 )
 from flashcards.domain.invites import Invite, Role
+from flashcards.domain.quotas import InstanceQuotas
 from flashcards.domain.sessions import Session
+from flashcards.domain.usage import AiFeature, AiUsage, ProviderUsage, UserUsage
+from flashcards.domain.users import User
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
 
@@ -141,3 +148,77 @@ async def test_only_an_active_invite_gets_a_new_token(engine: AsyncEngine) -> No
         assert await repo.get_by_token_hash("old-active") is None
         rotated = await repo.get_by_token_hash("new-active")
         assert rotated is not None and rotated.id == "active"
+
+
+async def test_page_reservations_honour_a_per_call_limit(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        pages = SqlQuotaRepository(s, limit=10)
+        assert await pages.used("u1", "2026-11") == 0
+        assert await pages.try_reserve_pages("u1", 3, "2026-11", limit=4) is True
+        assert await pages.try_reserve_pages("u1", 2, "2026-11", limit=4) is False
+        assert await pages.try_reserve_pages("u1", 5, "2026-11", limit=4) is False
+        assert await pages.try_reserve_pages("u1", 2, "2026-11") is True  # repository limit
+        assert await pages.used("u1", "2026-11") == 5
+
+
+async def test_quota_settings_round_trip_and_follow_the_user(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        await SqlUserRepository(s).add(
+            User(id="u1", email="u@example.com", password_hash="h", role=Role.MEMBER,
+                 created_at=NOW)
+        )
+        settings = SqlQuotaSettingsRepository(s)
+        assert await settings.get_instance() is None
+        await settings.put_instance(InstanceQuotas(default_monthly_pages=5))
+        await settings.put_instance(
+            InstanceQuotas(default_monthly_pages=7, monthly_spend_cap_micro_usd=1_000_000)
+        )
+        assert await settings.get_user_pages("u1") is None
+        await settings.set_user_pages("u1", 3)
+        await settings.set_user_pages("u1", 4)
+
+    async with sm() as s, s.begin():
+        settings = SqlQuotaSettingsRepository(s)
+        assert await settings.get_instance() == InstanceQuotas(
+            default_monthly_pages=7, monthly_spend_cap_micro_usd=1_000_000
+        )
+        assert await settings.get_user_pages("u1") == 4
+        await settings.set_user_pages("u1", None)
+        assert await settings.get_user_pages("u1") is None
+        await settings.set_user_pages("u1", 9)
+        await SqlUserRepository(s).delete("u1")
+
+    async with sm() as s:
+        assert await SqlQuotaSettingsRepository(s).get_user_pages("u1") is None
+
+
+def _usage(uid: str, owner: str, model: str, cost: int, period: str = "2026-11") -> AiUsage:
+    return AiUsage(id=uid, owner_id=owner, provider="anthropic", model=model,
+                   feature=AiFeature.GRADING, input_tokens=100, output_tokens=10,
+                   cost_micro_usd=cost, period=period, created_at=NOW)
+
+
+async def test_usage_totals_by_user_and_provider(engine: AsyncEngine) -> None:
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        usage = SqlUsageRepository(s)
+        assert await usage.total_cost("2026-11") == 0
+        await usage.add(_usage("a", "u1", "m1", 100))
+        await usage.add(_usage("b", "u2", "m2", 300))
+        await usage.add(_usage("c", "u2", "m1", 50))
+        await usage.add(_usage("d", "u1", "m1", 999, period="2026-10"))
+
+    async with sm() as s:
+        usage = SqlUsageRepository(s)
+        assert await usage.total_cost("2026-11") == 450
+        assert await usage.by_user("2026-11") == [
+            UserUsage("u2", 2, 200, 20, 350),
+            UserUsage("u1", 1, 100, 10, 100),
+        ]
+        assert await usage.by_provider("2026-11") == [
+            ProviderUsage("anthropic", "m2", 1, 100, 10, 300),
+            ProviderUsage("anthropic", "m1", 2, 200, 20, 150),
+        ]
+        assert await usage.by_user("2026-09") == []

@@ -39,11 +39,13 @@ from flashcards.adapters.sql import (
     SqlObjectStore,
     SqlPassageRepository,
     SqlQuotaRepository,
+    SqlQuotaSettingsRepository,
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
     SqlShareLinkRepository,
     SqlUnitOfWork,
+    SqlUsageRepository,
     SqlUserRepository,
     SqlUserTokenRepository,
 )
@@ -56,6 +58,7 @@ from flashcards.api.container import (
 )
 from flashcards.domain.ports import LLMProvider, Mailer
 from flashcards.domain.quotas import DEFAULT_DAILY_AI_CALLS, DEFAULT_DAILY_CLONE_CARDS
+from flashcards.domain.usage import AiMetering
 
 ServicesProvider = Callable[[], AsyncIterator[Container]]
 
@@ -83,10 +86,15 @@ def in_memory_provider(
     *,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    metering: AiMetering | None = None,
 ) -> tuple[Container, ServicesProvider, InProcessJobQueue]:
     job_queue = InProcessJobQueue()
     container = build_container(
-        llm=llm, job_queue=job_queue, mailer=mailer, public_base_url=public_base_url
+        llm=llm,
+        job_queue=job_queue,
+        mailer=mailer,
+        public_base_url=public_base_url,
+        metering=metering,
     )
 
     async def provider() -> AsyncIterator[Container]:
@@ -101,6 +109,7 @@ def sql_provider(
     *,
     mailer: Mailer | None = None,
     public_base_url: str = "http://localhost:5173",
+    metering: AiMetering | None = None,
 ) -> tuple[AsyncEngine, ServicesProvider, InProcessJobQueue]:
     engine = create_engine(database_url)
     sessionmaker = create_sessionmaker(engine)
@@ -116,6 +125,7 @@ def sql_provider(
     job_queue = InProcessJobQueue()
     provider_llm = llm or NullLLMProvider()
     provider_mailer = mailer or LogMailer(show_content=False)
+    provider_metering = metering or AiMetering()
 
     async def provider() -> AsyncIterator[Container]:
         # One unit of work: commit on success, roll back on any error. Explicit
@@ -160,6 +170,9 @@ def sql_provider(
                         audit_events=SqlAuditRepository(session),
                         login_throttle=SqlLoginThrottleRepository(session),
                         user_tokens=SqlUserTokenRepository(session),
+                        quota_settings=SqlQuotaSettingsRepository(session),
+                        usage=SqlUsageRepository(session),
+                        metering=provider_metering,
                         mailer=provider_mailer,
                         public_base_url=public_base_url,
                         unit_of_work=SqlUnitOfWork(session),

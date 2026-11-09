@@ -35,6 +35,8 @@ class AuditAction(enum.StrEnum):
     USER_REGISTERED = "user.registered"
     SESSION_REVOKED = "session.revoked"
     SESSIONS_REVOKED_OTHERS = "session.revoked_others"
+    QUOTA_DEFAULTS_CHANGED = "quota.defaults_changed"
+    QUOTA_USER_CHANGED = "quota.user_changed"
 
 
 @dataclass(frozen=True, slots=True)

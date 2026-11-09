@@ -15,10 +15,13 @@ from flashcards.adapters.memory import (
     InMemoryObjectStore,
     InMemoryPassageRepository,
     InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
+    InMemoryUsageRepository,
     SystemClock,
 )
 from flashcards.adapters.transcripts import TranscriptAwareExtractor
 from flashcards.application.ai_budget import AiCallBudget
+from flashcards.application.ai_spend import AiSpend
 from flashcards.application.chat_service import ChatService
 from flashcards.application.deck_service import DeckService
 from flashcards.domain.ai import StructuredRequest, StructuredResult, Thoroughness, TokenUsage
@@ -36,9 +39,23 @@ from flashcards.domain.chat import (
 )
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.jobs import new_generation_job
+from flashcards.domain.ports import Clock
+from flashcards.domain.quotas import InstanceQuotas
 from flashcards.domain.transcripts import encode_transcript, pasted_transcript
+from flashcards.domain.usage import TokenPrices
 
 NOW = datetime(2026, 11, 8, tzinfo=UTC)
+
+def _spend(clock: Clock) -> AiSpend:
+    return AiSpend(
+        InMemoryUsageRepository(),
+        InMemoryQuotaSettingsRepository(),
+        clock,
+        provider="test",
+        prices=TokenPrices(),
+        defaults=InstanceQuotas(),
+    )
+
 
 
 def _p(text: str, *, file_id: str = "f", page: int = 1, ordinal: int = 0) -> Passage:
@@ -131,7 +148,7 @@ class _Rig:
             TranscriptAwareExtractor(PyMuPDFExtractor()),
             self.passages,
             llm,
-            AiCallBudget(InMemoryQuotaRepository(limit=100), clock),
+            AiCallBudget(InMemoryQuotaRepository(limit=100), clock, _spend(clock)),
         )
 
     async def deck(self, owner: str = "alice") -> str:

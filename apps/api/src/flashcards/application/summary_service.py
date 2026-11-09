@@ -22,6 +22,7 @@ from flashcards.domain.summary import (
     SummaryLocked,
     parse_summary,
 )
+from flashcards.domain.usage import AiFeature
 
 
 class SummaryService:
@@ -59,6 +60,7 @@ class SummaryService:
         )
         await self._budget.charge(owner_id)  # raises AiCallLimitReached
         result = await self._llm.generate_structured(request)
+        await self._budget.record(owner_id, AiFeature.SUMMARY, result)
         return parse_summary(result.data)
 
 

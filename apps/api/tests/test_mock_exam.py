@@ -14,8 +14,11 @@ from flashcards.adapters.memory import (
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
     InMemoryQuotaRepository,
+    InMemoryQuotaSettingsRepository,
+    InMemoryUsageRepository,
 )
 from flashcards.application.ai_budget import AiCallBudget
+from flashcards.application.ai_spend import AiSpend
 from flashcards.application.deck_service import DeckService
 from flashcards.application.mock_exam_service import MockExamService
 from flashcards.application.note_service import NoteService
@@ -35,6 +38,9 @@ from flashcards.domain.mock_exam import (
     parse_grades,
 )
 from flashcards.domain.notes import NoteType
+from flashcards.domain.ports import Clock
+from flashcards.domain.quotas import InstanceQuotas
+from flashcards.domain.usage import TokenPrices
 
 NOW_QUESTIONS: dict[str, object] = {
     "questions": [
@@ -42,6 +48,17 @@ NOW_QUESTIONS: dict[str, object] = {
         {"prompt": "Define osmosis", "answer": "Water across a membrane", "topic": "Biology"},
     ]
 }
+
+def _spend(clock: Clock) -> AiSpend:
+    return AiSpend(
+        InMemoryUsageRepository(),
+        InMemoryQuotaSettingsRepository(),
+        clock,
+        provider="test",
+        prices=TokenPrices(),
+        defaults=InstanceQuotas(),
+    )
+
 
 
 def test_parse_exam_questions_reads_triples_and_defaults_topic() -> None:
@@ -154,7 +171,7 @@ def _service(
     exams_repo = InMemoryMockExamRepository()
     decks = DeckService(decks_repo, clock)
     notes = NoteService(decks, notes_repo, cards_repo, clock)
-    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock)
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock, _spend(clock))
     service = MockExamService(
         decks, notes_repo, cards_repo, exams_repo, llm, budget, clock, unlock_cards=unlock_cards
     )
@@ -359,7 +376,7 @@ async def test_a_concurrent_submission_wins() -> None:
     )
     decks = DeckService(decks_repo, clock)
     exams = _LosesTheRace()
-    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock)
+    budget = AiCallBudget(InMemoryQuotaRepository(limit=100), clock, _spend(clock))
     service = MockExamService(
         decks, notes_repo, cards_repo, exams, _ScriptedLLM([]), budget, clock, unlock_cards=1
     )

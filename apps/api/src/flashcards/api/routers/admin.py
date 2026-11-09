@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Admin routes: invites, users and the audit log (F-ADMIN-1, F-ADMIN-2, F-ADMIN-5).
+"""Admin routes: invites, users, quotas, usage and the audit log (F-ADMIN-1..5).
 
 All require the admin role, and every change is recorded in the audit log.
 """
@@ -10,6 +10,14 @@ from datetime import timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
+from flashcards.api.ai_schemas import (
+    InstanceQuotasIn,
+    InstanceQuotasOut,
+    Period,
+    UsageReportOut,
+    UserQuotaIn,
+    UserQuotaOut,
+)
 from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, get_container, require_admin
 from flashcards.api.mail import send_later
@@ -174,3 +182,56 @@ async def delete_user(
 ) -> Response:
     await container.admin.delete_user(admin_id=admin.user.id, user_id=user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/quotas", response_model=InstanceQuotasOut)
+async def get_instance_quotas(
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> InstanceQuotasOut:
+    return InstanceQuotasOut.from_domain(await container.quotas.instance())
+
+
+@router.put("/quotas", response_model=InstanceQuotasOut)
+async def set_instance_quotas(
+    body: InstanceQuotasIn,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> InstanceQuotasOut:
+    """Set the default monthly page limit and the monthly spend cap (null: no cap)."""
+    quotas = await container.quotas.set_instance(admin_id=admin.user.id, quotas=body.to_domain())
+    return InstanceQuotasOut.from_domain(quotas)
+
+
+@router.get("/users/{user_id}/quota", response_model=UserQuotaOut)
+async def get_user_quota(
+    user_id: str,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> UserQuotaOut:
+    return UserQuotaOut.from_quota(await container.quotas.user_quota(user_id))
+
+
+@router.put("/users/{user_id}/quota", response_model=UserQuotaOut)
+async def set_user_quota(
+    user_id: str,
+    body: UserQuotaIn,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> UserQuotaOut:
+    """Override the user's monthly page limit; null returns them to the default."""
+    quota = await container.quotas.set_user_pages(
+        admin_id=admin.user.id, user_id=user_id, pages=body.monthly_pages
+    )
+    return UserQuotaOut.from_quota(quota)
+
+
+@router.get("/usage", response_model=UsageReportOut)
+async def get_usage(
+    period: Period | None = Query(default=None, description="A month, e.g. 2026-11."),
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> UsageReportOut:
+    """AI calls, tokens and cost for a month, by user and by provider and model."""
+    report = await container.quotas.usage_report(period or container.quotas.current_period())
+    return UsageReportOut.from_report(report)

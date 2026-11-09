@@ -34,12 +34,14 @@ from flashcards.adapters.db import (
     AiBlobRow,
     AiJobRow,
     AiQuotaRow,
+    AiUsageRow,
     AuditEventRow,
     CardRow,
     CardScheduleRow,
     DeckRow,
     DraftCardRow,
     GoalRow,
+    InstanceQuotaRow,
     InviteRow,
     LoginThrottleRow,
     MediaRow,
@@ -51,6 +53,7 @@ from flashcards.adapters.db import (
     SessionActivityRow,
     SessionRow,
     ShareLinkRow,
+    UserQuotaRow,
     UserRow,
     UserTokenRow,
     aijob_from_row,
@@ -85,6 +88,7 @@ from flashcards.adapters.db import (
     share_link_from_row,
     share_link_to_row,
     throttle_from_row,
+    usage_to_row,
     user_from_row,
     user_to_row,
     user_token_from_row,
@@ -108,10 +112,11 @@ from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
-from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES
+from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, InstanceQuotas
 from flashcards.domain.scheduling import CardSchedule, DuplicateReview, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
+from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import EmailAlreadyRegistered, User
 
@@ -746,10 +751,13 @@ class SqlQuotaRepository:
         self._session = session
         self._limit = limit
 
-    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
+    async def try_reserve_pages(
+        self, owner_id: str, pages: int, period: str, limit: int | None = None
+    ) -> bool:
+        limit = self._limit if limit is None else limit
         # A single upload can never exceed the whole-period limit; this also guards
         # the INSERT branch below (a fresh owner/period starts at used_pages=0).
-        if pages > self._limit:
+        if pages > limit:
             return False
         # Atomic upsert: insert the first reservation, or add to an existing one only
         # while it stays within the limit. RETURNING yields a row exactly when the
@@ -760,14 +768,123 @@ class SqlQuotaRepository:
             .on_conflict_do_update(
                 index_elements=[AiQuotaRow.owner_id, AiQuotaRow.period],
                 set_={"used_pages": AiQuotaRow.used_pages + pages},
-                where=(AiQuotaRow.used_pages + pages <= self._limit),
+                where=(AiQuotaRow.used_pages + pages <= limit),
             )
             .returning(AiQuotaRow.used_pages)
         )
         return await self._session.scalar(stmt) is not None
 
+    async def used(self, owner_id: str, period: str) -> int:
+        used = await self._session.scalar(
+            select(AiQuotaRow.used_pages).where(
+                AiQuotaRow.owner_id == owner_id, AiQuotaRow.period == period
+            )
+        )
+        return used or 0
+
     async def delete_for_owner(self, owner_id: str) -> None:
         await self._session.execute(delete(AiQuotaRow).where(AiQuotaRow.owner_id == owner_id))
+
+
+class SqlQuotaSettingsRepository:
+    _INSTANCE_ID = 1
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_instance(self) -> InstanceQuotas | None:
+        row = await self._session.get(InstanceQuotaRow, self._INSTANCE_ID)
+        if row is None:
+            return None
+        return InstanceQuotas(
+            default_monthly_pages=row.default_monthly_pages,
+            monthly_spend_cap_micro_usd=row.monthly_spend_cap_micro_usd,
+        )
+
+    async def put_instance(self, quotas: InstanceQuotas) -> None:
+        values = {
+            "default_monthly_pages": quotas.default_monthly_pages,
+            "monthly_spend_cap_micro_usd": quotas.monthly_spend_cap_micro_usd,
+        }
+        await self._session.execute(
+            pg_insert(InstanceQuotaRow)
+            .values(id=self._INSTANCE_ID, **values)
+            .on_conflict_do_update(index_elements=[InstanceQuotaRow.id], set_=values)
+        )
+
+    async def get_user_pages(self, user_id: str) -> int | None:
+        row = await self._session.get(UserQuotaRow, user_id)
+        return row.monthly_pages if row is not None else None
+
+    async def set_user_pages(self, user_id: str, pages: int | None) -> None:
+        if pages is None:
+            await self._session.execute(
+                delete(UserQuotaRow).where(UserQuotaRow.user_id == user_id)
+            )
+            return
+        await self._session.execute(
+            pg_insert(UserQuotaRow)
+            .values(user_id=user_id, monthly_pages=pages)
+            .on_conflict_do_update(
+                index_elements=[UserQuotaRow.user_id], set_={"monthly_pages": pages}
+            )
+        )
+
+
+class SqlUsageRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, usage: AiUsage) -> None:
+        self._session.add(usage_to_row(usage))
+        await self._session.flush()
+
+    async def total_cost(self, period: str) -> int:
+        total = await self._session.scalar(
+            select(func.coalesce(func.sum(AiUsageRow.cost_micro_usd), 0)).where(
+                AiUsageRow.period == period
+            )
+        )
+        return int(total or 0)
+
+    async def by_user(self, period: str) -> list[UserUsage]:
+        cost = func.sum(AiUsageRow.cost_micro_usd)
+        rows = await self._session.execute(
+            select(
+                AiUsageRow.owner_id,
+                func.count(),
+                func.sum(AiUsageRow.input_tokens),
+                func.sum(AiUsageRow.output_tokens),
+                cost,
+            )
+            .where(AiUsageRow.period == period)
+            .group_by(AiUsageRow.owner_id)
+            .order_by(cost.desc(), AiUsageRow.owner_id)
+        )
+        return [
+            UserUsage(owner, int(calls), int(inp), int(out), int(spent))
+            for owner, calls, inp, out, spent in rows.tuples()
+        ]
+
+    async def by_provider(self, period: str) -> list[ProviderUsage]:
+        cost = func.sum(AiUsageRow.cost_micro_usd)
+        rows = await self._session.execute(
+            select(
+                AiUsageRow.provider,
+                AiUsageRow.model,
+                func.count(),
+                func.sum(AiUsageRow.input_tokens),
+                func.sum(AiUsageRow.output_tokens),
+                cost,
+            )
+            .where(AiUsageRow.period == period)
+            .group_by(AiUsageRow.provider, AiUsageRow.model)
+            .order_by(cost.desc(), AiUsageRow.provider, AiUsageRow.model)
+        )
+        return [
+            ProviderUsage(provider, model, int(calls), int(inp), int(out), int(spent))
+            for provider, model, calls, inp, out, spent in rows.tuples()
+        ]
 
 
 class SqlGoalRepository:

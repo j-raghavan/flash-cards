@@ -21,11 +21,13 @@ from flashcards.domain.media import MediaAsset
 from flashcards.domain.mock_exam import MockExam
 from flashcards.domain.note_types import CustomNoteType
 from flashcards.domain.notes import Card, Note
+from flashcards.domain.quotas import InstanceQuotas
 from flashcards.domain.scheduling import CardSchedule, Rating, ReviewLog
 from flashcards.domain.sessions import Session
 from flashcards.domain.sharing import ShareLink
 from flashcards.domain.sources import ExtractedPage
 from flashcards.domain.transcripts import Transcript
+from flashcards.domain.usage import AiUsage, ProviderUsage, UserUsage
 from flashcards.domain.user_tokens import TokenPurpose, UserToken
 from flashcards.domain.users import User
 
@@ -456,12 +458,54 @@ class JobQueue(Protocol):
 
 
 class QuotaRepository(Protocol):
-    async def try_reserve_pages(self, owner_id: str, pages: int, period: str) -> bool:
-        """Atomically reserve pages against the owner's limit; True if within it."""
+    async def try_reserve_pages(
+        self, owner_id: str, pages: int, period: str, limit: int | None = None
+    ) -> bool:
+        """Atomically reserve pages against a limit; True if within it.
+
+        `limit` overrides the repository's own limit for this reservation (a
+        per-user monthly page limit).
+        """
+        ...
+
+    async def used(self, owner_id: str, period: str) -> int:
+        """How much the owner has reserved in the period."""
         ...
 
     async def delete_for_owner(self, owner_id: str) -> None:
         """Delete the owner's quota counters (account deletion, F-IMP-5)."""
+        ...
+
+
+class QuotaSettingsRepository(Protocol):
+    async def get_instance(self) -> InstanceQuotas | None:
+        """The stored instance quotas, or None when an admin never set them."""
+        ...
+
+    async def put_instance(self, quotas: InstanceQuotas) -> None: ...
+
+    async def get_user_pages(self, user_id: str) -> int | None:
+        """The user's monthly page override, or None to use the instance default."""
+        ...
+
+    async def set_user_pages(self, user_id: str, pages: int | None) -> None:
+        """Set the user's monthly page override; None removes it."""
+        ...
+
+
+class UsageRepository(Protocol):
+    async def add(self, usage: AiUsage) -> None: ...
+
+    async def total_cost(self, period: str) -> int:
+        """The period's recorded cost in micro-USD, across every user."""
+        ...
+
+    async def by_user(self, period: str) -> list[UserUsage]:
+        """The period's usage per user, highest cost first."""
+        ...
+
+    async def by_provider(self, period: str) -> list[ProviderUsage]:
+        """The period's usage per provider and model, highest cost first."""
         ...
 
 

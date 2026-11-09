@@ -46,10 +46,12 @@ from flashcards.adapters.sql import (
     SqlObjectStore,
     SqlPassageRepository,
     SqlQuotaRepository,
+    SqlQuotaSettingsRepository,
     SqlReviewLogRepository,
     SqlScheduleRepository,
     SqlSessionRepository,
     SqlShareLinkRepository,
+    SqlUsageRepository,
     SqlUserRepository,
     SqlUserTokenRepository,
 )
@@ -101,6 +103,8 @@ def _sql_repositories(session: AsyncSession, hasher: PasswordHasher) -> Reposito
         audit_events=SqlAuditRepository(session),
         login_throttle=SqlLoginThrottleRepository(session),
         user_tokens=SqlUserTokenRepository(session),
+        quota_settings=SqlQuotaSettingsRepository(session),
+        usage=SqlUsageRepository(session),
         mailer=LogMailer(show_content=False),
     )
 
