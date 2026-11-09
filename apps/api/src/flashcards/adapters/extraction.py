@@ -5,7 +5,7 @@ Born-digital PDF pages yield their text (authoritative, with an exact page ref);
 text-less pages and uploaded images are rasterized/passed through for the vision
 model. Content type is sniffed from the bytes, never trusted from the client.
 All synchronous PyMuPDF work (opening, counting, text extraction, rendering)
-runs in a worker thread under the PARSING limiter, so a slow or hostile file
+runs in a worker thread under the single-slot PYMUPDF limiter, so a slow or hostile file
 never stalls the event loop, and a page is rendered at a resolution that keeps
 its pixmap under MAX_RASTER_PIXELS however large the page claims to be.
 """
@@ -19,7 +19,7 @@ from functools import partial
 import puremagic
 import pymupdf
 
-from flashcards.adapters.offload import PARSING, run_blocking
+from flashcards.adapters.offload import PYMUPDF, run_blocking
 from flashcards.domain.sources import (
     ExtractedPage,
     PageKind,
@@ -70,23 +70,32 @@ class PyMuPDFExtractor:
             )
             return
 
-        doc = await _parse(lambda: pymupdf.open(stream=data, filetype="pdf"))
+        doc, page_count = await _parse(lambda: _open(data))
         try:
-            page_count = int(doc.page_count)
             if page_count > max_pages:
                 raise TooManyPages(f"{page_count} pages (max {max_pages})")
             for index in range(page_count):
                 yield await _parse(partial(_render_page, doc, index, file_id))
         finally:
-            doc.close()
+            # Closing touches MuPDF too, so it takes the same single slot.
+            await run_blocking(PYMUPDF, doc.close)
 
 
 async def _parse[T](work: Callable[[], T]) -> T:
-    """Run PyMuPDF work in a parsing thread; its failures become UnreadableDocument."""
+    """Run PyMuPDF work in a worker thread; its failures become UnreadableDocument.
+
+    PyMuPDF does not support concurrent use from several threads, so all of it
+    (request-time counting, worker rendering, chat indexing) shares one slot.
+    """
     try:
-        return await run_blocking(PARSING, work)
+        return await run_blocking(PYMUPDF, work)
     except _PDF_ERRORS as exc:
         raise UnreadableDocument(type(exc).__name__) from exc
+
+
+def _open(data: bytes) -> tuple[pymupdf.Document, int]:
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    return doc, int(doc.page_count)
 
 
 def _page_count(data: bytes) -> int:

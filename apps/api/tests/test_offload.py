@@ -43,6 +43,8 @@ def test_limits_are_small_and_separate() -> None:
     assert offload.PASSWORD_HASHING is not offload.PARSING
     assert offload.PASSWORD_HASHING.total_tokens == offload.PASSWORD_HASHING_SLOTS
     assert offload.PARSING.total_tokens == offload.PARSING_SLOTS
+    assert offload.PYMUPDF is not offload.PARSING
+    assert offload.PYMUPDF.total_tokens == offload.PYMUPDF_SLOTS == 1
 
 
 async def test_blocking_package_reader_parses_off_the_event_loop() -> None:

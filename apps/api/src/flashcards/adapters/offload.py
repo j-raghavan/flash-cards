@@ -21,11 +21,15 @@ from flashcards.domain.anki import AnkiPackage
 # Concurrent Argon2 hashes or verifications. Each uses argon2-cffi's default
 # 64 MiB, so this also bounds the memory sign-ins can take at once.
 PASSWORD_HASHING_SLOTS = 4
-# Concurrent untrusted-file parses (PDF counting, page rendering, .apkg reading).
+# Concurrent .apkg parses (zip and SQLite).
 PARSING_SLOTS = 2
+# PyMuPDF does not support concurrent use from several threads, so every PDF
+# operation (open, count, extract, render, close) takes this single slot.
+PYMUPDF_SLOTS = 1
 
 PASSWORD_HASHING = anyio.CapacityLimiter(PASSWORD_HASHING_SLOTS)
 PARSING = anyio.CapacityLimiter(PARSING_SLOTS)
+PYMUPDF = anyio.CapacityLimiter(PYMUPDF_SLOTS)
 
 
 async def run_blocking[T](limiter: anyio.CapacityLimiter, func: Callable[[], T]) -> T:
