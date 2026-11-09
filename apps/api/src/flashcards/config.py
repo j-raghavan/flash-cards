@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     ai_provider_terms_url: str | None = None
     # Where the web client lives; links in emails point here.
     public_base_url: str = "http://localhost:5173"
+    # Per-address rate limit for POST /auth/* and /shared/* (ADR 0019), per process.
+    rate_limit_enabled: bool = True
+    rate_limit_auth_per_minute: int = Field(default=20, ge=1)
+    rate_limit_shared_per_minute: int = Field(default=60, ge=1)
+    # How many reverse proxies append to X-Forwarded-For in front of the API. 0 (the
+    # default) ignores the header and limits by the connection's peer address.
+    trusted_proxy_count: int = Field(default=0, ge=0, le=10)
     # Outgoing mail. Without smtp_host, mail is not sent: in development it is
     # logged so the links can be followed; elsewhere only its subject is logged.
     smtp_host: str | None = None

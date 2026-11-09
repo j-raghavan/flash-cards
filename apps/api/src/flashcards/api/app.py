@@ -22,6 +22,7 @@ from flashcards.api.container import Container
 from flashcards.api.csrf import CsrfOriginMiddleware
 from flashcards.api.job_events import StreamSlots
 from flashcards.api.provider import ServicesProvider, in_memory_provider, sql_provider
+from flashcards.api.rate_limit import RateLimitMiddleware, default_rules
 from flashcards.api.routers import (
     account,
     admin,
@@ -388,6 +389,16 @@ def create_app(settings: Settings | None = None, *, llm: LLMProvider | None = No
 
     # Refuses unsafe requests that do not come from a trusted origin (ADR 0017).
     app.add_middleware(CsrfOriginMiddleware, public_base_url=settings.public_base_url)
+    if settings.rate_limit_enabled:
+        # Runs before the CSRF check, so a refused burst costs nothing (ADR 0019).
+        app.add_middleware(
+            RateLimitMiddleware,
+            rules=default_rules(
+                auth_per_minute=settings.rate_limit_auth_per_minute,
+                shared_per_minute=settings.rate_limit_shared_per_minute,
+            ),
+            trusted_proxies=settings.trusted_proxy_count,
+        )
     # Added last, so it runs first: no body is parsed or spooled past the cap.
     app.add_middleware(BodySizeLimitMiddleware)
     _register_error_handlers(app)

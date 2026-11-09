@@ -176,7 +176,7 @@ docker compose up -d --wait
 - **`FLASHCARDS_ENVIRONMENT=production`** (the image default) disables `/docs` and `/openapi.json` and keeps email bodies, which contain working reset links, out of the logs. Never run a reachable instance in `development`.
 - **Request size.** The API reads `.apkg` and AI uploads into memory before checking their size. The bundled Caddyfile caps request bodies at 50 MB; set an equivalent limit on any other proxy (`client_max_body_size 50m;` in nginx).
 - **Server-Sent Events.** `GET /api/ai/jobs/{id}/events` streams job progress. The API sends `X-Accel-Buffering: no`, which nginx honours; both bundled Caddy configurations use `flush_interval -1`, and `web` does not compress `/api` responses. Other proxies must not buffer `text/event-stream` responses, and their read timeout must exceed the 15-second keep-alive interval (streams last at most 10 minutes).
-- **Rate limiting.** Sign-in lockout is per email address (5 failures per 15 minutes). There is no per-IP limit in the API; add one at the proxy for `/api/auth/*` if the instance is reachable from the internet.
+- **Rate limiting.** Sign-in lockout is per email address (5 failures per 15 minutes). The API also limits each client address: 20 POST requests a minute under `/auth/` and 60 requests a minute under `/shared/`, answering 429 with `Retry-After` (ADR 0019; `FLASHCARDS_RATE_LIMIT_AUTH_PER_MINUTE`, `FLASHCARDS_RATE_LIMIT_SHARED_PER_MINUTE`, `FLASHCARDS_RATE_LIMIT_ENABLED`). The counts live in the API process's memory, so each process limits on its own and a restart resets them; for a global limit, also limit at the proxy (see [Rate limiting at the proxy](#rate-limiting-at-the-proxy)). The client address is what uvicorn reports, which in this stack comes from `X-Forwarded-For` because of `FORWARDED_ALLOW_IPS`. When uvicorn does not rewrite it (the API runs behind proxies it is not told to trust), set `FLASHCARDS_TRUSTED_PROXY_COUNT` to the number of proxies that append to `X-Forwarded-For`; leave it at 0 otherwise, or clients can choose their own address.
 - **Security headers.** `web` sends the Content-Security-Policy and the other headers listed under [The web app and routing](#the-web-app-and-routing) on every response, and HSTS for requests that arrived over HTTPS. A proxy in front should pass them through rather than add its own copies.
 - **Share links in logs.** Share-link tokens appear in request paths (`/api/shared/{token}`), so the API's access log (`docker compose logs api`) contains working links, as does any proxy access log that is enabled (neither bundled Caddyfile enables one). Restrict who can read those logs.
 - **Unhealthy containers are not restarted.** `restart: unless-stopped` restarts a container whose process exits. Compose does not restart a container that is running but failing its healthcheck; use external monitoring on `/api/healthz` (from the host, `http://127.0.0.1:8000/api/healthz`).
@@ -204,6 +204,42 @@ server {
     }
 }
 ```
+
+## Rate limiting at the proxy
+
+The API's own limit is per process. A proxy limit covers every process and stops a burst before it reaches the API. With nginx:
+
+```nginx
+# In the http block: 20 requests a minute per client address, for sign-in and sharing.
+limit_req_zone $binary_remote_addr zone=flashcards_auth:10m rate=20r/m;
+
+# In the server block, next to `location /`:
+location ~ ^/api/(auth|shared)/ {
+    limit_req zone=flashcards_auth burst=20 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Caddy has no rate limiter built in. With a Caddy build that includes the `caddy-ratelimit` module (`xcaddy build --with github.com/mholt/caddy-ratelimit`), add to the site block of `deploy/compose/Caddyfile`:
+
+```caddyfile
+rate_limit {
+	zone flashcards_auth {
+		match {
+			path /api/auth/* /api/shared/*
+		}
+		key {remote_host}
+		events 20
+		window 1m
+	}
+}
+```
+
+and `order rate_limit before reverse_proxy` in the global options block.
 
 ## Troubleshooting
 
