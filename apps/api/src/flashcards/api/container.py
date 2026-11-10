@@ -437,6 +437,7 @@ def build_services(repos: Repositories) -> Container:
         repos.user_tokens,
         repos.clock,
         base_url=repos.public_base_url,
+        hasher=repos.hasher,
     )
     ceremonies = repos.passkey_ceremonies
     if ceremonies is None:

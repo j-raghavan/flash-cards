@@ -84,6 +84,18 @@ class PasswordResetConfirmRequest(BaseModel):
     password: str = Field(max_length=1_000)
 
 
+class AdminCreateUserRequest(BaseModel):
+    """An account an admin creates directly, without an invite or email."""
+
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=1_000)
+    role: Role = Role.MEMBER
+
+
+class AdminSetPasswordRequest(BaseModel):
+    password: str = Field(max_length=1_000)
+
+
 class InviteCreateRequest(BaseModel):
     email: str | None = None
     role: Role = Role.MEMBER

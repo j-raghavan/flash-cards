@@ -192,6 +192,10 @@ export const admin = {
     request<CreatedInvite>("/admin/invites", { method: "POST", json: { email, role, ttl_days: ttlDays } }),
   revokeInvite: (inviteId: string) => request<undefined>(`/admin/invites/${id(inviteId)}/revoke`, { method: "POST" }),
   users: () => request<AdminUser[]>("/admin/users"),
+  createUser: (email: string, password: string, role: Role) =>
+    request<AdminUser>("/admin/users", { method: "POST", json: { email, password, role } }),
+  setPassword: (userId: string, password: string) =>
+    request<AdminUser>(`/admin/users/${id(userId)}/password`, { method: "POST", json: { password } }),
   suspend: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/suspend`, { method: "POST" }),
   unsuspend: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/unsuspend`, { method: "POST" }),
   unlock: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/unlock`, { method: "POST" }),
