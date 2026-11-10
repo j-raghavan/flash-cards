@@ -372,3 +372,20 @@ def test_secret_box_from_settings(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         assert _secret_box_from_settings(Settings(), persistent=True) is None
     assert "FLASHCARDS_TOTP_ENCRYPTION_KEYS" in caplog.text
+
+
+def test_an_admin_set_password_keeps_two_factor_sign_in(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    member, member_id = _member(app, seed_invite)
+    _enable_totp(member)
+    new_password = "a-password-the-admin-chose"
+
+    changed = admin_client.post(
+        f"/admin/users/{member_id}/password", json={"password": new_password}
+    )
+
+    assert changed.status_code == 200
+    # The new password is only the first step: the second factor is still required.
+    login = TestClient(app).post("/auth/login", json={"email": MEMBER, "password": new_password})
+    assert login.status_code == 202

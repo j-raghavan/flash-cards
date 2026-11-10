@@ -33,6 +33,7 @@ class AuditAction(enum.StrEnum):
     EMAIL_VERIFIED = "email.verified"
     INVITE_RESENT = "invite.resent"
     USER_REGISTERED = "user.registered"
+    USER_PASSWORD_SET = "user.password_set"  # noqa: S105 - an event name, not a secret
     SESSION_REVOKED = "session.revoked"
     SESSIONS_REVOKED_OTHERS = "session.revoked_others"
     QUOTA_DEFAULTS_CHANGED = "quota.defaults_changed"

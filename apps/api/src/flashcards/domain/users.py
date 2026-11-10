@@ -42,6 +42,10 @@ class UserNotFound(UserError):
     """No user with that id."""
 
 
+class AdminPasswordProtected(UserError):
+    """An admin's password cannot be set by another admin; demote them first."""
+
+
 class AdminSelfAction(UserError):
     """An admin tried to suspend, demote or delete their own account."""
 

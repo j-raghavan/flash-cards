@@ -22,6 +22,8 @@ from flashcards.api.container import Container
 from flashcards.api.deps import CurrentUser, get_container, require_admin
 from flashcards.api.mail import send_later
 from flashcards.api.schemas import (
+    AdminCreateUserRequest,
+    AdminSetPasswordRequest,
     AdminUserOut,
     AuditEventOut,
     CreatedInviteOut,
@@ -30,7 +32,12 @@ from flashcards.api.schemas import (
     RoleUpdateRequest,
 )
 from flashcards.application.invite_service import CreatedInvite, InviteHasNoEmail
-from flashcards.domain.users import InvalidEmail
+from flashcards.domain.users import (
+    AdminPasswordProtected,
+    EmailAlreadyRegistered,
+    InvalidEmail,
+    WeakPassword,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -131,6 +138,50 @@ async def list_users(
     users = await container.admin.list_users()
     enabled = await container.two_factor.enabled_among([user.id for user in users])
     return [AdminUserOut.from_user(user, two_factor=user.id in enabled) for user in users]
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED, response_model=AdminUserOut)
+async def create_user(
+    body: AdminCreateUserRequest,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> AdminUserOut:
+    """Create an account directly: no invite, no email, and the email counts as
+    verified. For instances without outgoing mail, such as a home server."""
+    try:
+        user = await container.admin.create_user(
+            admin_id=admin.user.id, email=body.email, password=body.password, role=body.role
+        )
+    except (InvalidEmail, WeakPassword) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except EmailAlreadyRegistered as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, "That email already has an account.") from exc
+    return AdminUserOut.from_user(user, two_factor=False)
+
+
+@router.post("/users/{user_id}/password", response_model=AdminUserOut)
+async def set_user_password(
+    user_id: str,
+    body: AdminSetPasswordRequest,
+    tasks: BackgroundTasks,
+    admin: CurrentUser = Depends(require_admin),
+    container: Container = Depends(get_container, scope="function"),
+) -> AdminUserOut:
+    """Set a member's password; they are signed out everywhere and, when mail is
+    configured, told by email. Refused (409) for admins: demote them first."""
+    try:
+        user = await container.admin.set_password(
+            admin_id=admin.user.id, user_id=user_id, password=body.password
+        )
+    except WeakPassword as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except AdminPasswordProtected as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "An admin's password cannot be set by another admin. Demote them first.",
+        ) from exc
+    send_later(tasks, container.mailer, container.admin.password_set_email(user))
+    return AdminUserOut.from_user(user)
 
 
 @router.post("/users/{user_id}/suspend", response_model=AdminUserOut)

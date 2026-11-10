@@ -45,7 +45,7 @@ These flows send email and change who can act on the instance. Mistakes in them 
 
 ### User management
 
-- Admins can list, suspend, unsuspend, change the role of, and delete users. They can never do this to their own account. There is no impersonation.
+- Admins can list, suspend, unsuspend, change the role of, and delete users. They can never do this to their own account. There is no impersonation, with one audited exception added later: setting a member's password (ADR 0023).
 - Suspension signs the user out everywhere.
 - Every admin change first locks the active admin rows (`SELECT ... FOR UPDATE`, in id order), then the target's row. Concurrent changes therefore apply one after the other without deadlocking. An admin who lost the role while their request was waiting is refused (403).
 - Together with the self-action rule, this keeps at least one active admin. Account deletion takes the same lock and refuses the last active admin (409).

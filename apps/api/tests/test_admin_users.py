@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from flashcards.adapters.memory import InMemoryUserRepository
 from flashcards.api.container import Container
 from flashcards.domain.invites import Role
+from flashcards.domain.mail import OutgoingEmail
 from flashcards.domain.users import AdminRequired
 
 PASSWORD = "correct-horse-battery"
@@ -265,3 +266,187 @@ def test_an_admin_demoted_mid_request_gets_403(
     monkeypatch.setattr(InMemoryUserRepository, "lock_active_admins", no_admins_left)
     refused = admin_client.post(f"/admin/users/{member_id}/suspend")
     assert refused.status_code == 403 and refused.json()["detail"] == "Admin only."
+
+
+# Admin-created accounts and admin-set passwords, for instances without mail.
+
+NEW_PASSWORD = "a-brand-new-secret-phrase"
+
+
+def test_admin_creates_a_verified_account_that_can_sign_in(
+    app: FastAPI, admin_client: TestClient
+) -> None:
+    created = admin_client.post(
+        "/admin/users", json={"email": "  Kid@Example.com ", "password": PASSWORD}
+    )
+
+    assert created.status_code == 201
+    body = created.json()
+    assert body["email"] == "kid@example.com" and body["role"] == "member"
+    assert body["email_verified"] is True and body["two_factor"] is False
+    login = TestClient(app).post(
+        "/auth/login", json={"email": "kid@example.com", "password": PASSWORD}
+    )
+    assert login.status_code == 200
+    assert ("user.registered", body["id"]) in _actions(admin_client)
+    event = next(e for e in admin_client.get("/admin/audit").json() if e["target_id"] == body["id"])
+    assert event["actor_id"] == _admin_id(admin_client)
+
+
+def test_admin_can_create_another_admin(app: FastAPI, admin_client: TestClient) -> None:
+    created = admin_client.post(
+        "/admin/users",
+        json={"email": "second@example.com", "password": PASSWORD, "role": "admin"},
+    )
+    assert created.status_code == 201 and created.json()["role"] == "admin"
+
+
+def test_creating_an_account_refuses_bad_input_and_duplicates(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    _member(app, seed_invite)
+    duplicate = admin_client.post("/admin/users", json={"email": MEMBER, "password": PASSWORD})
+    assert duplicate.status_code == 409
+    weak = admin_client.post("/admin/users", json={"email": "a@example.com", "password": "short"})
+    assert weak.status_code == 422 and "short" not in weak.text
+    bad = admin_client.post("/admin/users", json={"email": "not-an-email", "password": PASSWORD})
+    assert bad.status_code == 422
+
+
+def test_members_cannot_create_accounts_or_set_passwords(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    member, member_id = _member(app, seed_invite)
+    create = member.post("/admin/users", json={"email": "x@example.com", "password": PASSWORD})
+    assert create.status_code == 403
+    password = member.post(f"/admin/users/{member_id}/password", json={"password": NEW_PASSWORD})
+    assert password.status_code == 403
+
+
+def test_setting_a_password_signs_the_user_out_and_replaces_the_old_one(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    member, member_id = _member(app, seed_invite)
+
+    changed = admin_client.post(
+        f"/admin/users/{member_id}/password", json={"password": NEW_PASSWORD}
+    )
+
+    assert changed.status_code == 200 and changed.json()["id"] == member_id
+    assert member.get("/auth/me").status_code == 401  # signed out everywhere
+    old = TestClient(app).post("/auth/login", json={"email": MEMBER, "password": PASSWORD})
+    assert old.status_code == 401
+    new = TestClient(app).post("/auth/login", json={"email": MEMBER, "password": NEW_PASSWORD})
+    assert new.status_code == 200
+    assert ("user.password_set", member_id) in _actions(admin_client)
+
+
+def test_setting_a_password_clears_a_sign_in_lockout(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    _member(app, seed_invite)
+    member_id = next(
+        u["id"] for u in admin_client.get("/admin/users").json() if u["email"] == MEMBER
+    )
+    stranger = TestClient(app)
+    for _ in range(12):
+        stranger.post("/auth/login", json={"email": MEMBER, "password": "wrong-password-guess"})
+    locked = stranger.post("/auth/login", json={"email": MEMBER, "password": PASSWORD})
+    assert locked.status_code == 429
+
+    admin_client.post(f"/admin/users/{member_id}/password", json={"password": NEW_PASSWORD})
+
+    login = TestClient(app).post("/auth/login", json={"email": MEMBER, "password": NEW_PASSWORD})
+    assert login.status_code == 200
+
+
+def test_setting_a_password_refuses_weak_ones_unknown_users_and_oneself(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    _member_client, member_id = _member(app, seed_invite)
+    weak = admin_client.post(f"/admin/users/{member_id}/password", json={"password": "short"})
+    assert weak.status_code == 422
+    missing = admin_client.post("/admin/users/nobody/password", json={"password": NEW_PASSWORD})
+    assert missing.status_code == 404
+    own = admin_client.post(
+        f"/admin/users/{_admin_id(admin_client)}/password", json={"password": NEW_PASSWORD}
+    )
+    assert own.status_code == 409  # use the account page for your own password
+    # The admin's own password is unchanged.
+    assert admin_client.get("/auth/me").status_code == 200
+
+
+def test_setting_a_password_voids_links_already_emailed(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    container: Container = app.state.container
+    _member_client, member_id = _member(app, seed_invite)
+    email = asyncio.run(container.account_email.password_reset_email(MEMBER))
+    assert email is not None
+    token = email.body.split("#token=")[1].split()[0]
+
+    admin_client.post(f"/admin/users/{member_id}/password", json={"password": NEW_PASSWORD})
+
+    confirm = {"token": token, "password": "yet-another-password"}
+    assert TestClient(app).post("/auth/password-reset/confirm", json=confirm).status_code == 422
+    event = next(
+        e for e in admin_client.get("/admin/audit").json() if e["action"] == "user.password_set"
+    )
+    assert event["detail"] == {"lockouts_cleared": "true"}
+
+
+def test_an_admins_password_cannot_be_set_by_another_admin(
+    app: FastAPI, admin_client: TestClient
+) -> None:
+    other = admin_client.post(
+        "/admin/users",
+        json={"email": "second@example.com", "password": PASSWORD, "role": "admin"},
+    ).json()
+
+    refused = admin_client.post(
+        f"/admin/users/{other['id']}/password", json={"password": NEW_PASSWORD}
+    )
+
+    assert refused.status_code == 409 and "Demote them first" in refused.json()["detail"]
+    login = TestClient(app).post(
+        "/auth/login", json={"email": "second@example.com", "password": PASSWORD}
+    )
+    assert login.status_code == 200  # unchanged
+    # Once demoted, it works.
+    admin_client.patch(f"/admin/users/{other['id']}", json={"role": "member"})
+    allowed = admin_client.post(
+        f"/admin/users/{other['id']}/password", json={"password": NEW_PASSWORD}
+    )
+    assert allowed.status_code == 200
+
+
+def test_the_member_is_told_by_email_when_mail_is_configured(
+    app: FastAPI,
+    admin_client: TestClient,
+    seed_invite: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container: Container = app.state.container
+    _member_client, member_id = _member(app, seed_invite)
+    sent: list[OutgoingEmail] = []
+
+    async def capture(email: OutgoingEmail) -> None:
+        sent.append(email)
+
+    monkeypatch.setattr(container.mailer, "send", capture)
+    admin_client.post(f"/admin/users/{member_id}/password", json={"password": NEW_PASSWORD})
+
+    assert [(e.to, e.subject) for e in sent] == [
+        (MEMBER, "An administrator set your Flash-Cards password")
+    ]
+    assert NEW_PASSWORD not in sent[0].body
+
+
+def test_an_over_long_password_is_refused_without_echoing_it(
+    app: FastAPI, admin_client: TestClient
+) -> None:
+    secret = "x" * 1_001
+    refused = admin_client.post(
+        "/admin/users", json={"email": "long@example.com", "password": secret}
+    )
+    assert refused.status_code == 422 and secret not in refused.text

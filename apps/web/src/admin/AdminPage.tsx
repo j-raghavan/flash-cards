@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The admin console (F-ADMIN-1 to F-ADMIN-5): users and their AI quotas,
-// invites, instance quotas, AI usage and the audit log. The server checks the admin role on every call; this screen only
+// invites, instance quotas, AI usage and the audit log. Admins can also create
+// accounts and set passwords directly, for instances without outgoing mail. The server checks the admin role on every call; this screen only
 // hides itself from members and keeps admins from acting on their own account.
 // Loaded on first visit, so members never download it.
 
-import { useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
 import { adminUsage } from "../api/adminUsage";
 import { describeError } from "../api/client";
@@ -51,6 +52,23 @@ function UserRow({
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [quotaOpen, setQuotaOpen] = useState(false);
   const quotaButton = useRef<HTMLButtonElement>(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const passwordButton = useRef<HTMLButtonElement>(null);
+  const closePassword = (): void => {
+    setPasswordOpen(false);
+    setPassword("");
+    passwordButton.current?.focus();
+  };
+  // After a save the toggle is still disabled until the action settles, so focus
+  // returns to it once it is enabled again.
+  const refocusPassword = useRef(false);
+  useEffect(() => {
+    if (refocusPassword.current && !action.busy) {
+      refocusPassword.current = false;
+      passwordButton.current?.focus();
+    }
+  }, [action.busy]);
   const closeQuota = (): void => {
     setQuotaOpen(false);
     quotaButton.current?.focus();
@@ -137,6 +155,28 @@ function UserRow({
                     Suspend
                   </button>
                 )}
+                {account.role === "admin" ? null : (
+                  // An admin's password cannot be set by another admin (the server
+                  // refuses it): demote them first.
+                  <button
+                    type="button"
+                    className="button"
+                    ref={passwordButton}
+                    disabled={action.busy}
+                    aria-expanded={passwordOpen}
+                    aria-controls={passwordOpen ? `password-row-${account.id}` : undefined}
+                    aria-label={`Set password for ${account.email}`}
+                    onClick={() => {
+                      if (passwordOpen) {
+                        closePassword();
+                      } else {
+                        setPasswordOpen(true);
+                      }
+                    }}
+                  >
+                    Set password
+                  </button>
+                )}
                 <button
                   type="button"
                   className="button"
@@ -185,10 +225,61 @@ function UserRow({
           <span role="status" className="muted">
             {note}
           </span>
-          <ErrorText message={action.error} />
+          {/* While the password row is open, its errors show next to its field. */}
+          <ErrorText message={passwordOpen ? null : action.error} />
           <ErrorText message={removeError} />
         </td>
       </tr>
+      {passwordOpen ? (
+        <tr id={`password-row-${account.id}`}>
+          <td colSpan={5}>
+            <form
+              className="inline-form"
+              aria-label={`New password for ${account.email}`}
+              onSubmit={(event: SubmitEvent) => {
+                event.preventDefault();
+                setNote(null);
+                void action.run(async () => {
+                  onChanged(await admin.setPassword(account.id, password));
+                  setPasswordOpen(false);
+                  setPassword("");
+                  refocusPassword.current = true;
+                  setNote("Password set; they have been signed out everywhere.");
+                });
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  closePassword();
+                }
+              }}
+            >
+              <label className="field grow">
+                <span>New password for {account.email}</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  required
+                  minLength={MIN_PASSWORD}
+                  maxLength={1000}
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                  }}
+                />
+              </label>
+              <button type="submit" className="button primary" disabled={action.busy || password.length < MIN_PASSWORD}>
+                Save password
+              </button>
+              <button type="button" className="button" onClick={closePassword}>
+                Cancel
+              </button>
+              <ErrorText message={action.error} />
+            </form>
+          </td>
+        </tr>
+      ) : null}
       {quotaOpen ? (
         <tr id={`quota-row-${account.id}`}>
           <td colSpan={5}>
@@ -197,6 +288,93 @@ function UserRow({
         </tr>
       ) : null}
     </>
+  );
+}
+
+const MIN_PASSWORD = 12;
+
+/** Create an account directly: no invite and no email; it can sign in at once. */
+function CreateUserForm({ onCreated }: { onCreated: (user: AdminUser) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<Role>("member");
+  const [created, setCreated] = useState<string | null>(null);
+  const submit = useSubmit();
+
+  const onSubmit = (event: SubmitEvent): void => {
+    event.preventDefault();
+    setCreated(null);
+    void submit.run(async () => {
+      const user = await admin.createUser(email.trim(), password, role);
+      onCreated(user);
+      setEmail("");
+      setPassword("");
+      setRole("member");
+      setCreated(`Created ${user.email}. They can sign in now with that password.`);
+    });
+  };
+
+  return (
+    <div className="panel">
+      <h2>Add an account</h2>
+      <p className="muted">
+        For people on this server without email: the account is ready at once, with no invite. Share the password with
+        them in person.
+      </p>
+      <form className="inline-form" aria-label="Add an account" onSubmit={onSubmit}>
+        <label className="field grow">
+          <span>Email</span>
+          <input
+            type="email"
+            autoComplete="off"
+            required
+            maxLength={320}
+            value={email}
+            onChange={(event) => {
+              setEmail(event.target.value);
+            }}
+          />
+        </label>
+        <label className="field grow">
+          <span>Password</span>
+          <input
+            type="password"
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            required
+            minLength={MIN_PASSWORD}
+            maxLength={1000}
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+            }}
+          />
+        </label>
+        <label className="field">
+          <span>Role</span>
+          <select
+            value={role}
+            onChange={(event) => {
+              setRole(event.target.value as Role);
+            }}
+          >
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <button
+          type="submit"
+          className="button primary"
+          disabled={submit.busy || email.trim() === "" || password.length < MIN_PASSWORD}
+        >
+          Add account
+        </button>
+      </form>
+      <p className="small muted">Passwords need at least {MIN_PASSWORD} characters.</p>
+      <span role="status">{created}</span>
+      <ErrorText message={submit.error} />
+    </div>
   );
 }
 
@@ -210,42 +388,49 @@ function UsersPanel({ selfId }: { selfId: string }) {
   }
   const list = users.data;
   return (
-    <div className="table-wrap">
-      <table className="browser">
-        <caption className="visually-hidden">Users</caption>
-        <thead>
-          <tr>
-            <th scope="col">Email</th>
-            <th scope="col">Role</th>
-            <th scope="col">Status</th>
-            <th scope="col">Joined</th>
-            <th scope="col">
-              <span className="visually-hidden">Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map((account) => (
-            <UserRow
-              key={account.id}
-              account={account}
-              self={account.id === selfId}
-              onChanged={(changed) => {
-                // Most answers do not look up two-step sign-in (null): keep what the list said.
-                users.setData((current = []) =>
-                  current.map((u) =>
-                    u.id === changed.id ? { ...changed, two_factor: changed.two_factor ?? u.two_factor ?? null } : u,
-                  ),
-                );
-              }}
-              onRemoved={(userId) => {
-                users.setData((current = []) => current.filter((u) => u.id !== userId));
-              }}
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <CreateUserForm
+        onCreated={(user) => {
+          users.setData((current = []) => [...current, user]);
+        }}
+      />
+      <div className="table-wrap">
+        <table className="browser">
+          <caption className="visually-hidden">Users</caption>
+          <thead>
+            <tr>
+              <th scope="col">Email</th>
+              <th scope="col">Role</th>
+              <th scope="col">Status</th>
+              <th scope="col">Joined</th>
+              <th scope="col">
+                <span className="visually-hidden">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((account) => (
+              <UserRow
+                key={account.id}
+                account={account}
+                self={account.id === selfId}
+                onChanged={(changed) => {
+                  // Most answers do not look up two-step sign-in (null): keep what the list said.
+                  users.setData((current = []) =>
+                    current.map((u) =>
+                      u.id === changed.id ? { ...changed, two_factor: changed.two_factor ?? u.two_factor ?? null } : u,
+                    ),
+                  );
+                }}
+                onRemoved={(userId) => {
+                  users.setData((current = []) => current.filter((u) => u.id !== userId));
+                }}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
