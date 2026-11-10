@@ -336,6 +336,31 @@ def test_a_clone_copies_note_types_and_images(alice: TestClient, app: FastAPI) -
     assert len(export["cards"]) == 8  # 2 custom notes x 2 + 2 occlusion notes x 2
 
 
+def test_a_clone_copies_the_figures_cards_show(alice: TestClient, app: FastAPI) -> None:
+    deck_id, image_id = _deck(alice), _image(alice)
+    bob = _member(app, "bob@example.com")
+    bobs_own = _image(bob)
+    fronts = [
+        f"![Figure](media:{image_id})\n\nWhich line is dashed?",
+        f"![Figure](media:{image_id}) again, ![x](media:{bobs_own}) ![y](media:no-such-id)",
+    ]
+    for front in fronts:
+        alice.post(
+            f"/decks/{deck_id}/notes",
+            json={"note_type": "basic", "fields": {"front": front, "back": "b"}},
+        )
+    assert bob.post(f"/shared/{_share(alice, deck_id)}/clone").status_code == 201
+
+    export = bob.get("/account/export").json()
+    copies = [m["id"] for m in export["media"] if m["id"] != bobs_own]
+    assert len(copies) == 1  # one copy for both cards; media alice does not own is not copied
+    assert {n["fields"]["front"] for n in export["notes"]} == {
+        f"![Figure](media:{copies[0]})\n\nWhich line is dashed?",
+        f"![Figure](media:{copies[0]}) again, ![x](media:{bobs_own}) ![y](media:no-such-id)",
+    }
+    assert bob.get(f"/media/{copies[0]}").status_code == 200
+
+
 def test_a_clone_is_bounded_by_image_bytes(
     alice: TestClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
