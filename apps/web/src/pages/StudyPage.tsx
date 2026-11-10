@@ -566,7 +566,7 @@ export function StudyPage() {
             <button
               key={rating}
               type="button"
-              className={rating === (suggestion ?? 3) ? "button primary" : "button"}
+              className={`button rate-${String(rating)}${rating === (suggestion ?? 3) ? " primary" : ""}`}
               aria-keyshortcuts={rating === suggestion ? `${String(rating)} Enter` : String(rating)}
               disabled={undoing}
               onClick={() => {

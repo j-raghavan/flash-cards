@@ -11,6 +11,7 @@ import { auth } from "../api/endpoints";
 import { needsSecondFactor, type SecondFactorRequired } from "../api/twoFactor";
 import type { User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { BrandMark } from "../components/BrandMark";
 import { SiteFooter } from "../components/SiteFooter";
 import { SecondFactorStep } from "../auth/SecondFactorStep";
 import { ErrorText, Loading } from "../components/ui";
@@ -21,15 +22,53 @@ import { useSubmit } from "../lib/useSubmit";
 
 const MIN_PASSWORD_LENGTH = 12;
 
+/** The panel beside the sign-in forms on wide screens: what the app is for. */
+function AuthShowcase() {
+  return (
+    <aside className="auth-showcase" aria-label="About Flash-Cards">
+      <p className="auth-tagline">Remember more. Study less.</p>
+      <p className="auth-pitch">
+        Turn lecture notes, PDFs and videos into flashcards, then review each one just before you would forget it.
+      </p>
+      <div className="card-stack" aria-hidden="true">
+        <div className="demo-card">
+          <strong>Biology</strong>
+          Which organelle makes most of a cell&apos;s ATP?
+        </div>
+        <div className="demo-card">
+          <strong>Java</strong>
+          What does an ArrayList&apos;s size() return?
+        </div>
+        <div className="demo-card">
+          <strong>Spanish</strong>
+          la biblioteca
+          <div className="demo-rating">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function AuthFrame({ title, children }: { title: string; children: ReactNode }) {
   useDocumentTitle(title);
   return (
     <>
-      <main id="main" className="auth">
-        <p className="brand">Flash-Cards</p>
-        <h1>{title}</h1>
-        {children}
-      </main>
+      <div className="auth-shell">
+        <AuthShowcase />
+        <main id="main" className="auth">
+          <p className="brand">
+            <BrandMark />
+            Flash-Cards
+          </p>
+          <h1>{title}</h1>
+          {children}
+        </main>
+      </div>
       <SiteFooter />
     </>
   );
