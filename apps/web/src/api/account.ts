@@ -4,6 +4,7 @@
 // and the operator's legal pages (F-LEGAL-1).
 // Shapes mirror apps/api/src/flashcards/api/schemas.py and ai_schemas.py.
 
+import type { Appearance } from "../lib/appearance";
 import { request } from "./client";
 
 /** A device-list entry; it never carries the session token. */
@@ -78,6 +79,9 @@ export const account = {
   /** Everything the account holds, as one JSON document. */
   export: () => request<unknown>("/account/export"),
   remove: () => request<undefined>("/account", { method: "DELETE" }),
+  /** Change the parts of the look given; it follows the user to every device. */
+  setAppearance: (change: Partial<Appearance>) =>
+    request<Appearance>("/account/appearance", { method: "PATCH", json: change }),
 };
 
 export const legal = {

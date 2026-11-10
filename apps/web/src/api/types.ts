@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Response and request shapes, mirroring apps/api/src/flashcards/api/schemas.py.
 
+import type { Accent, Theme } from "../lib/appearance";
+
 export type Role = "admin" | "member";
 
 export interface User {
@@ -8,6 +10,9 @@ export interface User {
   email: string;
   role: Role;
   email_verified: boolean;
+  /** The chosen look (absent from an API older than it, or a user cached before it). Read it with appearanceOf. */
+  theme?: Theme;
+  accent?: Accent;
 }
 
 export interface Deck {

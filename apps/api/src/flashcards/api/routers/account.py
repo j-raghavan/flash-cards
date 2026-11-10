@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Account routes: data export, deletion and AI quota (F-IMP-5, NF-PRIV-1, F-AI-11)."""
+"""Account routes: data export, deletion, AI quota and appearance
+(F-IMP-5, NF-PRIV-1, F-AI-11)."""
 
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from flashcards.api.deps import (
     get_container,
     get_settings,
 )
-from flashcards.api.schemas import AccountExportOut
+from flashcards.api.schemas import AccountExportOut, AppearanceOut, AppearanceUpdateRequest
 from flashcards.config import Settings
 from flashcards.domain.audit import AuditAction
 from flashcards.domain.sources import page_cap
@@ -29,6 +30,20 @@ async def export_account(
 ) -> AccountExportOut:
     export = await container.account.export(user=caller.user)
     return AccountExportOut.from_export(export)
+
+
+@router.patch("/appearance", response_model=AppearanceOut)
+async def update_appearance(
+    body: AppearanceUpdateRequest,
+    caller: CurrentUser = Depends(current_user),
+    container: Container = Depends(get_container, scope="function"),
+) -> AppearanceOut:
+    """Change the caller's light or dark choice and accent palette; it follows them
+    to every device."""
+    appearance = await container.appearance.update(
+        user_id=caller.user.id, theme=body.theme, accent=body.accent
+    )
+    return AppearanceOut.from_appearance(appearance)
 
 
 @router.get("/ai-quota", response_model=MyAiQuotaOut)

@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from flashcards.domain.appearance import Appearance
 from flashcards.domain.invites import Role, normalize_email
 
 # Minimum password length. Short of a breach-list check (added later), length is
@@ -98,6 +99,7 @@ class User:
     created_at: datetime
     email_verified_at: datetime | None = None
     suspended_at: datetime | None = None
+    appearance: Appearance = Appearance()
 
     def status(self) -> UserStatus:
         if self.suspended_at is not None:
@@ -126,3 +128,6 @@ class User:
 
     def with_role(self, role: Role) -> User:
         return replace(self, role=role)
+
+    def with_appearance(self, appearance: Appearance) -> User:
+        return replace(self, appearance=appearance)
