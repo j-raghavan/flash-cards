@@ -9,9 +9,11 @@ import { Link, useNavigate, useParams } from "react-router";
 import { describeError } from "../api/client";
 import { notes, noteTypes, type NoteExtras } from "../api/endpoints";
 import type { Fields, Note, NoteType, Occlusion } from "../api/types";
+import { LibraryNotice } from "../components/LibraryGuard";
 import { CardContent, ConfirmButton, ErrorText, Loading } from "../components/ui";
 import { cardSides } from "../lib/cardSides";
 import { clozeNumbers, nextClozeNumber } from "../lib/cloze";
+import { isOwned } from "../lib/ownership";
 import { parseTags } from "../lib/text";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
@@ -328,6 +330,9 @@ export function EditNotePage() {
     return <Loading />;
   }
   const loaded = note.data;
+  if (!isOwned(loaded)) {
+    return <LibraryNotice deckId={loaded.deck_id} title="Edit card" />;
+  }
 
   return (
     <section>

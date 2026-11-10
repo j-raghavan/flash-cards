@@ -10,6 +10,7 @@ import { cards, decks } from "../api/endpoints";
 import {
   CARD_STATES,
   SORT_KEYS,
+  type BrowserPage as BrowserPageData,
   type BrowserQuery,
   type BulkAction,
   type BulkRequest,
@@ -83,6 +84,15 @@ export function queryFromParams(params: URLSearchParams): ParsedQuery {
   }
   return query;
 }
+
+function withoutDeck(query: ParsedQuery): ParsedQuery {
+  const rest = { ...query };
+  delete rest.deck_id;
+  return rest;
+}
+
+/** An answer that never comes, while a deck filter waits to be checked. */
+const WAITING = new Promise<BrowserPageData>(() => undefined);
 
 function BulkBar({
   selected,
@@ -216,10 +226,18 @@ function BulkBar({
 export function BrowserPage() {
   useDocumentTitle("Browse cards");
   const [params, setParams] = useSearchParams();
-  const query = queryFromParams(params);
-  const queryKey = JSON.stringify(query);
-  const page = useResource(() => cards.browse(query), queryKey);
   const deckList = useResource(() => decks.list(), "decks");
+  const asked = queryFromParams(params);
+  // A deck filter must name one of the user's own decks: a library deck's cards
+  // are not in the browser, so its filter is dropped and the user's own cards are
+  // listed. Until the decks are known the filter cannot be checked, so nothing is
+  // asked for yet; if they cannot load, the server decides.
+  const ownIds = new Set(ownedDecks(deckList.data ?? []).map((deck) => deck.id));
+  const checking = asked.deck_id !== undefined && deckList.data === undefined && deckList.error === null;
+  const ignoredDeck = asked.deck_id !== undefined && deckList.data !== undefined && !ownIds.has(asked.deck_id);
+  const query: ParsedQuery = ignoredDeck ? withoutDeck(asked) : asked;
+  const queryKey = checking ? "checking" : JSON.stringify(query);
+  const page = useResource(() => (checking ? WAITING : cards.browse(query)), queryKey);
   const [selected, setSelected] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState(params.get("q") ?? "");
@@ -371,6 +389,9 @@ export function BrowserPage() {
         </button>
       </form>
 
+      {ignoredDeck ? (
+        <p className="muted">That deck is in the library, so its cards are not listed here; showing your own cards.</p>
+      ) : null}
       <p role="status" className="muted">
         {message}
       </p>

@@ -4,6 +4,7 @@ import { Link, Route, Routes } from "react-router";
 
 import { AuthProvider } from "./auth/AuthContext";
 import { Layout } from "./components/Layout";
+import { OwnerOnly } from "./components/LibraryGuard";
 import { Loading } from "./components/ui";
 import { ForgotPasswordPage, LoginPage, ResetPasswordPage, SignupPage, VerifyEmailPage } from "./pages/auth";
 import { BrowserPage } from "./pages/BrowserPage";
@@ -77,20 +78,43 @@ export function AppRoutes() {
         />
         <Route path="/decks/:deckId" element={<DeckDetailPage />} />
         <Route path="/decks/:deckId/study" element={<StudyPage />} />
-        <Route path="/decks/:deckId/notes/new" element={<NewNotePage />} />
-        <Route path="/decks/:deckId/generate" element={<GeneratePage />} />
+        <Route
+          path="/decks/:deckId/notes/new"
+          element={
+            <OwnerOnly title="Add a card">
+              <NewNotePage />
+            </OwnerOnly>
+          }
+        />
+        <Route
+          path="/decks/:deckId/generate"
+          element={
+            <OwnerOnly title="Generate cards">
+              <GeneratePage />
+            </OwnerOnly>
+          }
+        />
         <Route
           path="/decks/:deckId/exam"
           element={
-            <Lazy>
-              <MockExamPage />
-            </Lazy>
+            <OwnerOnly title="Mock exam">
+              <Lazy>
+                <MockExamPage />
+              </Lazy>
+            </OwnerOnly>
           }
         />
         <Route path="/notes/:noteId/edit" element={<EditNotePage />} />
         <Route path="/cards" element={<BrowserPage />} />
         <Route path="/jobs/:jobId" element={<JobPage />} />
-        <Route path="/decks/:deckId/share" element={<SharePage />} />
+        <Route
+          path="/decks/:deckId/share"
+          element={
+            <OwnerOnly title="Share deck">
+              <SharePage />
+            </OwnerOnly>
+          }
+        />
         <Route path="/shared" element={<SharedDeckPage />} />
         <Route path="/import" element={<ImportPage />} />
         <Route path="/goals" element={<GoalsPage />} />
