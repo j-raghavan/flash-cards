@@ -38,7 +38,7 @@ Review logs, the last-answer row and the review idempotency key are already per 
 - **Deck stats, proficiency and the due forecast** count the caller's schedules over the cards they can read.
 - **Bury and flag belong to the card's owner.** They are still columns on `cards`, so they are the owner's personal markers:
   - for a reader who does not own the card, the due queue and deck stats ignore `buried_until`, so an admin burying a card does not hide it from members;
-  - every card payload returned to a non-owner reports flag `0`.
+  - every card payload returned to a non-owner reports flag `0` and no bury date.
 - **Suspension applies to everyone.** A card the admin suspends is hidden from every member's queue and stats, since the admin suspends a card when it should not be studied at all.
 
 ### Access

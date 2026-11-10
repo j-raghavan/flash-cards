@@ -190,10 +190,19 @@ class DeckOut(BaseModel):
     name: str
     parent_id: str | None
     created_at: datetime
+    # False for a library deck: an active admin's deck the caller may study but
+    # not change (ADR 0024).
+    owned: bool
 
     @classmethod
-    def from_deck(cls, deck: Deck) -> DeckOut:
-        return cls(id=deck.id, name=deck.name, parent_id=deck.parent_id, created_at=deck.created_at)
+    def from_deck(cls, deck: Deck, *, owned: bool) -> DeckOut:
+        return cls(
+            id=deck.id,
+            name=deck.name,
+            parent_id=deck.parent_id,
+            created_at=deck.created_at,
+            owned=owned,
+        )
 
 
 TagIn = Annotated[str, StringConstraints(max_length=MAX_TAG_LENGTH)]

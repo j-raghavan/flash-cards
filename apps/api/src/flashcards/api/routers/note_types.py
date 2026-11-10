@@ -46,7 +46,8 @@ async def get_note_type(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> NoteTypeOut:
-    note_type = await container.note_types.get(owner_id=caller.user.id, note_type_id=note_type_id)
+    # Readable for library notes too, so their cards render (ADR 0024).
+    note_type = await container.read_access.note_type(caller.user.id, note_type_id)
     return NoteTypeOut.from_note_type(note_type)
 
 

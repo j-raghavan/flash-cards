@@ -62,8 +62,8 @@ async def list_cards(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> list[CardOut]:
-    cards = await container.notes.list_cards(owner_id=caller.user.id, deck_id=deck_id)
-    return [CardOut.from_card(card) for card in cards]
+    cards = await container.read_access.deck_cards(caller.user.id, deck_id)
+    return [CardOut.from_card(card.seen_by(caller.user.id)) for card in cards]
 
 
 @router.get("/decks/{deck_id}/stats", response_model=DeckStatsOut)
@@ -142,15 +142,8 @@ async def get_card(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> CardDetailOut:
-    card = await container.notes.get_card(owner_id=caller.user.id, card_id=card_id)
-    note = await container.notes.get_note(owner_id=caller.user.id, note_id=card.note_id)
-    template = None
-    if note.note_type_id is not None:
-        note_type = await container.note_types.get(
-            owner_id=caller.user.id, note_type_id=note.note_type_id
-        )
-        template = note_type.template(card.ordinal)
-    return CardDetailOut.from_card_and_note(card, note, template)
+    card, note, template = await container.read_access.render_card(caller.user.id, card_id)
+    return CardDetailOut.from_card_and_note(card.seen_by(caller.user.id), note, template)
 
 
 @router.post("/cards/{card_id}/suspend", response_model=CardOut)
@@ -181,8 +174,9 @@ async def get_note(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> NoteOut:
-    note = await container.notes.get_note(owner_id=caller.user.id, note_id=note_id)
-    return NoteOut.from_note(note, await container.notes.cards_of(note))
+    note = await container.read_access.note(caller.user.id, note_id)
+    cards = await container.notes.cards_of(note)
+    return NoteOut.from_note(note, [card.seen_by(caller.user.id) for card in cards])
 
 
 @router.patch("/notes/{note_id}", response_model=NoteOut)

@@ -39,7 +39,7 @@ async def create_deck(
     deck = await container.decks.create(
         owner_id=caller.user.id, name=body.name, parent_id=body.parent_id
     )
-    return DeckOut.from_deck(deck)
+    return DeckOut.from_deck(deck, owned=True)
 
 
 @router.get("", response_model=list[DeckOut])
@@ -47,7 +47,9 @@ async def list_decks(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> list[DeckOut]:
-    return [DeckOut.from_deck(d) for d in await container.decks.list_decks(caller.user.id)]
+    """The caller's decks and the library decks (ADR 0024), oldest first."""
+    decks = await container.read_access.decks(caller.user.id)
+    return [DeckOut.from_deck(d, owned=d.owner_id == caller.user.id) for d in decks]
 
 
 @router.get("/{deck_id}", response_model=DeckOut)
@@ -56,7 +58,8 @@ async def get_deck(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> DeckOut:
-    return DeckOut.from_deck(await container.decks.get(owner_id=caller.user.id, deck_id=deck_id))
+    deck = await container.read_access.deck(caller.user.id, deck_id)
+    return DeckOut.from_deck(deck, owned=deck.owner_id == caller.user.id)
 
 
 @router.patch("/{deck_id}", response_model=DeckOut)
@@ -69,7 +72,7 @@ async def rename_deck(
     deck = await container.decks.rename(
         owner_id=caller.user.id, deck_id=deck_id, name=body.name
     )
-    return DeckOut.from_deck(deck)
+    return DeckOut.from_deck(deck, owned=True)
 
 
 @router.post("/{deck_id}/move", response_model=DeckOut)
@@ -82,7 +85,7 @@ async def move_deck(
     deck = await container.decks.move(
         owner_id=caller.user.id, deck_id=deck_id, new_parent_id=body.parent_id
     )
-    return DeckOut.from_deck(deck)
+    return DeckOut.from_deck(deck, owned=True)
 
 
 @router.delete("/{deck_id}", status_code=status.HTTP_204_NO_CONTENT)
