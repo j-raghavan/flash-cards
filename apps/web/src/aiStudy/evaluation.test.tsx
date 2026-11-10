@@ -22,6 +22,7 @@ const basic = (id: string, front: string, back: string): CardDetail => ({
   note_type: "basic",
   fields: { front, back },
   tags: [],
+  owned: true,
 });
 
 const me = { "GET /auth/me": { body: USER } };

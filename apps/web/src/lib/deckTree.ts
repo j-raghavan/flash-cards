@@ -81,3 +81,8 @@ export function deckOptions(decks: Deck[]): { id: string; label: string }[] {
     label: `${"  ".repeat(node.depth)}${node.deck.name}`,
   }));
 }
+
+/** The caller's own decks: the only ones a deck picker offers, since library decks are read-only. */
+export function ownedDecks(decks: Deck[]): Deck[] {
+  return decks.filter((deck) => deck.owned);
+}

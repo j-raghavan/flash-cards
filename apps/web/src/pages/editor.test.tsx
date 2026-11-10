@@ -16,6 +16,7 @@ const note = (over: Partial<Note> = {}): Note => ({
   tags: ["bio", "ch::1"],
   created_at: "2026-01-01T00:00:00Z",
   cards: [{ id: "c1", deck_id: "d1", note_id: "n1", ordinal: 0, suspended: false, flag: 0, buried_until: null }],
+  owned: true,
   ...over,
 });
 

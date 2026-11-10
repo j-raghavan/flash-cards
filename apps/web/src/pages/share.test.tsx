@@ -7,7 +7,7 @@ import type { SharedDeck, ShareLink } from "../api/types";
 import { USER, mockApi, renderApp } from "../test/helpers";
 
 const me = { "GET /auth/me": { body: USER } };
-const DECK = { id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+const DECK = { id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z", owned: true };
 
 const link = (id: string, over: Partial<ShareLink> = {}): ShareLink => ({
   id,

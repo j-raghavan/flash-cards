@@ -23,11 +23,12 @@ import {
 const me = { "GET /auth/me": { body: USER } };
 const KEY = `flashcards.onboarding.${USER.id}`;
 
-const deck = (id: string, name: string): Deck => ({
+const deck = (id: string, name: string, owned = true): Deck => ({
   id,
   name,
   parent_id: null,
   created_at: "2026-01-01T00:00:00Z",
+  owned,
 });
 
 const EMPTY_STATS: DeckStats = {
@@ -190,11 +191,16 @@ describe("guided first run", () => {
   });
 
   it("uses a deck the user already has, and forgets one deleted since", async () => {
-    mockApi({ ...me, "GET /decks": { body: [deck("d1", "Biology"), deck("d2", "Chemistry")] } });
+    mockApi({
+      ...me,
+      "GET /decks": { body: [deck("d1", "Biology"), deck("d2", "Chemistry"), deck("l1", "Anatomy", false)] },
+    });
     renderApp("/welcome");
     const user = userEvent.setup();
     const useDeck = await screen.findByRole("button", { name: "Use this deck" });
     expect(useDeck).toBeDisabled();
+    // A library deck cannot take new cards, so the setup does not offer it.
+    expect(screen.queryByRole("option", { name: "Anatomy" })).toBeNull();
     await user.selectOptions(screen.getByLabelText("Or use a deck you already have"), "d2");
     await user.click(useDeck);
     expect(await screen.findByRole("link", { name: "Write a card yourself" })).toHaveAttribute(
@@ -239,6 +245,13 @@ describe("guided first run", () => {
     expect(await screen.findByRole("link", { name: "Biology" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Getting started" })).not.toBeInTheDocument();
     expect(readOnboarding(USER.id)).toBeNull();
+  });
+
+  it("offers no existing deck to a member who has only library decks", async () => {
+    mockApi({ ...me, "GET /decks": { body: [deck("l1", "Anatomy", false)] } });
+    renderApp("/welcome");
+    expect(await screen.findByRole("button", { name: "Create deck" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Or use a deck you already have")).toBeNull();
   });
 
   it("shows why a goal could not be saved and why the decks could not load", async () => {

@@ -11,7 +11,7 @@ import { decks, goals } from "../api/endpoints";
 import { plans } from "../api/studyProgress";
 import type { Deck, Goal, GoalInput, StudyPlan } from "../api/types";
 import { ConfirmButton, ErrorText, Loading, ProficiencyRing } from "../components/ui";
-import { deckOptions } from "../lib/deckTree";
+import { deckOptions, ownedDecks } from "../lib/deckTree";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
@@ -213,7 +213,7 @@ export function GoalsPage() {
       <ErrorText message={all.error} />
       {all.data === undefined ? null : (
         <GoalForm
-          all={all.data}
+          all={ownedDecks(all.data)}
           submitLabel="Create goal"
           onSubmit={async (input) => {
             const created = await goals.create(input);
@@ -319,7 +319,7 @@ export function GoalPage() {
       <h2>Manage</h2>
       {editing && all.data !== undefined ? (
         <GoalForm
-          all={all.data}
+          all={ownedDecks(all.data)}
           initial={current}
           submitLabel="Save goal"
           onCancel={() => {

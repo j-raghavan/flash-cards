@@ -8,12 +8,16 @@ import { enqueue } from "../offline/reviewQueue";
 import { finishOnboarding } from "../onboarding/state";
 import { USER, mockApi, renderApp } from "../test/helpers";
 
-const deck = (id: string, name: string, parent: string | null = null): Deck => ({
+const deck = (id: string, name: string, parent: string | null = null, owned = true): Deck => ({
   id,
   name,
   parent_id: parent,
   created_at: "2026-01-01T00:00:00Z",
+  owned,
 });
+
+/** An admin's deck, as a member sees it (ADR 0024). */
+const libraryDeck = (id: string, name: string, parent: string | null = null): Deck => deck(id, name, parent, false);
 
 const STATS: DeckStats = {
   total: 10,
@@ -95,6 +99,49 @@ describe("deck list", () => {
     await user.click(screen.getByRole("button", { name: "Add deck" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid deck name.");
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ name: "x", parent_id: "b" });
+  });
+
+  it("lists library decks apart from the user's own, marked, and never as a parent", async () => {
+    mockApi({
+      ...me,
+      "GET /decks": {
+        body: [deck("a", "Biology"), libraryDeck("l1", "Anatomy"), libraryDeck("l2", "Bones", "l1")],
+      },
+    });
+    renderApp("/");
+    const own = await screen.findByRole("heading", { name: "Your decks" });
+    expect(own.tagName).toBe("H2");
+    const library = screen.getByRole("region", { name: "Library" });
+    expect(
+      within(library).getByText("Shared by your admin. Study them; your progress is your own."),
+    ).toBeInTheDocument();
+    const tile = within(library).getByRole("link", { name: "Anatomy" }).closest("li.deck-tile") as HTMLElement;
+    expect(within(tile).getByText("Library")).toHaveClass("badge");
+    expect(within(tile).getByRole("link", { name: "Bones" })).toHaveAttribute("href", "/decks/l2");
+    expect(within(library).queryByRole("link", { name: "Biology" })).toBeNull();
+    const ownTile = screen.getByRole("link", { name: "Biology" }).closest("li.deck-tile") as HTMLElement;
+    expect(within(ownTile).queryByText("Library")).toBeNull();
+    const parents = within(screen.getByLabelText("Inside")).getAllByRole("option");
+    expect(parents.map((option) => option.textContent)).toEqual(["No parent", "Biology"]);
+  });
+
+  it("keeps the plain layout when there is no library", async () => {
+    mockApi({ ...me, "GET /decks": { body: [deck("a", "Biology")] } });
+    renderApp("/");
+    await screen.findByRole("link", { name: "Biology" });
+    expect(screen.queryByRole("heading", { name: "Your decks" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Library" })).toBeNull();
+  });
+
+  it("lets a member with only library decks study them, still offering the guided setup", async () => {
+    mockApi({ ...me, "GET /decks": { body: [libraryDeck("l1", "Anatomy")] } });
+    renderApp("/");
+    expect(await screen.findByText(/No decks of your own yet/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "guided setup" })).toHaveAttribute("href", "/welcome");
+    expect(screen.getByRole("link", { name: "Anatomy" })).toHaveAttribute("href", "/decks/l1");
+    // Nothing of their own to nest under, and no detour into the setup.
+    expect(screen.queryByLabelText("Inside")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Getting started" })).toBeNull();
   });
 
   it("shows a load failure", async () => {

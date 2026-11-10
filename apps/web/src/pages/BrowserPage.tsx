@@ -16,7 +16,7 @@ import {
   type SortKey,
 } from "../api/types";
 import { ErrorText, Loading } from "../components/ui";
-import { deckOptions } from "../lib/deckTree";
+import { deckOptions, ownedDecks } from "../lib/deckTree";
 import { parseTags } from "../lib/text";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
@@ -223,7 +223,8 @@ export function BrowserPage() {
   const [search, setSearch] = useState(params.get("q") ?? "");
   const [tag, setTag] = useState(params.get("tag") ?? "");
 
-  const deckChoices = deckOptions(deckList.data ?? []);
+  // The browser covers the user's own cards only, so it offers only their decks.
+  const deckChoices = deckOptions(ownedDecks(deckList.data ?? []));
   const rows = page.data?.cards ?? [];
   const total = page.data?.total ?? 0;
   const offset = query.offset;

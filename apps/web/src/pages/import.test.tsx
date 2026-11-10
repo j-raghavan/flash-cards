@@ -152,7 +152,7 @@ describe("import wizard", () => {
   });
 
   it("is reached from the deck list, and the deck page offers exports", async () => {
-    const deck = { id: "d1", name: "Bio", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+    const deck = { id: "d1", name: "Bio", parent_id: null, created_at: "2026-01-01T00:00:00Z", owned: true };
     mockApi({ ...me, "GET /decks": { body: [deck] }, "GET /decks/d1/stats": { status: 500 } });
     const { unmount } = renderApp("/");
     expect(await screen.findByRole("link", { name: "Import decks from Anki" })).toHaveAttribute("href", "/import");
@@ -160,7 +160,7 @@ describe("import wizard", () => {
   });
 
   it("exports a deck as a download, saying what was left out or why it failed", async () => {
-    const deck = { id: "d1", name: "Bio", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+    const deck = { id: "d1", name: "Bio", parent_id: null, created_at: "2026-01-01T00:00:00Z", owned: true };
     mockApi({ ...me, "GET /decks": { body: [deck] }, "GET /decks/d1/stats": { status: 500 } });
     const api = globalThis.fetch;
     const replies: (Response | Error)[] = [

@@ -96,7 +96,9 @@ describe("progress page", () => {
       ...me,
       "GET /progress/today": { body: TODAY },
       "GET /progress/settings": { body: { daily_goal: 20, time_zone: "UTC" } },
-      "GET /decks": { body: [{ id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z" }] },
+      "GET /decks": {
+        body: [{ id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z", owned: true }],
+      },
       "GET /progress/stats": { body: STATS },
     });
     renderApp("/progress");

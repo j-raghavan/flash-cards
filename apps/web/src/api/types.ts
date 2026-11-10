@@ -15,6 +15,8 @@ export interface Deck {
   name: string;
   parent_id: string | null;
   created_at: string;
+  /** False for a library deck: an admin's deck the caller may study but not change. */
+  owned: boolean;
 }
 
 export interface DeckStats {
@@ -71,6 +73,8 @@ export interface CardDetail extends Card {
   note_type_id?: string | null;
   template?: CardTemplate | null;
   occlusion?: Occlusion | null;
+  /** False for a library card: it can be studied but not edited or AI-graded. */
+  owned: boolean;
 }
 
 export interface Note {
@@ -83,6 +87,8 @@ export interface Note {
   cards: Card[];
   note_type_id?: string | null;
   occlusion?: Occlusion | null;
+  /** False for a library note: it can be read but not changed. */
+  owned: boolean;
 }
 
 export type Rating = 1 | 2 | 3 | 4;

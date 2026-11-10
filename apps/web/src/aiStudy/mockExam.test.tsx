@@ -48,7 +48,9 @@ describe("mock exam", () => {
   it("is reached from the deck page", async () => {
     mockApi({
       ...me,
-      "GET /decks": { body: [{ id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z" }] },
+      "GET /decks": {
+        body: [{ id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z", owned: true }],
+      },
       "GET /decks/d1/stats": { status: 500 },
     });
     renderApp("/decks/d1");

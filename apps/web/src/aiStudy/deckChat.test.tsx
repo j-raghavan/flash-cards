@@ -7,7 +7,7 @@ import type { ChatAnswer } from "../api/aiStudy";
 import type { Deck } from "../api/types";
 import { USER, mockApi, renderApp, type Call } from "../test/helpers";
 
-const DECKS: Deck[] = [{ id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z" }];
+const DECKS: Deck[] = [{ id: "d1", name: "Biology", parent_id: null, created_at: "2026-01-01T00:00:00Z", owned: true }];
 const page = { "GET /auth/me": { body: USER }, "GET /decks": { body: DECKS } };
 
 async function panel(): Promise<HTMLElement> {

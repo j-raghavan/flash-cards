@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -28,8 +28,10 @@ const base = {
   "GET /auth/me": { body: USER },
   "GET /decks": {
     body: [
-      { id: "d1", name: "Biology", parent_id: null, created_at: "" },
-      { id: "d2", name: "Chemistry", parent_id: null, created_at: "" },
+      { id: "d1", name: "Biology", parent_id: null, created_at: "", owned: true },
+      { id: "d2", name: "Chemistry", parent_id: null, created_at: "", owned: true },
+      // A library deck: its cards are not in the browser, so it is never offered.
+      { id: "l1", name: "Anatomy", parent_id: null, created_at: "", owned: false },
     ],
   },
 };
@@ -121,6 +123,11 @@ describe("card browser", () => {
     expect(screen.getByText("1 selected")).toBeInTheDocument();
     const apply = screen.getByRole("button", { name: "Apply" });
     expect(apply).toBeDisabled(); // move needs a deck
+    // Neither the deck filter nor a move offers a library deck.
+    for (const picker of screen.getAllByLabelText("Deck")) {
+      expect(within(picker).queryByRole("option", { name: "Anatomy" })).toBeNull();
+      expect(within(picker).getByRole("option", { name: "Chemistry" })).toBeInTheDocument();
+    }
     await user.selectOptions(screen.getByLabelText("Deck", { selector: ".bulk-bar select" }), "d2");
     await user.click(apply);
     expect(await screen.findByText("Updated 1 card.")).toBeInTheDocument();
