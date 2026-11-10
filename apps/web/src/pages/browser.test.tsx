@@ -287,6 +287,30 @@ describe("card view", () => {
     expect(calls.filter((c) => c.path.startsWith("/cards?"))).toHaveLength(1);
   });
 
+  it("keeps focus in the dialog when the arrow keys reach an end, and Escape always closes it", async () => {
+    mockApi(three);
+    renderApp("/cards");
+    const user = userEvent.setup();
+    const opener = await screen.findByRole("button", { name: "Card 2" });
+    await user.click(opener);
+    const dialog = await screen.findByRole("dialog", { name: "Card 2 of 3" });
+    within(dialog).getByRole("button", { name: "Next card" }).focus();
+    await user.keyboard("{ArrowRight}"); // Next is now disabled: focus moves to Previous
+    expect(await screen.findByRole("dialog", { name: "Card 3 of 3" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Previous card" })).toHaveFocus();
+    await user.keyboard("{ArrowLeft}{ArrowLeft}"); // Previous is now disabled: focus moves to Next
+    expect(await screen.findByRole("dialog", { name: "Card 1 of 3" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Next card" })).toHaveFocus();
+    // Even with focus outside the dialog, Escape closes it.
+    (document.activeElement as HTMLElement).blur();
+    expect(dialog).not.toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(opener).toHaveFocus();
+  });
+
   it("keeps focus in the dialog when a button reaches an end of the page", async () => {
     mockApi(three);
     renderApp("/cards");

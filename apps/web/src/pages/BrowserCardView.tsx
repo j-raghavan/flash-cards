@@ -5,7 +5,7 @@
 // returns focus to the row that opened it. Editing is a link away, and only
 // for the caller's own cards.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { cards } from "../api/endpoints";
@@ -59,15 +59,18 @@ export function BrowserCardView({
   const previousButton = useRef<HTMLButtonElement>(null);
   const nextButton = useRef<HTMLButtonElement>(null);
   // A button that becomes disabled at an end of the page would drop focus out of
-  // the dialog, so focus moves to the other one.
-  const step = (to: number): void => {
-    onMove(to);
-    if (to === 0) {
-      nextButton.current?.focus();
-    } else if (to === rows.length - 1) {
-      previousButton.current?.focus();
-    }
-  };
+  // the dialog, so focus moves to the other one. The arrow keys step the same way.
+  const step = useCallback(
+    (to: number): void => {
+      onMove(to);
+      if (to === 0) {
+        nextButton.current?.focus();
+      } else if (to === rows.length - 1) {
+        previousButton.current?.focus();
+      }
+    },
+    [onMove, rows.length],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -76,17 +79,22 @@ export function BrowserCardView({
       }
       if (event.key === "ArrowLeft" && hasPrevious) {
         event.preventDefault();
-        onMove(index - 1);
+        step(index - 1);
       } else if (event.key === "ArrowRight" && hasNext) {
         event.preventDefault();
-        onMove(index + 1);
+        step(index + 1);
+      } else if (event.key === "Escape" && !event.defaultPrevented) {
+        // The dialog closes on Escape while focus is inside it; this also covers
+        // focus that ended up outside it (on the page body).
+        event.preventDefault();
+        onClose();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [index, hasPrevious, hasNext, onMove]);
+  }, [index, hasPrevious, hasNext, step, onClose]);
 
   if (row === undefined) {
     return null;
