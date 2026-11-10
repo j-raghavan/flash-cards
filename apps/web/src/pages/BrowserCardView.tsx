@@ -13,6 +13,7 @@ import type { BrowserRow } from "../api/types";
 import { CardFaces } from "../components/CardFaces";
 import { Dialog, ErrorText, Loading } from "../components/ui";
 import { isOwned } from "../lib/ownership";
+import { isTyping } from "../lib/typing";
 import { useResource } from "../lib/useResource";
 
 function CardBody({ row, revealed }: { row: BrowserRow; revealed: boolean }) {
@@ -60,22 +61,28 @@ export function BrowserCardView({
   const previousButton = useRef<HTMLButtonElement>(null);
   const nextButton = useRef<HTMLButtonElement>(null);
   // A button that becomes disabled at an end of the page would drop focus out of
-  // the dialog, so focus moves to the other one. The arrow keys step the same way.
+  // the dialog, so focus moves to the other one, once the step has rendered and
+  // enabled it. The arrow keys step the same way.
+  const focusAfterStep = useRef<HTMLButtonElement | null>(null);
   const step = useCallback(
     (to: number): void => {
+      focusAfterStep.current = to === 0 ? nextButton.current : to === rows.length - 1 ? previousButton.current : null;
       onMove(to);
-      if (to === 0) {
-        nextButton.current?.focus();
-      } else if (to === rows.length - 1) {
-        previousButton.current?.focus();
-      }
     },
     [onMove, rows.length],
   );
+  useEffect(() => {
+    focusAfterStep.current?.focus();
+    focusAfterStep.current = null;
+  }, [index]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
+      if (arrow && (event.defaultPrevented || isTyping(event.target))) {
         return;
       }
       if (event.key === "ArrowLeft" && hasPrevious) {

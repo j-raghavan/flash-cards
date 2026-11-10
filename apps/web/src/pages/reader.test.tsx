@@ -137,6 +137,35 @@ describe("deck reader", () => {
     ).toEqual(["Decks", "Algebra"]);
   });
 
+  it("moves focus to the other button in a deck of two, where both ends are one step apart", async () => {
+    mockApi({ ...library, "GET /decks/l2/cards": { body: [card(1), card(2)] } });
+    renderApp("/decks/l2/read");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Next card" }));
+    expect(screen.getByText(/^Card \d of 2$/)).toHaveTextContent("Card 2 of 2");
+    expect(screen.getByRole("button", { name: "Previous card" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Previous card" }));
+    expect(screen.getByText(/^Card \d of 2$/)).toHaveTextContent("Card 1 of 2");
+    expect(screen.getByRole("button", { name: "Next card" })).toHaveFocus();
+  });
+
+  it("leaves the arrow keys to a text field, and to a handler that already took them", async () => {
+    mockApi(library);
+    renderApp("/decks/l2/read?card=2");
+    await screen.findByRole("button", { name: "Next card" });
+    const user = userEvent.setup();
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByText(/^Card \d of 3$/)).toHaveTextContent("Card 2 of 3");
+    field.remove();
+    const taken = new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true });
+    taken.preventDefault();
+    window.dispatchEvent(taken);
+    expect(screen.getByText(/^Card \d of 3$/)).toHaveTextContent("Card 2 of 3");
+  });
+
   it("says when a deck has no cards to read", async () => {
     mockApi({ ...library, "GET /decks/l2/cards": { body: [] } });
     renderApp("/decks/l2/read");

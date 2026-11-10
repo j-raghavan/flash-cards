@@ -14,6 +14,7 @@ import { CardFaces } from "../components/CardFaces";
 import { ErrorText, Loading } from "../components/ui";
 import { deckPath } from "../lib/deckTree";
 import { isOwned } from "../lib/ownership";
+import { isTyping } from "../lib/typing";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 
@@ -62,22 +63,31 @@ export function DeckReaderPage() {
   const hasNext = index + 1 < total;
 
   // A button that becomes disabled at an end of the deck would drop focus, so
-  // focus moves to the other one. The arrow keys step the same way.
+  // focus moves to the other one, once the step has rendered and enabled it.
+  // The arrow keys step the same way.
+  const focusAfterStep = useRef<HTMLButtonElement | null>(null);
   const step = useCallback(
     (to: number): void => {
+      focusAfterStep.current = to === 0 ? nextButton.current : to === total - 1 ? previousButton.current : null;
       setParams({ card: String(to + 1) }, { replace: true });
-      if (to === 0) {
-        nextButton.current?.focus();
-      } else if (to === total - 1) {
-        previousButton.current?.focus();
-      }
     },
     [setParams, total],
   );
+  useEffect(() => {
+    focusAfterStep.current?.focus();
+    focusAfterStep.current = null;
+  }, [index]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+      if (
+        event.defaultPrevented ||
+        isTyping(event.target) ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
         return;
       }
       if (event.key === "ArrowLeft" && hasPrevious) {

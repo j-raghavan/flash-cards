@@ -21,6 +21,7 @@ import { Dialog, ErrorText, Loading } from "../components/ui";
 import { newIdempotencyKey } from "../lib/text";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { isOwned } from "../lib/ownership";
+import { isChoice, isTyping } from "../lib/typing";
 import { useResource } from "../lib/useResource";
 import { pending, submitReview } from "../offline/reviewQueue";
 import { NoteEditor } from "./NoteEditorPage";
@@ -53,19 +54,6 @@ const RATINGS: { rating: Rating; label: string }[] = [
   { rating: 3, label: "Good" },
   { rating: 4, label: "Easy" },
 ];
-
-/** A choice control (the answer-mode radios) takes no text, so shortcuts still apply. */
-function isChoice(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement && (target.type === "radio" || target.type === "checkbox");
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    !isChoice(target) &&
-    (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-  );
-}
 
 /** The latest answer, kept so it can be taken back (ADR 0014). */
 interface LastAnswer {
