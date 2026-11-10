@@ -3,11 +3,14 @@
 #
 # Upgrade (or first start) the compose stack without losing data:
 #
-#   1. if the stack is running, take a verified backup and stop if it fails;
+#   1. if the database is running, take a verified backup, and stop if it fails;
 #   2. build the images from the current source;
 #   3. start the stack: the migrate service applies new migrations before the
-#      new API starts (a failed migration leaves the old API running);
+#      API starts;
 #   4. wait until the API reports healthy.
+#
+# If a migration fails, the API stays down and the logs are printed; the backup
+# from step 1 is the way back (restore.sh, with the previous release).
 #
 # Run it from anywhere: ./deploy/compose/upgrade.sh
 # COMPOSE and DOCKER override the commands, e.g. on a Synology:
@@ -29,11 +32,15 @@ if [ ! -f .env ]; then
 	exit 1
 fi
 
-if [ -n "$($COMPOSE ps --status running --quiet backup 2>/dev/null)" ]; then
+# Fails loudly (e.g. sudo needing a password) instead of reading as "not running".
+db=$($COMPOSE ps --status running --quiet db)
+if [ -n "$db" ]; then
 	say "taking a backup before upgrading"
-	$COMPOSE exec -T backup /bin/sh /usr/local/bin/backup.sh once
+	# A one-off container: works whatever state the backup service is in, and
+	# before the first upgrade that adds it.
+	$COMPOSE run --rm --no-deps -T backup once
 else
-	say "the stack is not running, so there is nothing to back up yet"
+	say "the database is not running, so there is nothing to back up yet"
 fi
 
 say "building images"
@@ -43,6 +50,7 @@ say "starting the stack (migrations run first)"
 if ! $COMPOSE up -d --remove-orphans; then
 	say "the stack did not start; recent logs follow"
 	$COMPOSE logs --tail 40 migrate api
+	say "to roll back: check out the previous release and run restore.sh with the backup taken above"
 	exit 1
 fi
 

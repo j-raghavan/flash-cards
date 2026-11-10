@@ -20,7 +20,7 @@ The web service's own configuration is `apps/web/Caddyfile`, baked into its imag
 | Service | Role |
 |---|---|
 | `db` | Postgres 16 with a `pg_isready` healthcheck. Its data is in the named volume `pgdata`, or in a host directory when `FLASHCARDS_PGDATA` is set. No host port is published. |
-| `backup` | Takes a verified database backup at start and every `FLASHCARDS_BACKUP_INTERVAL_HOURS` (default 24), keeping the newest `FLASHCARDS_BACKUP_KEEP` (default 14) in `FLASHCARDS_BACKUP_DIR` (default `deploy/compose/backups`). |
+| `backup` | Takes a verified database backup every `FLASHCARDS_BACKUP_INTERVAL_HOURS` (default 24), keeping the newest `FLASHCARDS_BACKUP_KEEP` (default 14) in `FLASHCARDS_BACKUP_DIR` (default `deploy/compose/backups`). Its healthcheck turns unhealthy when no backup was written for two intervals. |
 | `migrate` | One-shot job running `alembic upgrade head`. It starts once `db` is healthy and must exit successfully before `api` starts. |
 | `api` | The API image built from `apps/api/Dockerfile`, running as a non-root user, with a `/healthz` healthcheck. No host port is published; it is reached through `web`. |
 | `web` | The web app and the site's entry point: a Caddy image (`apps/web/Dockerfile`) that serves the built app and forwards `/api/*` to `api`. It is published on `127.0.0.1:8000` only, over plain HTTP, and runs unprivileged with a read-only root file system. |
@@ -164,9 +164,9 @@ git pull
 
 `upgrade.sh` does the whole upgrade, and the first start too:
 
-1. If the stack is running, it takes a verified backup and stops if the backup fails.
+1. If the database is running, it takes a verified backup and stops if the backup fails.
 2. It builds the images from the current source.
-3. It starts the stack. `migrate` applies any new migrations before the new `api` container starts; if a migration fails, the old `api` container is not replaced, and the script prints the `migrate` and `api` logs.
+3. It starts the stack. `migrate` applies any new migrations before the `api` container starts. If a migration fails, the API stays down and the script prints the `migrate` and `api` logs.
 4. It waits until the API reports healthy (`WAIT_SECONDS`, default 300).
 
 Migrations are forward-only in practice, so the backup taken in step 1 is the rollback path: check out the previous release and restore it (see [Restore](#restore)). Set `COMPOSE` (and `DOCKER`) when the commands differ, for example `COMPOSE="sudo docker-compose" DOCKER="sudo docker"`. With the `proxy` profile, set `COMPOSE_PROFILES=proxy` in `.env` so every command includes it.
@@ -178,16 +178,16 @@ docker compose pull db proxy
 docker compose up -d --wait
 ```
 
-Postgres major upgrades (16 to 17) need a dump and restore into a fresh volume; changing the image tag alone does not work.
+Postgres major upgrades (16 to 17) need a backup and a restore into a fresh, empty data volume or directory; changing the image tag alone does not work. Change the `db` and `backup` images together: `pg_dump` must match the server's major version.
 
 ## Backups
 
-The `backup` service backs the database up automatically: once when it starts, then every `FLASHCARDS_BACKUP_INTERVAL_HOURS` (default 24). Each backup is a `pg_dump` in the custom format, consistent while the API keeps running. It is written to a temporary file, checked with `pg_restore --list`, and only then renamed to `flashcards-YYYYMMDD-HHMMSS.dump`, so a failed or truncated dump never replaces a good one. The newest `FLASHCARDS_BACKUP_KEEP` (default 14) are kept and older ones deleted. Files are readable by their owner only. `docker compose logs backup` shows each run.
+The `backup` service backs the database up automatically every `FLASHCARDS_BACKUP_INTERVAL_HOURS` (default 24). When it starts, it takes one only if none is newer than the interval, so restarts, reboots and restores do not rotate good backups out. Each backup is a `pg_dump` in the custom format, consistent while the API keeps running. It is written under a temporary name, read back in full (`pg_restore` to `/dev/null`), and only then renamed to `flashcards-YYYYMMDD-HHMMSS.dump`, so a failed or truncated dump never replaces a good one. The newest `FLASHCARDS_BACKUP_KEEP` (default 14) are kept and older ones deleted. Files are readable by their owner only. `docker compose logs backup` shows each run, and `docker compose ps` shows the service as unhealthy when no backup was written for two intervals.
 
 To take one now:
 
 ```sh
-docker compose exec -T backup /bin/sh /usr/local/bin/backup.sh once
+docker compose run --rm --no-deps -T backup once
 ```
 
 Backups on the same disk do not survive the loss of that disk. Copy `FLASHCARDS_BACKUP_DIR` and `.env` to another machine or to off-site storage on a schedule (for example with the host's backup tool). Keep `.env` with them: it holds `POSTGRES_PASSWORD` and `FLASHCARDS_TOTP_ENCRYPTION_KEYS`.
@@ -196,13 +196,22 @@ Backups contain everything the instance holds: email addresses, Argon2 password 
 
 Restoring into a fresh stack is the only reliable test of a backup. Do one after the first backup and periodically afterwards.
 
+`FLASHCARDS_PGDATA` chooses where the database lives. Changing it on an existing install points Postgres at a different, empty directory, and the site starts empty (the old data stays where it was). To move the data, take a backup, change the setting, start the stack, and restore the backup with `restore.sh`.
+
 ## Restore
 
 ```sh
 ./deploy/compose/restore.sh --yes deploy/compose/backups/flashcards-YYYYMMDD-HHMMSS.dump
 ```
 
-The script replaces the whole database with the backup. It stops `api`, `web` and `backup`, restores into the running database (dropping and recreating every object), and starts the stack again. It works on a fresh, empty database too, for example on a new host or after the data directory was lost. Take a backup first if the current data might still be needed. Without `--yes` it does nothing.
+The script replaces the whole database with the backup:
+
+1. It stops `api`, `web` and `backup`, so nothing writes meanwhile.
+2. It saves the current database as `pre-restore-YYYYMMDD-HHMMSS.dump` in the backup directory, and stops if that fails. Retention never deletes these files; remove them by hand once they are no longer needed. `--no-safety-backup` skips this step, for example when the database cannot be read at all.
+3. It drops and recreates the database, so nothing from a newer schema is left behind, and restores the backup in a single transaction: a failure leaves an empty database, never a half-restored one.
+4. It starts the stack again.
+
+It works on a fresh, empty database too, for example on a new host or after the data directory was lost. Without `--yes` it does nothing. To roll back an upgrade, check out the release the backup was taken with, then restore it. When recovering from damage, copy the backup directory aside first, so nothing in it can change while you try backups one after another.
 
 `migrate` runs on `up` and brings a dump taken on an older release up to the current schema. Every session in the dump is restored with it; to force everyone to sign in again, revoke sessions after the restore (for example `UPDATE sessions SET revoked_at = now() WHERE revoked_at IS NULL;` in `psql`).
 

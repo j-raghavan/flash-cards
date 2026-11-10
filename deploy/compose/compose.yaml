@@ -35,9 +35,9 @@ services:
       POSTGRES_USER: flashcards
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
-      # A named volume by default. Set FLASHCARDS_PGDATA in .env to a host
-      # directory (e.g. /volume1/docker/flash-cards/pgdata on a Synology) to keep
-      # the data where host backups can see it.
+      # A named volume by default, or the host directory FLASHCARDS_PGDATA.
+      # Changing it on an existing install points Postgres at a different
+      # (empty) database: move the data with a backup and restore.sh instead.
       - ${FLASHCARDS_PGDATA:-pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U flashcards -d flashcards"]
@@ -51,6 +51,7 @@ services:
   # Scheduled database backups (deploy/compose/backup.sh): a verified pg_dump
   # every FLASHCARDS_BACKUP_INTERVAL_HOURS into FLASHCARDS_BACKUP_DIR, keeping
   # the newest FLASHCARDS_BACKUP_KEEP. upgrade.sh also takes one before upgrading.
+  # Keep its image's major version the same as db's: pg_dump must match.
   backup:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -62,6 +63,17 @@ services:
     volumes:
       - ./backup.sh:/usr/local/bin/backup.sh:ro
       - ${FLASHCARDS_BACKUP_DIR:-./backups}:/backups
+    # Unhealthy (visible in `docker compose ps`) when the newest backup is older
+    # than two intervals: backups are failing.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          [ -n "$$(find /backups -maxdepth 1 -name 'flashcards-*.dump'
+          -mmin -$$((BACKUP_INTERVAL_HOURS * 120)) | head -n 1)" ]
+      interval: 1h
+      timeout: 10s
+      start_period: 15m
     depends_on:
       db:
         condition: service_healthy
