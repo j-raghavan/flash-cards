@@ -21,6 +21,7 @@ import httpx
 from flashcards.domain.ai import (
     LlmDocument,
     LlmError,
+    OutputTruncated,
     StructuredRequest,
     StructuredResult,
     TokenUsage,
@@ -125,8 +126,12 @@ def _parse_response(raw: object, *, fallback_model: str) -> StructuredResult:
     if not isinstance(choices, list) or not choices:
         raise LlmError("the endpoint returned no choices")
     choice = _require_object(choices[0], "choice")
+    model = body.get("model")
+    model_name = model if isinstance(model, str) else fallback_model
     if choice.get("finish_reason") == "length":
-        raise LlmError("the model output was truncated")
+        # The answer hit the output limit: the provider worked and billed the call,
+        # but the output is unusable.
+        raise OutputTruncated(_parse_usage(body.get("usage")), model_name)
     message = _require_object(choice.get("message"), "message")
     if message.get("refusal"):
         raise LlmError("the model declined the request")
@@ -134,11 +139,7 @@ def _parse_response(raw: object, *, fallback_model: str) -> StructuredResult:
     if not text:
         raise LlmError("the model returned no text content")
     data = _parse_json_object(text)
-    usage = _parse_usage(body.get("usage"))
-    model = body.get("model")
-    return StructuredResult(
-        data=data, usage=usage, model=model if isinstance(model, str) else fallback_model
-    )
+    return StructuredResult(data=data, usage=_parse_usage(body.get("usage")), model=model_name)
 
 
 def _parse_usage(value: object) -> TokenUsage:

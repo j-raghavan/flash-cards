@@ -20,9 +20,12 @@ from flashcards.api.app import _llm_from_settings
 from flashcards.config import Settings
 from flashcards.domain.ai import (
     DRAFT_CARDS_SCHEMA,
+    InvalidModelOutput,
     LlmDocument,
     LlmError,
+    OutputTruncated,
     StructuredRequest,
+    TokenUsage,
 )
 
 CARDS_JSON = json.dumps({"cards": [{"type": "basic", "fields": {"front": "Q", "back": "A"}}]})
@@ -221,6 +224,14 @@ async def test_refusal_raises() -> None:
     provider, _ = _provider(_Response([_Block(CARDS_JSON)], stop_reason="refusal"))
     with pytest.raises(LlmError):
         await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+
+
+async def test_output_cut_off_at_the_limit_is_unusable_output() -> None:
+    provider, _ = _provider(_Response([_Block('{"cards": [')], stop_reason="max_tokens"))
+    with pytest.raises(OutputTruncated, match="output limit") as cut:
+        await provider.generate_structured(_request(LlmDocument("text/plain", b"x")))
+    assert isinstance(cut.value, InvalidModelOutput)
+    assert (cut.value.usage, cut.value.model) == (TokenUsage(11, 7), "claude-opus-5-5")
 
 
 async def test_no_text_block_raises() -> None:
