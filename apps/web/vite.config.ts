@@ -124,6 +124,9 @@ export default defineConfig(({ mode }) => {
       setupFiles: ["./src/test/setup.ts"],
       restoreMocks: true,
       unstubGlobals: true,
+      // Above Testing Library's 5 s wait (src/test/setup.ts), so a missing element
+      // fails with its own message rather than a bare test timeout.
+      testTimeout: 15_000,
       coverage: {
         provider: "v8",
         include: ["src/**/*.{ts,tsx}"],

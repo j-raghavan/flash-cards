@@ -57,8 +57,13 @@ describe("study session", () => {
     await user.keyboard("3");
 
     expect(await screen.findByText("Card 2 of 2")).toBeInTheDocument();
-    await screen.findByText("square", { exact: false }).catch(() => undefined);
+    // Card 2's content has been requested; its back stays hidden until revealed.
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === "GET" && c.path === "/cards/c2")).toBe(true);
+    });
+    expect(screen.queryByText("square")).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: /Show answer/ }));
+    expect(await screen.findByText("square")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Easy/ }));
 
     expect(await screen.findByRole("heading", { name: "All caught up" })).toBeInTheDocument();
