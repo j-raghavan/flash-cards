@@ -2,20 +2,51 @@
 // Test fixtures. Every test that uses `member` gets a brand-new account, signed in
 // in its own browser context, so tests share no users or data and can run in
 // parallel against the one in-memory API.
-import { test as base } from "@playwright/test";
+import { request, test as base } from "@playwright/test";
 
 import { signUpWithApi, uniqueEmail, type Api } from "./api";
+import { WEB_URL } from "./env";
 
 export interface Member {
   email: string;
   api: Api;
 }
 
-export const test = base.extend<{ member: Member }>({
+/**
+ * An admin of its own, signed in through the API only. Every member sees an
+ * active admin's decks (ADR 0024), so each deck it creates is deleted when the
+ * test ends, pass or fail.
+ */
+export interface LibraryAdmin {
+  api: Api;
+  createDeck: (name: string) => Promise<{ id: string; name: string }>;
+}
+
+export const test = base.extend<{ member: Member; libraryAdmin: LibraryAdmin }>({
   member: async ({ context }, use, testInfo) => {
     const email = uniqueEmail(testInfo.title);
     const api = await signUpWithApi(context.request, email);
     await use({ email, api });
+  },
+  libraryAdmin: async ({}, use, testInfo) => {
+    const ctx = await request.newContext({ baseURL: WEB_URL });
+    const created: string[] = [];
+    try {
+      const api = await signUpWithApi(ctx, uniqueEmail(`admin ${testInfo.title}`), "admin");
+      await use({
+        api,
+        createDeck: async (name) => {
+          const deck = await api.createDeck(name);
+          created.push(deck.id);
+          return deck;
+        },
+      });
+      for (const deckId of created) {
+        await api.deleteDeck(deckId);
+      }
+    } finally {
+      await ctx.dispose();
+    }
   },
 });
 

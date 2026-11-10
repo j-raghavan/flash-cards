@@ -11,6 +11,11 @@ import { ADMIN_STATE, API_LOG, WEB_URL } from "./env";
 /** A password that meets the server's rules (at least 12 characters). */
 export const PASSWORD = "e2e correct horse battery";
 
+/** A name with a fresh suffix, so a run never meets data a previous attempt left behind. */
+export function uniqueName(label: string): string {
+  return `${label} ${randomUUID().slice(0, 8)}`;
+}
+
 /** A fresh address per user, so tests never share accounts or data. */
 export function uniqueEmail(label: string): string {
   const slug = label

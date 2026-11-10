@@ -31,7 +31,10 @@ The API's log is written to `e2e/.run/api.log`. Tests read emails (password rese
 | `account-export.spec.ts` | Download my data from the account page, and the file's contents                                                                                                                                                                                                                                                                                       |
 | `library.spec.ts`        | An admin's deck in a member's library: listed and marked, a study-only deck page, a session with no edit control, and the admin's own progress untouched                                                                                                                                                                                              |
 
-Every test signs up its own users, so tests are independent and run in parallel. The one exception is `library.spec.ts`: every member sees an active admin's decks, so it runs in its own project (`chromium-library`) after the others have finished.
+Every test signs up its own users, so tests are independent and run in parallel. The one exception is `library.spec.ts`: every member sees an active admin's decks, and the other specs expect fresh members with nothing to study, so it runs in its own project (`chromium-library`, one per browser chosen) that depends on the others and starts only after they have finished. Its admin's decks are deleted by the fixture when the test ends.
+
+- A file or title filter still runs the projects it depends on: `npx playwright test library` runs the whole suite first. Add `--no-deps` to run the library spec alone: `npx playwright test library --no-deps`.
+- If any test in the other projects fails, Playwright does not run the library project and reports its test as skipped, not failed. Fix the earlier failure first.
 
 ## Running locally
 
