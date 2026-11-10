@@ -151,7 +151,7 @@ async def test_answer_and_undo_through_sql(engine: AsyncEngine) -> None:
         undone = await reviews(s).undo(owner_id="alice", review_id=outcome.review_id)
         assert undone.schedule is None
     async with sm() as s, s.begin():
-        assert await SqlScheduleRepository(s).get(card_id) is None
+        assert await SqlScheduleRepository(s).get("alice", card_id) is None
         with pytest.raises(ReviewNotFound):
             await reviews(s).undo(owner_id="alice", review_id=outcome.review_id)
 

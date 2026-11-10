@@ -183,8 +183,8 @@ async def test_editing_a_type_rederives_cards_and_keeps_surviving_schedules() ->
     assert edited.fields == ("Term", "Meaning")
     after = {c.ordinal: c.id for c in await rig.cards.list_for_notes([note.id])}
     assert set(after) == {0, 2} and after[0] == before[0]  # Forward kept, Reverse gone
-    assert await rig.schedules.get(before[0]) is not None
-    assert await rig.schedules.get(before[1]) is None  # purged with its card
+    assert await rig.schedules.get(ALICE, before[0]) is not None
+    assert await rig.schedules.get(ALICE, before[1]) is None  # purged with its card
     assert {log.card_id for log in await rig.logs.list_for_owner(ALICE)} == {before[0]}
     stored = await rig.note_repo.get(note.id)
     assert stored is not None and stored.fields == (("Term", "chat"), ("Meaning", "cat"))
@@ -294,7 +294,7 @@ async def test_editing_masks_keeps_cards_whose_mask_id_survives() -> None:
     after = {c.ordinal: c.id for c in after_cards}
     assert updated.occlusion == moved
     assert set(after) == {1, 3} and after[1] == before[1]  # mask 1 moved, kept its card
-    assert await rig.schedules.get(before[1]) is not None
+    assert await rig.schedules.get(ALICE, before[1]) is not None
 
 
 async def test_changing_the_image_checks_the_new_one() -> None:

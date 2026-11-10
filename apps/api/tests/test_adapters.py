@@ -275,7 +275,7 @@ async def test_card_repo_list_order_update_and_delete_for_note() -> None:
 
 async def test_schedule_repo_upsert_and_get() -> None:
     repo = InMemoryScheduleRepository()
-    assert await repo.get("c1") is None
+    assert await repo.get("alice", "c1") is None
     schedule = CardSchedule(
         card_id="c1",
         state=ScheduleState.LEARNING,
@@ -285,10 +285,11 @@ async def test_schedule_repo_upsert_and_get() -> None:
         due_at=NOW,
         last_reviewed_at=None,
     )
-    await repo.upsert(schedule)
-    loaded = await repo.get("c1")
+    await repo.upsert("alice", schedule)
+    loaded = await repo.get("alice", "c1")
     assert loaded is not None and loaded.state is ScheduleState.LEARNING
     await repo.upsert(
+        "alice",
         CardSchedule(
             card_id="c1",
             state=ScheduleState.REVIEW,
@@ -299,7 +300,7 @@ async def test_schedule_repo_upsert_and_get() -> None:
             last_reviewed_at=NOW,
         )
     )
-    reloaded = await repo.get("c1")
+    reloaded = await repo.get("alice", "c1")
     assert reloaded is not None and reloaded.state is ScheduleState.REVIEW
 
 

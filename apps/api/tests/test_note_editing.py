@@ -77,8 +77,8 @@ async def test_editing_a_cloze_keeps_surviving_cards_and_their_history() -> None
     after = {card.ordinal: card.id for card in cards}
     assert set(after) == {1, 3} and after[1] == before[1]  # c1 kept, c2 gone, c3 new
     assert note.field("text") == "The {{c1::nucleus}} and {{c3::RNA}}"
-    assert await rig.schedules.get(before[1]) is not None  # c1's schedule survives
-    assert await rig.schedules.get(before[2]) is None  # c2's schedule and log are gone
+    assert await rig.schedules.get(ALICE, before[1]) is not None  # c1's schedule survives
+    assert await rig.schedules.get(ALICE, before[2]) is None  # c2's schedule and log are gone
     assert [log.card_id for log in await rig.logs.list_for_owner(ALICE)] == [before[1]]
     assert await rig.cards.get(before[2]) is None
 

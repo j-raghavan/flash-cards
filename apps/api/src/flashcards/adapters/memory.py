@@ -329,19 +329,32 @@ class InMemoryCardRepository:
 
 class InMemoryScheduleRepository:
     def __init__(self) -> None:
-        self._by_card: dict[str, CardSchedule] = {}
+        self._by_key: dict[tuple[str, str], CardSchedule] = {}  # (user id, card id)
 
-    async def get(self, card_id: str) -> CardSchedule | None:
-        return self._by_card.get(card_id)
+    async def get(self, user_id: str, card_id: str) -> CardSchedule | None:
+        return self._by_key.get((user_id, card_id))
 
-    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
-        return {cid: self._by_card[cid] for cid in card_ids if cid in self._by_card}
+    async def get_many(self, user_id: str, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+        return {
+            cid: self._by_key[(user_id, cid)] for cid in card_ids if (user_id, cid) in self._by_key
+        }
 
-    async def upsert(self, schedule: CardSchedule) -> None:
-        self._by_card[schedule.card_id] = schedule
+    async def list_for_user(self, user_id: str) -> list[CardSchedule]:
+        return [s for (uid, _), s in sorted(self._by_key.items()) if uid == user_id]
 
-    async def delete(self, card_id: str) -> None:
-        self._by_card.pop(card_id, None)
+    async def upsert(self, user_id: str, schedule: CardSchedule) -> None:
+        self._by_key[(user_id, schedule.card_id)] = schedule
+
+    async def delete(self, user_id: str, card_id: str) -> None:
+        self._by_key.pop((user_id, card_id), None)
+
+    async def delete_for_card(self, card_id: str) -> None:
+        for key in [key for key in self._by_key if key[1] == card_id]:
+            del self._by_key[key]
+
+    async def delete_for_user(self, user_id: str) -> None:
+        for key in [key for key in self._by_key if key[0] == user_id]:
+            del self._by_key[key]
 
 
 class InMemoryReviewLogRepository:
@@ -1067,7 +1080,7 @@ class InMemoryStudyStatsRepository:
             for c in await self._cards.list_for_owner(owner_id)
             if not c.is_suspended and (wanted is None or c.deck_id in wanted)
         ]
-        schedules = await self._schedules.get_many([c.id for c in cards])
+        schedules = await self._schedules.get_many(owner_id, [c.id for c in cards])
         totals: dict[datetime, int] = {}
         for schedule in schedules.values():
             if schedule.due_at >= until:

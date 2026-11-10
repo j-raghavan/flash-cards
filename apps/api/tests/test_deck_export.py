@@ -205,7 +205,7 @@ async def test_apkg_round_trip_keeps_notes_state_and_schedule() -> None:
     original_card = next(
         c for c in await world.card_repo.list_for_owner(ALICE) if c.flag == 4
     )
-    original_schedule = await world.schedules.get(original_card.id)
+    original_schedule = await world.schedules.get(ALICE, original_card.id)
 
     data = await world.export(root_id, ExportFormat.APKG)
     report = await world.importer.import_package(owner_id=BOB, data=data)
@@ -222,7 +222,7 @@ async def test_apkg_round_trip_keeps_notes_state_and_schedule() -> None:
         (2, False, 0),
     ]
     reviewed = next(c for c in bob_cards if c.flag == 4)
-    schedule = await world.schedules.get(reviewed.id)
+    schedule = await world.schedules.get(BOB, reviewed.id)
     assert original_schedule is not None and schedule is not None
     # Replaying the same history gives the same schedule (to the millisecond).
     assert schedule.state is original_schedule.state

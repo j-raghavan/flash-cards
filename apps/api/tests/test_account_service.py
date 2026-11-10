@@ -119,6 +119,7 @@ class _Fixture:
             fields={"front": "new", "back": "card"},
         )
         await self.schedule_repo.upsert(
+            owner,
             CardSchedule(
                 card_id=cards[0].id, state=ScheduleState.REVIEW, step=None, stability=5.0,
                 difficulty=5.0, due_at=NOW, last_reviewed_at=NOW,
@@ -260,3 +261,22 @@ async def test_delete_removes_everything_the_user_owns_and_nothing_else() -> Non
     assert [m.id for m in await fx.media.list_for_owner(BOB)] == ["media-bob"]
     assert await fx.mock_exams.get("exam-bob") is not None
     assert await fx.passages.indexed_files(fx._deck_id) == {"f"}  # Bob's, seeded last
+
+
+async def test_export_and_delete_cover_progress_on_another_owners_card() -> None:
+    fx = _Fixture()
+    await fx.seed_full_account(ALICE.id)
+    await fx.seed_full_account(BOB)
+    [bobs_own] = await fx.schedule_repo.list_for_user(BOB)  # his reviewed card
+    # Alice studied Bob's card (a library card): her progress is hers, not his.
+    await fx.schedule_repo.upsert(ALICE.id, bobs_own)
+
+    export = await fx.service.export(user=ALICE)
+    assert bobs_own.card_id in {s.card_id for s in export.schedules}
+    assert len(export.schedules) == 2  # her own card and Bob's
+    assert {c.owner_id for c in export.cards} == {ALICE.id}  # Bob's cards stay his
+
+    await fx.service.delete(user=ALICE)
+
+    assert await fx.schedule_repo.list_for_user(ALICE.id) == []
+    assert await fx.schedule_repo.get(BOB, bobs_own.card_id) == bobs_own

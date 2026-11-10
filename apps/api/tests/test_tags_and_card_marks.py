@@ -135,5 +135,5 @@ async def test_owner_listings_updates_and_batched_schedules_in_memory() -> None:
         card_id="c-n1", state=ScheduleState.REVIEW, step=None, stability=3.0, difficulty=5.0,
         due_at=NOW, last_reviewed_at=NOW,
     )
-    await schedules.upsert(schedule)
-    assert await schedules.get_many(["c-n1", "c-n3"]) == {"c-n1": schedule}
+    await schedules.upsert("o", schedule)
+    assert await schedules.get_many("o", ["c-n1", "c-n3"]) == {"c-n1": schedule}

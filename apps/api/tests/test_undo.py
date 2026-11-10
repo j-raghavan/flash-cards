@@ -112,24 +112,24 @@ async def test_undo_of_a_new_cards_first_answer_makes_it_new_again(rig: _Rig) ->
     outcome = await rig.reviews.undo(owner_id=ALICE, review_id=review_id)
 
     assert (outcome.review_id, outcome.card_id, outcome.schedule) == (review_id, card, None)
-    assert await rig.schedules.get(card) is None
+    assert await rig.schedules.get(ALICE, card) is None
     assert await rig.logs.list_for_owner(ALICE) == []
 
 
 async def test_undo_restores_the_previous_schedule_one_step_only(rig: _Rig) -> None:
     _, card = await rig.card()
     first = await rig.answer(card, Rating.GOOD)
-    after_first = await rig.schedules.get(card)
+    after_first = await rig.schedules.get(ALICE, card)
     rig.clock.advance(timedelta(minutes=1))
     second = await rig.answer(card, Rating.AGAIN)
 
     outcome = await rig.reviews.undo(owner_id=ALICE, review_id=second)
     assert outcome.schedule == after_first
-    assert await rig.schedules.get(card) == after_first
+    assert await rig.schedules.get(ALICE, card) == after_first
     # One step only: the answer before it stays, until a new answer comes.
     with pytest.raises(UndoRejected, match="most recent"):
         await rig.reviews.undo(owner_id=ALICE, review_id=first)
-    assert await rig.schedules.get(card) == after_first
+    assert await rig.schedules.get(ALICE, card) == after_first
 
 
 async def test_a_late_retry_of_an_undone_answer_is_refused(rig: _Rig) -> None:
@@ -139,7 +139,7 @@ async def test_a_late_retry_of_an_undone_answer_is_refused(rig: _Rig) -> None:
     with pytest.raises(UndoRejected, match="was undone"):
         await rig.answer(card, key="k1")
     assert await rig.logs.list_for_owner(ALICE) == []
-    assert await rig.schedules.get(card) is None
+    assert await rig.schedules.get(ALICE, card) is None
     # Other keys, other cards and keyless answers still go through.
     await rig.answer(card, key="k2")
     await rig.answer(card)
@@ -221,13 +221,13 @@ async def test_a_review_without_a_snapshot_cannot_be_undone(rig: _Rig) -> None:
 async def test_undo_refuses_when_the_card_moved_on_since(rig: _Rig) -> None:
     _, card = await rig.card()
     review_id = await rig.answer(card)
-    schedule = await rig.schedules.get(card)
+    schedule = await rig.schedules.get(ALICE, card)
     assert schedule is not None
     # Something else (a reset, an import) rewrote the schedule after the answer.
-    await rig.schedules.upsert(replace(schedule, last_reviewed_at=NOW - timedelta(days=3)))
+    await rig.schedules.upsert(ALICE, replace(schedule, last_reviewed_at=NOW - timedelta(days=3)))
     with pytest.raises(UndoRejected, match="changed"):
         await rig.reviews.undo(owner_id=ALICE, review_id=review_id)
-    await rig.schedules.delete(card)
+    await rig.schedules.delete(ALICE, card)
     with pytest.raises(UndoRejected, match="changed"):
         await rig.reviews.undo(owner_id=ALICE, review_id=review_id)
 
@@ -257,7 +257,7 @@ async def test_losing_a_delete_race_reports_not_found() -> None:
     review_id = await rig.answer(card)
     with pytest.raises(ReviewNotFound):
         await rig.reviews.undo(owner_id=ALICE, review_id=review_id)
-    assert await rig.schedules.get(card) is not None  # nothing restored by the loser
+    assert await rig.schedules.get(ALICE, card) is not None  # nothing restored by the loser
 
 
 class _VanishingDuplicateLogs(InMemoryReviewLogRepository):
@@ -380,3 +380,23 @@ def test_a_retried_answer_returns_the_original_review_id(admin_client: TestClien
     again = admin_client.post(f"/cards/{card}/review", json=body).json()
     assert first["review_id"] == again["review_id"]
     assert admin_client.post(f"/reviews/{first['review_id']}/undo").status_code == 200
+
+
+async def test_undo_of_a_first_answer_leaves_another_users_schedule(rig: _Rig) -> None:
+    _, card = await rig.card()
+    theirs = CardSchedule(
+        card_id=card,
+        state=ScheduleState.REVIEW,
+        step=None,
+        stability=4.0,
+        difficulty=5.0,
+        due_at=NOW + timedelta(days=4),
+        last_reviewed_at=NOW,
+    )
+    await rig.schedules.upsert(BOB, theirs)  # another reader's own progress on the card
+    review_id = await rig.answer(card)
+
+    await rig.reviews.undo(owner_id=ALICE, review_id=review_id)
+
+    assert await rig.schedules.get(ALICE, card) is None
+    assert await rig.schedules.get(BOB, card) == theirs

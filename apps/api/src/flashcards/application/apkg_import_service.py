@@ -225,7 +225,7 @@ class ApkgImportService:
                 )
             )
         if schedule is not None:
-            await self._schedules.upsert(replace(schedule, card_id=card.id))
+            await self._schedules.upsert(owner_id, replace(schedule, card_id=card.id))
 
 
 def _schedules_for(

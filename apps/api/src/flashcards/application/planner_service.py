@@ -98,7 +98,7 @@ class PlannerService:
         stabilities: list[float] = []
         for deck_id in goal.deck_ids:
             cards = [c for c in await self._cards.list_for_deck(deck_id) if not c.is_suspended]
-            schedules = await self._schedules.get_many([card.id for card in cards])
+            schedules = await self._schedules.get_many(goal.owner_id, [card.id for card in cards])
             for card in cards:
                 schedule = schedules.get(card.id)
                 if schedule is None or schedule.stability is None:

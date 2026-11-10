@@ -81,6 +81,7 @@ class _Fixture:
 
     async def due(self, card_id: str, at: datetime) -> None:
         await self.schedules.upsert(
+            ALICE,
             CardSchedule(
                 card_id=card_id,
                 state=ScheduleState.REVIEW,

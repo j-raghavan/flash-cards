@@ -81,7 +81,7 @@ class ReviewService:
         await self._notes.get_card(owner_id=owner_id, card_id=card_id)
         await self._logs.lock_owner(owner_id)
         now = self._clock.now()
-        existing = await self._schedules.get(card_id)
+        existing = await self._schedules.get(owner_id, card_id)
         current = existing or self._scheduler.new_schedule(card_id, now)
         updated = self._scheduler.review(current, rating, now)
         log = ReviewLog(
@@ -114,10 +114,10 @@ class ReviewService:
             original = await self._logs.find_by_key(owner_id, card_id, idempotency_key or "")
             if original is None:  # cannot happen under the owner lock; never guess
                 raise ReviewNotFound(card_id) from None
-            stored = await self._schedules.get(card_id)
+            stored = await self._schedules.get(owner_id, card_id)
             return ReviewOutcome(original.id, stored or current)
 
-        await self._schedules.upsert(updated)
+        await self._schedules.upsert(owner_id, updated)
         await self._logs.set_last_answer(log)
         return ReviewOutcome(log.id, updated)
 
@@ -141,7 +141,7 @@ class ReviewService:
         if self._clock.now() - log.reviewed_at > UNDO_WINDOW:
             raise UndoRejected("The time to undo this answer has passed.")
         # Something other than this answer (a reset, an import) moved the card on.
-        current = await self._schedules.get(log.card_id)
+        current = await self._schedules.get(owner_id, log.card_id)
         if current is None or current.last_reviewed_at != log.reviewed_at:
             raise UndoRejected("The card has changed since this answer.")
         if not await self._logs.try_delete(log.id):
@@ -149,9 +149,9 @@ class ReviewService:
         await self._logs.mark_undone(owner_id)
         previous = log.undo.schedule
         if previous is None:
-            await self._schedules.delete(log.card_id)
+            await self._schedules.delete(owner_id, log.card_id)
         else:
-            await self._schedules.upsert(previous)
+            await self._schedules.upsert(owner_id, previous)
         return UndoOutcome(review_id=log.id, card_id=log.card_id, schedule=previous)
 
     async def due_queue(self, *, owner_id: str, deck_id: str, limit: int = 50) -> list[Card]:
@@ -162,7 +162,7 @@ class ReviewService:
         for card in cards:
             if card.is_suspended or card.is_buried(now):
                 continue
-            schedule = await self._schedules.get(card.id)
+            schedule = await self._schedules.get(owner_id, card.id)
             if schedule is None or schedule.due_at <= now:
                 due.append(card)
         return due[:limit]
@@ -179,7 +179,7 @@ class ReviewService:
             if card.is_suspended:
                 suspended += 1
                 continue
-            schedule = await self._schedules.get(card.id)
+            schedule = await self._schedules.get(owner_id, card.id)
             available = not card.is_buried(now)  # a buried card is not due until later
             if schedule is None:
                 new += 1

@@ -587,28 +587,50 @@ class SqlScheduleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get(self, card_id: str) -> CardSchedule | None:
-        row = await self._session.get(CardScheduleRow, card_id)
+    async def get(self, user_id: str, card_id: str) -> CardSchedule | None:
+        row = await self._session.get(CardScheduleRow, (user_id, card_id))
         return schedule_from_row(row) if row is not None else None
 
-    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+    async def get_many(self, user_id: str, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
         found: dict[str, CardSchedule] = {}
         # Chunked: Postgres caps the number of bind parameters in one statement.
         for start in range(0, len(card_ids), _IN_CHUNK):
             chunk = card_ids[start : start + _IN_CHUNK]
             rows = await self._session.scalars(
-                select(CardScheduleRow).where(CardScheduleRow.card_id.in_(chunk))
+                select(CardScheduleRow).where(
+                    CardScheduleRow.user_id == user_id, CardScheduleRow.card_id.in_(chunk)
+                )
             )
             found.update({row.card_id: schedule_from_row(row) for row in rows})
         return found
 
-    async def upsert(self, schedule: CardSchedule) -> None:
-        await self._session.merge(schedule_to_row(schedule))
+    async def list_for_user(self, user_id: str) -> list[CardSchedule]:
+        rows = await self._session.scalars(
+            select(CardScheduleRow)
+            .where(CardScheduleRow.user_id == user_id)
+            .order_by(CardScheduleRow.card_id)
+        )
+        return [schedule_from_row(row) for row in rows]
+
+    async def upsert(self, user_id: str, schedule: CardSchedule) -> None:
+        await self._session.merge(schedule_to_row(user_id, schedule))
         await self._session.flush()
 
-    async def delete(self, card_id: str) -> None:
+    async def delete(self, user_id: str, card_id: str) -> None:
+        await self._session.execute(
+            delete(CardScheduleRow).where(
+                CardScheduleRow.user_id == user_id, CardScheduleRow.card_id == card_id
+            )
+        )
+
+    async def delete_for_card(self, card_id: str) -> None:
         await self._session.execute(
             delete(CardScheduleRow).where(CardScheduleRow.card_id == card_id)
+        )
+
+    async def delete_for_user(self, user_id: str) -> None:
+        await self._session.execute(
+            delete(CardScheduleRow).where(CardScheduleRow.user_id == user_id)
         )
 
 
@@ -1531,6 +1553,7 @@ class SqlStudyStatsRepository:
             .select_from(CardScheduleRow)
             .join(CardRow, CardRow.id == CardScheduleRow.card_id)
             .where(
+                CardScheduleRow.user_id == owner_id,
                 CardRow.owner_id == owner_id,
                 CardRow.suspended_at.is_(None),
                 CardScheduleRow.due_at < until,

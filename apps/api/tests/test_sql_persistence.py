@@ -398,8 +398,9 @@ async def test_schedule_sql_upsert(engine: AsyncEngine) -> None:
         )
     async with sm() as s, s.begin():
         repo = SqlScheduleRepository(s)
-        assert await repo.get("c1") is None
+        assert await repo.get("alice", "c1") is None
         await repo.upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.LEARNING,
@@ -412,6 +413,7 @@ async def test_schedule_sql_upsert(engine: AsyncEngine) -> None:
         )
     async with sm() as s, s.begin():
         await SqlScheduleRepository(s).upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.REVIEW,
@@ -423,7 +425,7 @@ async def test_schedule_sql_upsert(engine: AsyncEngine) -> None:
             )
         )
     async with sm() as s:
-        got = await SqlScheduleRepository(s).get("c1")
+        got = await SqlScheduleRepository(s).get("alice", "c1")
         assert got is not None and got.state is ScheduleState.REVIEW
 
 
@@ -453,6 +455,49 @@ async def _seed_card(sm: async_sessionmaker[AsyncSession]) -> None:
                     created_at=_now(),
                 )
             )
+
+
+async def test_schedule_sql_rows_are_per_user_and_card(engine: AsyncEngine) -> None:
+    """The (user, card) key and the three deletes, as the in-memory adapter (ADR 0024)."""
+    from flashcards.domain.scheduling import CardSchedule, ScheduleState
+
+    def plain(card_id: str, stability: float) -> CardSchedule:
+        return CardSchedule(
+            card_id=card_id,
+            state=ScheduleState.REVIEW,
+            step=None,
+            stability=stability,
+            difficulty=5.0,
+            due_at=_now(),
+            last_reviewed_at=_now(),
+        )
+
+    sm = create_sessionmaker(engine)
+    await _seed_card(sm)
+    async with sm() as s, s.begin():
+        repo = SqlScheduleRepository(s)
+        for user, stability in (("alice", 1.0), ("bob", 2.0), ("carol", 3.0)):
+            await repo.upsert(user, plain("c1", stability))
+            await repo.upsert(user, plain("c2", stability))
+        await repo.upsert("bob", plain("c1", 2.5))  # an upsert replaces only bob's row
+    async with sm() as s, s.begin():
+        repo = SqlScheduleRepository(s)
+        bob_c1 = await repo.get("bob", "c1")
+        alice_c1 = await repo.get("alice", "c1")
+        assert bob_c1 is not None and bob_c1.stability == 2.5
+        assert alice_c1 is not None and alice_c1.stability == 1.0
+        assert set(await repo.get_many("carol", ["c1", "c2", "missing"])) == {"c1", "c2"}
+        assert [x.card_id for x in await repo.list_for_user("bob")] == ["c1", "c2"]
+        await repo.delete("alice", "c1")
+        await repo.delete_for_card("c2")
+        await repo.delete_for_user("carol")
+    async with sm() as s:
+        repo = SqlScheduleRepository(s)
+        assert await repo.get("alice", "c1") is None
+        assert await repo.get("bob", "c1") is not None
+        assert await repo.get_many("alice", ["c1", "c2"]) == {}
+        assert [x.card_id for x in await repo.list_for_user("bob")] == ["c1"]
+        assert await repo.list_for_user("carol") == []
 
 
 async def test_reviewlog_sql_duplicate_key_is_rejected(engine: AsyncEngine) -> None:
@@ -489,6 +534,7 @@ async def test_deck_delete_cascades_to_notes_cards_schedule_logs(engine: AsyncEn
     await _seed_card(sm)
     async with sm() as s, s.begin():
         await SqlScheduleRepository(s).upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.LEARNING,
@@ -516,7 +562,7 @@ async def test_deck_delete_cascades_to_notes_cards_schedule_logs(engine: AsyncEn
         # The deck's share links go with it.
         assert await SqlShareLinkRepository(s).get("share1") is None
         assert await SqlCardRepository(s).get("c1") is None
-        assert await SqlScheduleRepository(s).get("c1") is None
+        assert await SqlScheduleRepository(s).get("alice", "c1") is None
 
 
 async def test_sql_card_update_note_delete_and_missing_deck_delete(engine: AsyncEngine) -> None:
@@ -550,6 +596,7 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
     await _seed_card(sm)
     async with sm() as s, s.begin():
         await SqlScheduleRepository(s).upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.LEARNING,
@@ -596,7 +643,7 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
         assert await SqlDeckRepository(s).get("d1") is None
         assert await SqlNoteRepository(s).get("n1") is None
         assert await SqlCardRepository(s).get("c1") is None
-        assert await SqlScheduleRepository(s).get("c1") is None
+        assert await SqlScheduleRepository(s).get("alice", "c1") is None
 
 
 # --- Custom note types and image occlusion on Postgres (ADR 0013) ---
@@ -853,7 +900,7 @@ async def test_sql_apkg_round_trip_keeps_history_and_schedule(engine: AsyncEngin
     async with sm() as s:
         bob_cards = await SqlCardRepository(s).list_for_owner("bob")
         assert len(bob_cards) == 1 and bob_cards[0].is_suspended
-        assert await SqlScheduleRepository(s).get(bob_cards[0].id) is not None
+        assert await SqlScheduleRepository(s).get("bob", bob_cards[0].id) is not None
         logs = await SqlReviewLogRepository(s).list_for_owner("bob")
         assert [log.rating for log in logs] == [Rating.GOOD]
         bob_decks = await SqlDeckRepository(s).list_for_owner("bob")

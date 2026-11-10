@@ -327,16 +327,35 @@ class Scheduler(Protocol):
 
 
 class ScheduleRepository(Protocol):
-    async def get(self, card_id: str) -> CardSchedule | None: ...
+    """Review state per (user, card) (ADR 0024).
 
-    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
-        """The schedules of these cards, keyed by card id; cards never reviewed are absent."""
+    A member studying a library card has a schedule of their own on it, next to
+    the owner's. Each read and write names the user whose progress it is.
+    """
+
+    async def get(self, user_id: str, card_id: str) -> CardSchedule | None: ...
+
+    async def get_many(self, user_id: str, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+        """The user's schedules on these cards, keyed by card id; cards the user
+        never reviewed are absent."""
         ...
 
-    async def upsert(self, schedule: CardSchedule) -> None: ...
+    async def list_for_user(self, user_id: str) -> list[CardSchedule]:
+        """Every schedule of the user, on any owner's card, ordered by card id (export)."""
+        ...
 
-    async def delete(self, card_id: str) -> None:
-        """Delete a card's schedule, if any."""
+    async def upsert(self, user_id: str, schedule: CardSchedule) -> None: ...
+
+    async def delete(self, user_id: str, card_id: str) -> None:
+        """Delete the user's schedule on a card, if any (undo of a first answer)."""
+        ...
+
+    async def delete_for_card(self, card_id: str) -> None:
+        """Delete every user's schedule on a card (the card is deleted or re-derived)."""
+        ...
+
+    async def delete_for_user(self, user_id: str) -> None:
+        """Delete every schedule of the user, on any owner's card (account deletion)."""
         ...
 
 
@@ -1012,6 +1031,6 @@ class StudyStatsRepository(Protocol):
         until: datetime,
         deck_ids: Sequence[str] | None = None,
     ) -> list[DueBucket]:
-        """Schedules of the owner's unsuspended cards due before until, bucketed,
-        with anything due before floor counted at floor (overdue cards)."""
+        """The owner's own schedules on their unsuspended cards due before until,
+        bucketed, with anything due before floor counted at floor (overdue cards)."""
         ...

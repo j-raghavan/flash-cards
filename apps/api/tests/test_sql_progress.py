@@ -91,6 +91,9 @@ CARDS = [
     _card("b1", "dB", "nb1").suspended(NOW),
     _card("z1", "dZ", "nz1", owner="bob"),
 ]
+OWNER_OF = {card.id: card.owner_id for card in CARDS}  # each card's schedule is its owner's
+# Bob's own progress on Alice's card (ADR 0024): never part of Alice's forecast.
+OTHER_USERS_SCHEDULES = [("bob", _schedule("a1", NOW + timedelta(days=3)))]
 LOGS = [
     _log("l1", "a1", NOW - timedelta(days=2, minutes=3), Rating.AGAIN),
     _log("l2", "a1", NOW - timedelta(days=2, minutes=1), Rating.GOOD),
@@ -117,7 +120,9 @@ async def _seed(sm: async_sessionmaker[AsyncSession]) -> None:
             await SqlNoteRepository(s).add(_note(card.note_id, card.deck_id, card.owner_id))
             await SqlCardRepository(s).add(card)
         for schedule in SCHEDULES:
-            await SqlScheduleRepository(s).upsert(schedule)
+            await SqlScheduleRepository(s).upsert(OWNER_OF[schedule.card_id], schedule)
+        for user, schedule in OTHER_USERS_SCHEDULES:
+            await SqlScheduleRepository(s).upsert(user, schedule)
         for log in LOGS:
             await SqlReviewLogRepository(s).append(log)
 
@@ -131,7 +136,9 @@ async def _memory_stats() -> InMemoryStudyStatsRepository:
     for card in CARDS:
         await cards.add(card)
     for schedule in SCHEDULES:
-        await schedules.upsert(schedule)
+        await schedules.upsert(OWNER_OF[schedule.card_id], schedule)
+    for user, schedule in OTHER_USERS_SCHEDULES:
+        await schedules.upsert(user, schedule)
     for log in LOGS:
         await logs.append(log)
     return InMemoryStudyStatsRepository(cards, schedules, logs)
@@ -166,7 +173,8 @@ async def test_activity_and_forecast_match_the_memory_adapter(engine: AsyncEngin
         ActivityBucket(datetime(2026, 11, 8, 6, 45, tzinfo=UTC), 1, 1),
         ActivityBucket(datetime(2026, 11, 8, 11, 0, tzinfo=UTC), 1, 1),
     ]
-    # The overdue card is clamped to the floor; the suspended and foreign ones are absent.
+    # The overdue card is clamped to the floor; the suspended and foreign ones are absent,
+    # and so is Bob's own schedule on Alice's card.
     assert due == [
         DueBucket(floor, 1),
         DueBucket(datetime(2026, 11, 10, 12, 15, tzinfo=UTC), 1),

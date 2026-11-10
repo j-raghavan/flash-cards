@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -62,6 +63,7 @@ class _Fixture:
 
     async def seed_card(self, card_id: str) -> None:
         await self.schedule_repo.upsert(
+            ALICE,
             CardSchedule(
                 card_id=card_id,
                 state=ScheduleState.LEARNING,
@@ -105,7 +107,7 @@ async def test_delete_deck_cascades_to_all_content(fx: _Fixture) -> None:
     assert await fx.deck_repo.get(deck.id) is None
     assert await fx.card_repo.list_for_deck(deck.id) == []
     for card in cards:
-        assert await fx.schedule_repo.get(card.id) is None
+        assert await fx.schedule_repo.get(ALICE, card.id) is None
     assert fx.log_repo._logs == []
 
 
@@ -124,7 +126,7 @@ async def test_delete_deck_cascades_subtree(fx: _Fixture) -> None:
 
     assert await fx.deck_repo.get(child.id) is None
     assert await fx.card_repo.get(cards[0].id) is None
-    assert await fx.schedule_repo.get(cards[0].id) is None
+    assert await fx.schedule_repo.get(ALICE, cards[0].id) is None
 
 
 async def test_delete_deck_removes_its_passages_and_mock_exams(fx: _Fixture) -> None:
@@ -173,10 +175,33 @@ async def test_delete_note_cascades_only_its_own_cards(fx: _Fixture) -> None:
     assert await fx.note_repo.get(doomed.id) is None
     for card in doomed_cards:
         assert await fx.card_repo.get(card.id) is None
-        assert await fx.schedule_repo.get(card.id) is None
+        assert await fx.schedule_repo.get(ALICE, card.id) is None
     # The other note's card and schedule survive.
     assert await fx.card_repo.get(kept_cards[0].id) is not None
-    assert await fx.schedule_repo.get(kept_cards[0].id) is not None
+    assert await fx.schedule_repo.get(ALICE, kept_cards[0].id) is not None
+
+
+async def test_delete_note_purges_every_users_schedules(fx: _Fixture) -> None:
+    deck = await fx.decks.create(owner_id=ALICE, name="Deck")
+    doomed, doomed_cards = await fx.notes.create_note(
+        owner_id=ALICE,
+        deck_id=deck.id,
+        note_type=NoteType.BASIC,
+        fields={"front": "Q", "back": "A"},
+    )
+    [card] = doomed_cards
+    await fx.seed_card(card.id)
+    owners_row = await fx.schedule_repo.get(ALICE, card.id)
+    assert owners_row is not None
+    await fx.schedule_repo.upsert(BOB, owners_row)  # a reader's own progress on the card
+    await fx.schedule_repo.upsert(BOB, replace(owners_row, card_id="elsewhere"))
+
+    await fx.library.delete_note(owner_id=ALICE, note_id=doomed.id)
+
+    assert await fx.schedule_repo.get(ALICE, card.id) is None
+    assert await fx.schedule_repo.get(BOB, card.id) is None
+    # The reader's progress on other cards is not touched.
+    assert [s.card_id for s in await fx.schedule_repo.list_for_user(BOB)] == ["elsewhere"]
 
 
 async def test_delete_foreign_deck_is_not_found(fx: _Fixture) -> None:
