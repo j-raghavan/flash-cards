@@ -59,6 +59,7 @@ from flashcards.application.admin_service import AdminService
 from flashcards.application.ai_budget import AiCallBudget
 from flashcards.application.ai_spend import AiSpend
 from flashcards.application.apkg_import_service import ApkgImportService
+from flashcards.application.appearance_service import AppearanceService
 from flashcards.application.audit_service import AuditService
 from flashcards.application.auth_service import AuthService
 from flashcards.application.bulk_card_service import BulkCardService
@@ -249,6 +250,7 @@ class Container:
     sessions: SessionService
     public_signup: PublicSignupService
     quotas: QuotaService
+    appearance: AppearanceService
     mailer: Mailer
     two_factor: TwoFactorService
     second_factor: SecondFactorSignInService
@@ -520,6 +522,7 @@ def build_services(repos: Repositories) -> Container:
             repos.users, repos.hasher, repos.login_throttle, audit, repos.clock
         ),
         quotas=quotas,
+        appearance=AppearanceService(repos.users),
         mailer=repos.mailer,
         two_factor=two_factor,
         second_factor=second_factor,

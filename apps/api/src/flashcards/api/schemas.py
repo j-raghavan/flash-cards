@@ -20,6 +20,7 @@ from flashcards.application.planner_service import PlanReport
 from flashcards.application.review_service import ReviewOutcome, UndoOutcome
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
 from flashcards.domain.anki import ImportReport, UnsupportedKind
+from flashcards.domain.appearance import Accent, Appearance, Theme
 from flashcards.domain.audit import AuditEvent
 from flashcards.domain.browser import BrowserRow, CardState
 from flashcards.domain.chat import ChatAnswer
@@ -107,12 +108,36 @@ class UserOut(BaseModel):
     email: str
     role: Role
     email_verified: bool
+    # The chosen look comes with the user, so the app can paint in it at once.
+    theme: Theme
+    accent: Accent
 
     @classmethod
     def from_user(cls, user: User) -> UserOut:
         return cls(
-            id=user.id, email=user.email, role=user.role, email_verified=user.is_verified
+            id=user.id,
+            email=user.email,
+            role=user.role,
+            email_verified=user.is_verified,
+            theme=user.appearance.theme,
+            accent=user.appearance.accent,
         )
+
+
+class AppearanceOut(BaseModel):
+    theme: Theme
+    accent: Accent
+
+    @classmethod
+    def from_appearance(cls, appearance: Appearance) -> AppearanceOut:
+        return cls(theme=appearance.theme, accent=appearance.accent)
+
+
+class AppearanceUpdateRequest(BaseModel):
+    """Change the parts given; a part left out keeps its current value."""
+
+    theme: Theme | None = None
+    accent: Accent | None = None
 
 
 class CreatedInviteOut(BaseModel):

@@ -193,6 +193,31 @@ def test_0019_keeps_every_schedule_as_its_owners(pg_url: str) -> None:
     command.downgrade(cfg, "base")
 
 
+def test_0020_gives_every_existing_account_the_default_look(pg_url: str) -> None:
+    _reset(pg_url)
+    cfg = _alembic_config(pg_url)
+    command.upgrade(cfg, "0019")
+    _execute(
+        pg_url,
+        "INSERT INTO users (id, email, password_hash, role, created_at) "
+        "VALUES ('u1', 'old@example.com', 'h', 'member', now())",
+    )
+
+    command.upgrade(cfg, "0020")
+
+    async def _look() -> list[tuple[str, str]]:
+        engine = create_engine(pg_url)
+        async with engine.connect() as conn:
+            result = await conn.exec_driver_sql("SELECT theme, accent FROM users")
+            looks = [(str(row["theme"]), str(row["accent"])) for row in result.mappings()]
+        await engine.dispose()
+        return looks
+
+    assert asyncio.run(_look()) == [("system", "teal")]
+    command.downgrade(cfg, "0019")
+    command.downgrade(cfg, "base")
+
+
 def test_migrations_match_the_models(pg_url: str) -> None:
     """After upgrading to head, autogenerate finds nothing to change: no schema drift."""
     from alembic.autogenerate import compare_metadata

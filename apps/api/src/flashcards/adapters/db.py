@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from flashcards.domain.ai import DraftCardRecord, Thoroughness
+from flashcards.domain.appearance import Accent, Appearance, Theme
 from flashcards.domain.audit import AuditAction, AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.decks import Deck
@@ -92,6 +93,10 @@ class UserRow(Base):
         DateTime(timezone=True), nullable=True
     )
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The user's chosen look (domain/appearance.py); accounts made before it
+    # existed follow the device's light or dark setting with the teal palette.
+    theme: Mapped[str] = mapped_column(String, server_default=Theme.SYSTEM.value)
+    accent: Mapped[str] = mapped_column(String, server_default=Accent.TEAL.value)
 
 
 class SessionRow(Base):
@@ -159,6 +164,8 @@ def user_to_row(user: User) -> UserRow:
         created_at=user.created_at,
         email_verified_at=user.email_verified_at,
         suspended_at=user.suspended_at,
+        theme=user.appearance.theme.value,
+        accent=user.appearance.accent.value,
     )
 
 
@@ -171,6 +178,7 @@ def user_from_row(row: UserRow) -> User:
         created_at=row.created_at,
         email_verified_at=row.email_verified_at,
         suspended_at=row.suspended_at,
+        appearance=Appearance(theme=Theme(row.theme), accent=Accent(row.accent)),
     )
 
 
