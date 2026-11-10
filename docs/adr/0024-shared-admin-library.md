@@ -27,6 +27,7 @@ Review logs, the last-answer row and the review idempotency key are already per 
   - Library decks are read-only to members. Members can study them, see their stats and read their cards.
   - Only the owning admin edits, deletes, moves, generates into, shares or exports them.
 - **When an admin is demoted, suspended or deleted,** their decks stop being library decks at once. Members' progress rows on those cards stay, unused, until the cards are deleted.
+- **Promoting a user to admin, or unsuspending an admin,** publishes every deck they own to all members at once, including decks made while they were a member. The admin console warns before either change (web milestone).
 - **Admins see other admins' decks** as library decks too, read-only like any member.
 
 ### Progress is per (user, card)
@@ -51,8 +52,9 @@ Review logs, the last-answer row and the review idempotency key are already per 
     - deck list and deck get
     - deck stats, the due queue and review
     - card and note get
-    - note types and media needed to render a card
+    - note types and media, for any active admin's, not only those a library card references. Their ids are random UUIDs and media is raster images and audio only (no SVG or HTML), so reading them by id discloses no more than the library cards already do.
   - Every write path keeps its owner check unchanged.
+  - A card its owner has suspended is not readable by anyone else, and undo needs the answered card to be readable still (see above).
 - **The deck list** answers the caller's decks plus the library decks. Each deck says whether the caller owns it (`owned`).
   - A library deck's parent is another library deck of the same admin, so the tree stays whole.
   - A member's own deck can never be placed inside a library deck: moving into a deck still requires owning it.
@@ -61,14 +63,15 @@ Review logs, the last-answer row and the review idempotency key are already per 
 
 These are enhancements. Library decks simply do not offer them until they land, so the core works without them.
 
-1. **Per-member suspend, bury and flag on library cards.** Until then, a card the admin suspends is hidden from everyone else, the admin's bury and flag are ignored for members, and members cannot suspend, bury or flag library cards.
-2. **Library cards in the card browser, goals and plans.** Until then, these show only the member's own cards.
-3. **AI features on library decks:** document chat, deck summary, mock exams and typed-answer grading. Until then, they are offered on the member's own decks only.
-4. **Export of library decks.** Members can still clone a library deck through a share link if the admin creates one.
+1. **Per-member hide or subscribe.** Members cannot hide a library deck yet, and its new cards have no per-day limit, so a large library fills every member's queue at once. A per-member choice of which library decks to follow comes first.
+2. **Per-member suspend, bury and flag on library cards.** Until then, a card the admin suspends is hidden from everyone else, the admin's bury and flag are ignored for members, and members cannot suspend, bury or flag library cards.
+3. **Library cards in the card browser, goals and the goal planner.** Until then, these show only the member's own cards. The due forecast already counts library cards.
+4. **AI features on library decks:** document chat, deck summary, mock exams and typed-answer grading. Until then, they are offered on the member's own decks only.
+5. **Export of library decks.** Members can still clone a library deck through a share link if the admin creates one.
 
 ### Deletion and privacy
 
-- **Deleting a card, or editing a note so a card disappears,** deletes every user's schedule and review logs for that card. This is already the case for logs.
+- **Deleting a library deck, note or card, re-deriving a note so a card disappears, or deleting the admin's account** erases every member's schedules and review logs on those cards. The alternative, keeping history for cards that no longer exist, would leave rows nobody can study or see and complicate the export. The cost is that one admin action can wipe members' progress, so the web delete confirmation says how many members have progress on what is being deleted. A later enhancement may keep member history.
 - **Deleting a member's account** deletes their schedules and logs on library cards as well as on their own.
 - **Account export** includes the member's schedules and logs on library cards, by card id. The cards themselves stay the admin's.
 - **Admins see member progress only in aggregate.** No admin screen shows another user's schedule or reviews.
@@ -84,10 +87,11 @@ These are enhancements. Library decks simply do not offer them until they land, 
    - account delete and export
 2. **Web:**
    - library decks on the home page
-   - a read-only deck page for library decks (study, stats, browse their cards; no edit controls)
+   - a read-only deck page for library decks (study and stats only; no edit controls). Browsing library cards stays an enhancement.
+   - warnings on the admin console before promoting a user or unsuspending an admin, and on deletion of library material
    - the study screen without the edit shortcut on library cards
    - the offline queue unchanged, since reviews keep the same endpoint
-3. **Enhancements,** each its own change: per-member suspend, bury and flag; browser, goals and forecast over library cards; AI features on library decks.
+3. **Enhancements,** each its own change, in this order: per-member hide or subscribe; per-member suspend, bury and flag; the browser, goals and the goal planner over library cards; AI features on library decks.
 
 ## Consequences
 
