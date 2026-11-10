@@ -318,6 +318,9 @@ class InMemoryCardRepository:
     async def get_many(self, card_ids: Sequence[str]) -> list[Card]:
         return [self._by_id[cid] for cid in dict.fromkeys(card_ids) if cid in self._by_id]
 
+    async def share_lock(self, card_id: str) -> Card | None:
+        return self._by_id.get(card_id)  # one event loop: nothing runs in between
+
     async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
         wanted = set(note_ids)
         cards = [c for c in self._by_id.values() if c.note_id in wanted]

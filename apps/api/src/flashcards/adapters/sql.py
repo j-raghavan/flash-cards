@@ -548,6 +548,12 @@ class SqlCardRepository:
         row = await self._session.get(CardRow, card_id)
         return card_from_row(row) if row is not None else None
 
+    async def share_lock(self, card_id: str) -> Card | None:
+        row = await self._session.scalar(
+            select(CardRow).where(CardRow.id == card_id).with_for_update(key_share=True)
+        )
+        return card_from_row(row) if row is not None else None
+
     async def list_for_deck(self, deck_id: str) -> list[Card]:
         rows = await self._session.scalars(
             select(CardRow)

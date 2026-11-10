@@ -306,6 +306,16 @@ class CardRepository(Protocol):
         """The cards with these ids that exist (any owner; callers check ownership)."""
         ...
 
+    async def share_lock(self, card_id: str) -> Card | None:
+        """The card, with its row kept from deletion until the transaction ends
+        (SELECT ... FOR KEY SHARE), or None when it is already gone.
+
+        Taken before a review writes rows that reference the card, so a concurrent
+        deletion either lands first (the review then finds no card) or waits for
+        the review to commit and removes its rows with the card.
+        """
+        ...
+
     async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
         """Every card of these notes, by note then ordinal."""
         ...

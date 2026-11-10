@@ -67,6 +67,15 @@ class ReadAccess:
     async def card(self, user_id: str, card_id: str) -> Card:
         return await self._card_in(await self.scope(user_id), card_id)
 
+    async def study_card(self, user_id: str, card_id: str) -> Card:
+        """A readable card, kept from deletion until the transaction ends, for a
+        review about to write rows that reference it; raises CardNotFound."""
+        scope = await self.scope(user_id)
+        card = await self._cards.share_lock(card_id)
+        if card is None or not scope.can_read(card.owner_id):
+            raise CardNotFound(card_id)
+        return card
+
     async def note(self, user_id: str, note_id: str) -> Note:
         return await self._note_in(await self.scope(user_id), note_id)
 

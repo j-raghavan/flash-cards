@@ -81,9 +81,11 @@ class ReviewService:
         rating: Rating,
         idempotency_key: str | None = None,
     ) -> ReviewOutcome:
-        # Raises CardNotFound if the card is missing or not readable by the caller.
-        await self._access.card(owner_id, card_id)
         await self._logs.lock_owner(owner_id)
+        # Raises CardNotFound if the card is missing or not readable by the caller.
+        # The card row stays locked against deletion until this answer commits, so
+        # a card deleted meanwhile answers 404, never a foreign-key failure.
+        await self._access.study_card(owner_id, card_id)
         now = self._clock.now()
         existing = await self._schedules.get(owner_id, card_id)
         current = existing or self._scheduler.new_schedule(card_id, now)
