@@ -96,6 +96,16 @@ curl -si https://flashcards.example.org/api/auth/signup \
 
 The response is `201` with a session cookie. From then on the admin endpoints (`/api/admin/invites`, `/api/admin/users`, `/api/admin/audit`) mint invites and manage accounts. The token is printed to the terminal, so treat the terminal scrollback and any captured output as sensitive until the invite has been redeemed.
 
+### Admin decks are shared with every member
+
+Every deck owned by an active admin is a library deck: every member sees it on their home page under Library and can study it with their own progress, but cannot change, export or share it. There is no per-deck opt-in. Keep private material in a separate non-admin account.
+
+- Making a user an admin, or unsuspending an admin, publishes every deck they own at once, including decks made while they were a member. The admin console asks before either change.
+- Demoting, suspending or deleting an admin takes their decks out of the library at once. Members' progress on those cards stays until the cards are deleted.
+- Deleting a library deck, note or card, or the admin's account, erases every member's progress on those cards.
+
+See ADR 0024 for the design.
+
 ### Instances without email
 
 Without `FLASHCARDS_SMTP_HOST` no email is sent, so invites and password resets cannot reach anyone. An admin can instead add accounts directly under Admin → Users → Add an account (`POST /api/admin/users`), and set a member's password there when they forget it. The account is ready at once; share the password in person. See ADR 0023 for the limits.
