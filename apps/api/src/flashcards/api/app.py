@@ -519,11 +519,23 @@ def _llm_from_settings(settings: Settings) -> LLMProvider:
         if settings.openai_base_url:
             from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider
 
+            if (
+                settings.openai_output_limit_field == "max_completion_tokens"
+                and settings.openai_reasoning_effort is None
+            ):
+                logger.warning(
+                    "openai_output_limit_field is max_completion_tokens but "
+                    "openai_reasoning_effort is not set: a reasoning model's default "
+                    "effort can use up the output budget, and those answers fail as "
+                    "truncated. Set openai_reasoning_effort to low or below."
+                )
             return OpenAICompatibleLLMProvider(
                 base_url=settings.openai_base_url,
                 model=settings.openai_model,
                 api_key=settings.openai_api_key,
                 timeout_seconds=settings.openai_timeout_seconds,
+                output_limit_field=settings.openai_output_limit_field,
+                reasoning_effort=settings.openai_reasoning_effort,
             )
         logger.warning(
             "llm_provider is openai_compatible but openai_base_url is not set; "

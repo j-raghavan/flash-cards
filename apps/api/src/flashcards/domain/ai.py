@@ -17,7 +17,6 @@ from datetime import datetime
 from flashcards.domain.notes import Fields, InvalidNote, NoteType, card_ordinals
 
 MAX_DRAFT_CARDS = 200
-_DRAFT_TYPES = [NoteType.BASIC.value, NoteType.CLOZE.value]
 
 
 class LlmError(Exception):
@@ -89,8 +88,37 @@ class DraftCardRecord:
     created_at: datetime
 
 
+# The fields each draft type may carry, matching DRAFT_CARDS_SCHEMA. The parser
+# enforces them too, for servers that do not honour the schema strictly.
+_DRAFT_FIELDS: Mapping[NoteType, frozenset[str]] = {
+    NoteType.BASIC: frozenset({"front", "back"}),
+    NoteType.CLOZE: frozenset({"text"}),
+}
+
+
+def _draft_shape(note_type: NoteType, field_names: tuple[str, ...]) -> dict[str, object]:
+    """One card shape: its type and exactly the fields that type takes."""
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["type", "fields"],
+        "properties": {
+            "type": {"type": "string", "enum": [note_type.value]},
+            "fields": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": list(field_names),
+                "properties": {name: {"type": "string"} for name in field_names},
+            },
+        },
+    }
+
+
 # The JSON Schema a provider is told to produce. Kept framework-free so an
-# adapter can hand it to any structured-output API unchanged.
+# adapter can hand it to any structured-output API unchanged. Drafts are Basic or
+# Cloze only (ADR 0013). Every object closes its keys (additionalProperties false)
+# and lists them all as required, which strict structured outputs demand on both
+# OpenAI and Anthropic, so each card type is spelled out as its own shape.
 DRAFT_CARDS_SCHEMA: Mapping[str, object] = {
     "type": "object",
     "additionalProperties": False,
@@ -99,17 +127,10 @@ DRAFT_CARDS_SCHEMA: Mapping[str, object] = {
         "cards": {
             "type": "array",
             "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["type", "fields"],
-                "properties": {
-                    # Drafts are Basic or Cloze only (ADR 0013).
-                    "type": {"type": "string", "enum": _DRAFT_TYPES},
-                    "fields": {
-                        "type": "object",
-                        "additionalProperties": {"type": "string"},
-                    },
-                },
+                "anyOf": [
+                    _draft_shape(NoteType.BASIC, ("front", "back")),
+                    _draft_shape(NoteType.CLOZE, ("text",)),
+                ]
             },
         }
     },
@@ -139,6 +160,8 @@ def parse_draft_cards(raw: Mapping[str, object], *, source_page: int) -> list[Dr
             if not isinstance(key, str) or not isinstance(value, str):
                 raise InvalidDraft("card fields must be string key/value pairs")
         note_type = NoteType(type_value)
+        if not set(fields_value) <= _DRAFT_FIELDS[note_type]:
+            raise InvalidDraft(f"unexpected fields for a {note_type.value} card")
         fields: Fields = tuple(fields_value.items())
         try:
             card_ordinals(note_type, fields)
