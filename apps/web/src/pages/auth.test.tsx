@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { useAuth, AuthProvider } from "../auth/AuthContext";
+import { finishOnboarding } from "../onboarding/state";
 import { USER, mockApi, renderApp } from "../test/helpers";
 
 const signedOut = { "GET /auth/me": { status: 401, body: { detail: "Not authenticated." } } };
@@ -47,6 +48,8 @@ describe("sign-in", () => {
   });
 
   it("skips the form for someone already signed in", async () => {
+    // Someone who has been here before: the guided setup is behind them.
+    finishOnboarding(USER.id);
     mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [] } });
     renderApp("/login?next=//evil.example");
     expect(await screen.findByRole("heading", { name: "Decks" })).toBeInTheDocument();
@@ -66,7 +69,8 @@ describe("invite sign-up", () => {
     await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
     expect(screen.getByLabelText("Password")).toHaveAccessibleDescription("At least 12 characters.");
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    expect(await screen.findByRole("heading", { name: "Decks" })).toBeInTheDocument();
+    // A new account has no decks, so it lands in the guided setup.
+    expect(await screen.findByRole("heading", { name: "Getting started" })).toBeInTheDocument();
     expect(calls.find((c) => c.path === "/auth/signup")?.body).toEqual({
       token: "inv-123",
       email: "ada@example.com",
@@ -324,7 +328,8 @@ describe("public sign-up", () => {
     await user.type(await screen.findByLabelText("Email"), "ada@example.com");
     await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    expect(await screen.findByRole("heading", { name: "Decks" })).toBeInTheDocument();
+    // A new account has no decks, so it lands in the guided setup.
+    expect(await screen.findByRole("heading", { name: "Getting started" })).toBeInTheDocument();
     expect(calls.some((c) => c.path === "/auth/register")).toBe(false);
   });
 });

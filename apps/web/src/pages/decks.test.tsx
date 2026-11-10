@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Deck, DeckStats } from "../api/types";
 import { enqueue } from "../offline/reviewQueue";
-import { finishOnboarding } from "../onboarding/state";
+import { finishOnboarding, readOnboarding } from "../onboarding/state";
 import { USER, mockApi, renderApp } from "../test/helpers";
 
 const deck = (id: string, name: string, parent: string | null = null, owned = true): Deck => ({
@@ -142,7 +142,16 @@ describe("deck list", () => {
     expect(screen.getByRole("link", { name: "Anatomy" })).toHaveAttribute("href", "/decks/l1");
     // Nothing of their own to nest under, and no detour into the setup.
     expect(screen.queryByLabelText("Inside")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Getting started" })).toBeNull();
+    // The setup would open by itself within moments (as it does with no decks at all); it never does.
+    await expect(screen.findByRole("heading", { name: "Getting started" }, { timeout: 500 })).rejects.toThrow();
+    expect(screen.getByRole("heading", { name: "Decks", level: 1 })).toBeInTheDocument();
+    expect(readOnboarding(USER.id)).toBeNull();
+  });
+
+  it("opens the guided setup by itself when there is nothing to study at all", async () => {
+    mockApi({ ...me, "GET /decks": { body: [] } });
+    renderApp("/");
+    expect(await screen.findByRole("heading", { name: "Getting started" })).toBeInTheDocument();
   });
 
   it("shows a load failure", async () => {
