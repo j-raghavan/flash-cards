@@ -2,17 +2,21 @@
 // The logo mark: two stacked cards on the brand gradient. Decorative only; the
 // product name always sits next to it as text.
 
+import { useId } from "react";
+
 export function BrandMark({ size = 28 }: { size?: number }) {
+  // A unique gradient id per instance; useId's punctuation is not safe in url(#...).
+  const fill = `brand-mark-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
     <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
       <defs>
-        <linearGradient id="brand-mark-fill" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={fill} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#06b6d4" />
           <stop offset="0.55" stopColor="#10b981" />
           <stop offset="1" stopColor="#84cc16" />
         </linearGradient>
       </defs>
-      <rect width="32" height="32" rx="9" fill="url(#brand-mark-fill)" />
+      <rect width="32" height="32" rx="9" fill={`url(#${fill})`} />
       <rect
         x="10"
         y="7"

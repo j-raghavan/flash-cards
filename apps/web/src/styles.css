@@ -35,8 +35,12 @@
   --highlight: #f59e0b;
   --danger: #c62828;
   --danger-soft: #fee2e2;
+  /* Filled danger buttons: white text stays above 4.5:1 in both modes. */
+  --danger-solid: #b91c1c;
   --mark: #fef3c7;
-  --focus: #0ea5e9;
+  --focus: #0369a1;
+  /* The sticky header's height, so focused and anchored content clears it. */
+  --header-h: 64px;
   --brand-gradient: linear-gradient(135deg, #06b6d4 0%, #10b981 55%, #84cc16 100%);
   --button-gradient: linear-gradient(135deg, #0e7490 0%, #0f766e 50%, #047857 100%);
   --glow-1: rgb(16 185 129 / 16%);
@@ -87,6 +91,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--header-h) + 16px);
 }
 
 body {
@@ -94,7 +99,6 @@ body {
   min-height: 100vh;
   color: var(--text);
   font: 16px/1.6 var(--sans);
-  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   background:
     radial-gradient(900px 420px at 8% -8%, var(--glow-1), transparent 70%),
@@ -110,6 +114,11 @@ main {
 
 main:focus {
   outline: none;
+}
+
+/* Pages are wide for tables and tiles; running text keeps a readable measure. */
+main :where(p, .lead) {
+  max-width: 75ch;
 }
 
 h1 {
@@ -198,6 +207,10 @@ a:hover {
     color 0.15s ease;
 }
 
+.site-header nav a:focus-visible {
+  outline-offset: -2px;
+}
+
 .site-header nav a:hover {
   color: var(--text);
   background: var(--surface-2);
@@ -246,6 +259,10 @@ a:hover {
 }
 
 @media (max-width: 720px) {
+  :root {
+    --header-h: 104px;
+  }
+
   .site-header {
     flex-wrap: wrap;
     gap: 10px 12px;
@@ -353,7 +370,9 @@ textarea:hover {
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: none;
+  /* Transparent rather than none: forced-colours mode still paints it. */
+  outline: 2px solid transparent;
+  outline-offset: 0;
   border-color: var(--accent);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
 }
@@ -474,8 +493,8 @@ legend {
 }
 
 .button.danger {
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--danger-solid);
+  border-color: var(--danger-solid);
   color: #ffffff;
 }
 
@@ -531,7 +550,8 @@ kbd {
     padding: 48px clamp(32px, 5vw, 72px);
     overflow: hidden;
     color: #ffffff;
-    background: var(--brand-gradient);
+    /* Deep enough that white text passes AA everywhere on it. */
+    background: linear-gradient(135deg, #0e7490 0%, #047857 60%, #3f6212 100%);
     border-radius: 28px;
     box-shadow: var(--shadow-lg);
   }
@@ -582,7 +602,7 @@ kbd {
   max-width: 30em;
   margin: 0;
   font-size: 1.05rem;
-  color: rgb(255 255 255 / 88%);
+  color: #ffffff;
 }
 
 .card-stack {
@@ -649,6 +669,12 @@ kbd {
 
 .demo-rating span:nth-child(3) {
   background: #10b981;
+}
+
+@media (max-width: 1150px) {
+  .demo-card:nth-child(2) {
+    display: none;
+  }
 }
 
 @keyframes float {
@@ -781,6 +807,7 @@ kbd {
 .deck-tile::after {
   content: "\2192";
   position: absolute;
+  pointer-events: none;
   top: 20px;
   right: 22px;
   color: var(--muted);
@@ -795,7 +822,7 @@ kbd {
   transform: translateX(3px);
 }
 
-.deck-tile > a {
+.deck-tree .deck-tile > a {
   font: 700 1.1rem/1.3 var(--display);
   letter-spacing: -0.01em;
   padding: 0;
@@ -809,10 +836,16 @@ kbd {
   border-radius: inherit;
 }
 
+/* Subdeck links sit above the tile's overlay; the gaps between them do not. */
 .deck-tile .deck-tree {
   position: relative;
   z-index: 1;
   font-size: 0.92rem;
+  pointer-events: none;
+}
+
+.deck-tile .deck-tree a {
+  pointer-events: auto;
 }
 
 .deck-avatar {
@@ -1027,43 +1060,71 @@ main:has(.study-card) {
   border-width: 1.5px;
 }
 
+/* --rate colours the tinted buttons' text; --rate-solid fills the suggested one.
+   Both keep AA contrast in light and dark. */
 .ratings .rate-1 {
-  --rate: #dc2626;
+  --rate: #b91c1c;
+  --rate-solid: #b91c1c;
 }
 
 .ratings .rate-2 {
-  --rate: #d97706;
+  --rate: #9a4a07;
+  --rate-solid: #a14b06;
 }
 
 .ratings .rate-3 {
-  --rate: #059669;
+  --rate: #047857;
+  --rate-solid: #047857;
 }
 
 .ratings .rate-4 {
-  --rate: #0284c7;
+  --rate: #0369a1;
+  --rate-solid: #0369a1;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ratings .rate-1 {
+    --rate: #fca5a5;
+  }
+
+  .ratings .rate-2 {
+    --rate: #fcd34d;
+  }
+
+  .ratings .rate-3 {
+    --rate: #6ee7b7;
+  }
+
+  .ratings .rate-4 {
+    --rate: #7dd3fc;
+  }
 }
 
 .ratings .button[class*="rate-"] {
-  color: color-mix(in srgb, var(--rate) 80%, var(--text));
-  background: color-mix(in srgb, var(--rate) 9%, var(--surface));
-  border-color: color-mix(in srgb, var(--rate) 35%, var(--line));
+  color: var(--rate);
+  background: color-mix(in srgb, var(--rate-solid) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--rate-solid) 40%, var(--line));
 }
 
 .ratings .button[class*="rate-"]:hover:not(:disabled) {
-  color: color-mix(in srgb, var(--rate) 85%, var(--text));
-  border-color: var(--rate);
+  color: var(--rate);
+  border-color: var(--rate-solid);
 }
 
 /* The suggested answer stands out without hiding the others. */
 .ratings .button.primary[class*="rate-"] {
   color: #ffffff;
-  background: color-mix(in srgb, var(--rate) 88%, #000000);
+  background: var(--rate-solid);
   border-color: transparent;
-  box-shadow: 0 8px 18px -8px var(--rate);
+  box-shadow: 0 8px 18px -8px var(--rate-solid);
 }
 
 .ratings .button.primary[class*="rate-"]:hover:not(:disabled) {
   color: #ffffff;
+}
+
+.ratings kbd {
+  opacity: 1;
 }
 
 .reveal {
@@ -1682,7 +1743,9 @@ h2:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
     animation: none !important;
   }
@@ -1721,7 +1784,7 @@ h2:focus {
 
 .exam-timer {
   position: sticky;
-  top: 64px;
+  top: calc(var(--header-h) + 8px);
   z-index: 5;
   padding: 6px 12px;
   background: var(--surface);
@@ -1793,4 +1856,12 @@ h2:focus {
   font-size: 0.8rem;
   font-weight: 500;
   opacity: 0.9;
+}
+
+@media (forced-colors: active) {
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid Highlight;
+  }
 }
