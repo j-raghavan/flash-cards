@@ -7,6 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { ApiError, NetworkError, onUnauthorized } from "../api/client";
 import { auth } from "../api/endpoints";
 import type { User } from "../api/types";
+import { appearanceOf, applyAppearance } from "../lib/appearance";
 import { forgetAllJobs } from "../lib/recentJobs";
 import { clearStudyDataCache } from "../offline/apiCache";
 import { flush } from "../offline/reviewQueue";
@@ -127,6 +128,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onUnauthorized(null);
     };
   }, [apply, signedOut]);
+
+  // The page wears the signed-in user's look; signed out, the last one stays.
+  useEffect(() => {
+    if (user !== null) {
+      applyAppearance(appearanceOf(user));
+    }
+  }, [user]);
 
   const value = useMemo(
     () => ({ loading, user, signedIn, refresh, signOut, signedOut }),

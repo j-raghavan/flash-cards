@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* Bright, modern and calm to study in. Light and dark follow the system setting. */
+/* Bright, modern and calm to study in. Light or dark follows the system setting
+   unless the user picks one (data-theme on <html>), and the accent palette is the
+   user's choice too (data-accent). */
 
 /* Self-hosted variable fonts (OFL-1.1), Latin subset only, so no third-party
    requests and nothing extra to cache for offline use. */
@@ -27,11 +29,12 @@
   --text: #0f172a;
   --muted: #586374;
   --line: #e2e8f0;
-  /* Text-safe accent (AA on white) and a softer tint for backgrounds. */
-  --accent: #0f766e;
-  --accent-strong: #115e59;
-  --accent-soft: #ccfbf1;
-  --accent-text: #ffffff;
+  /* Text-safe accent (AA on the page) and a softer tint for backgrounds, from the
+     chosen palette below. */
+  --accent: var(--pal-accent);
+  --accent-strong: var(--pal-accent-strong);
+  --accent-soft: var(--pal-accent-soft);
+  --accent-text: var(--pal-accent-text);
   --highlight: #f59e0b;
   --danger: #c62828;
   --danger-soft: #fee2e2;
@@ -41,10 +44,10 @@
   --focus: #0369a1;
   /* The sticky header's height, so focused and anchored content clears it. */
   --header-h: 64px;
-  --brand-gradient: linear-gradient(135deg, #06b6d4 0%, #10b981 55%, #84cc16 100%);
-  --button-gradient: linear-gradient(135deg, #0e7490 0%, #0f766e 50%, #047857 100%);
-  --glow-1: rgb(16 185 129 / 16%);
-  --glow-2: rgb(6 182 212 / 14%);
+  --brand-gradient: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 55%, var(--brand-3) 100%);
+  --button-gradient: var(--pal-button);
+  --glow-1: var(--pal-glow-1);
+  --glow-2: var(--pal-glow-2);
   --shadow-sm: 0 1px 2px rgb(15 23 42 / 6%), 0 1px 3px rgb(15 23 42 / 4%);
   --shadow: 0 4px 12px rgb(15 23 42 / 6%), 0 1px 3px rgb(15 23 42 / 5%);
   --shadow-lg: 0 18px 40px -12px rgb(15 23 42 / 18%), 0 4px 12px rgb(15 23 42 / 6%);
@@ -59,30 +62,158 @@
   color-scheme: light dark;
 }
 
+/* Accent palettes. Each sets its light (-l) and dark (-d) values once; the light
+   and dark blocks below pick a side. Accent text meets WCAG AA on the page, and
+   the button text meets AA on every stop of its gradient. Teal is the default. */
+:root {
+  --pal-accent-l: #0f766e;
+  --pal-accent-strong-l: #115e59;
+  --pal-accent-soft-l: #ccfbf1;
+  --pal-accent-text-l: #ffffff;
+  --brand-1: #06b6d4;
+  --brand-2: #10b981;
+  --brand-3: #84cc16;
+  --pal-button-l: linear-gradient(135deg, #0e7490 0%, #0f766e 50%, #047857 100%);
+  --pal-glow-1-l: rgb(16 185 129 / 16%);
+  --pal-glow-2-l: rgb(6 182 212 / 14%);
+  --pal-accent-d: #2dd4bf;
+  --pal-accent-strong-d: #5eead4;
+  --pal-accent-soft-d: rgb(45 212 191 / 14%);
+  --pal-accent-text-d: #042f2e;
+  --pal-button-d: linear-gradient(135deg, #22d3ee 0%, #2dd4bf 50%, #34d399 100%);
+  --pal-glow-1-d: rgb(16 185 129 / 12%);
+  --pal-glow-2-d: rgb(6 182 212 / 10%);
+}
+
+:root[data-accent="indigo"] {
+  --pal-accent-l: #4f46e5;
+  --pal-accent-strong-l: #4338ca;
+  --pal-accent-soft-l: #e0e7ff;
+  --pal-accent-text-l: #ffffff;
+  --brand-1: #6366f1;
+  --brand-2: #8b5cf6;
+  --brand-3: #d946ef;
+  --pal-button-l: linear-gradient(135deg, #4f46e5 0%, #6d28d9 50%, #7c3aed 100%);
+  --pal-glow-1-l: rgb(99 102 241 / 16%);
+  --pal-glow-2-l: rgb(168 85 247 / 14%);
+  --pal-accent-d: #a5b4fc;
+  --pal-accent-strong-d: #c7d2fe;
+  --pal-accent-soft-d: rgb(129 140 248 / 16%);
+  --pal-accent-text-d: #1e1b4b;
+  --pal-button-d: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #c084fc 100%);
+  --pal-glow-1-d: rgb(99 102 241 / 14%);
+  --pal-glow-2-d: rgb(168 85 247 / 10%);
+}
+
+:root[data-accent="rose"] {
+  --pal-accent-l: #be123c;
+  --pal-accent-strong-l: #9f1239;
+  --pal-accent-soft-l: #ffe4e6;
+  --pal-accent-text-l: #ffffff;
+  --brand-1: #f43f5e;
+  --brand-2: #fb7185;
+  --brand-3: #fb923c;
+  --pal-button-l: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%);
+  --pal-glow-1-l: rgb(244 63 94 / 14%);
+  --pal-glow-2-l: rgb(251 146 60 / 12%);
+  --pal-accent-d: #fb7185;
+  --pal-accent-strong-d: #fda4af;
+  --pal-accent-soft-d: rgb(251 113 133 / 15%);
+  --pal-accent-text-d: #4c0519;
+  --pal-button-d: linear-gradient(135deg, #fb7185 0%, #f472b6 50%, #fb923c 100%);
+  --pal-glow-1-d: rgb(244 63 94 / 12%);
+  --pal-glow-2-d: rgb(251 146 60 / 10%);
+}
+
+:root[data-accent="amber"] {
+  --pal-accent-l: #b45309;
+  --pal-accent-strong-l: #92400e;
+  --pal-accent-soft-l: #fef3c7;
+  --pal-accent-text-l: #ffffff;
+  --brand-1: #f59e0b;
+  --brand-2: #f97316;
+  --brand-3: #ef4444;
+  --pal-button-l: linear-gradient(135deg, #b45309 0%, #c2410c 50%, #9a3412 100%);
+  --pal-glow-1-l: rgb(245 158 11 / 16%);
+  --pal-glow-2-l: rgb(249 115 22 / 12%);
+  --pal-accent-d: #fbbf24;
+  --pal-accent-strong-d: #fcd34d;
+  --pal-accent-soft-d: rgb(251 191 36 / 14%);
+  --pal-accent-text-d: #451a03;
+  --pal-button-d: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #fb923c 100%);
+  --pal-glow-1-d: rgb(245 158 11 / 14%);
+  --pal-glow-2-d: rgb(249 115 22 / 10%);
+}
+
+/* Light: the default, and what a user who picks Light always gets. */
+:root {
+  --pal-accent: var(--pal-accent-l);
+  --pal-accent-strong: var(--pal-accent-strong-l);
+  --pal-accent-soft: var(--pal-accent-soft-l);
+  --pal-accent-text: var(--pal-accent-text-l);
+  --pal-button: var(--pal-button-l);
+  --pal-glow-1: var(--pal-glow-1-l);
+  --pal-glow-2: var(--pal-glow-2-l);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Dark: when the system asks for it and the user has not picked Light, or when
+   the user picks Dark. The two rules hold the same values. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0b1120;
     --surface: #111a2b;
     --surface-2: #17223a;
     --text: #e6ebf2;
     --muted: #9aa7ba;
     --line: #243149;
-    --accent: #2dd4bf;
-    --accent-strong: #5eead4;
-    --accent-soft: rgb(45 212 191 / 14%);
-    --accent-text: #042f2e;
     --highlight: #fbbf24;
     --danger: #f87171;
     --danger-soft: rgb(248 113 113 / 14%);
     --mark: #4a3a12;
     --focus: #7dd3fc;
-    --button-gradient: linear-gradient(135deg, #22d3ee 0%, #2dd4bf 50%, #34d399 100%);
-    --glow-1: rgb(16 185 129 / 12%);
-    --glow-2: rgb(6 182 212 / 10%);
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
     --shadow: 0 6px 16px rgb(0 0 0 / 28%);
     --shadow-lg: 0 24px 48px -16px rgb(0 0 0 / 55%);
+    --pal-accent: var(--pal-accent-d);
+    --pal-accent-strong: var(--pal-accent-strong-d);
+    --pal-accent-soft: var(--pal-accent-soft-d);
+    --pal-accent-text: var(--pal-accent-text-d);
+    --pal-button: var(--pal-button-d);
+    --pal-glow-1: var(--pal-glow-1-d);
+    --pal-glow-2: var(--pal-glow-2-d);
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1120;
+  --surface: #111a2b;
+  --surface-2: #17223a;
+  --text: #e6ebf2;
+  --muted: #9aa7ba;
+  --line: #243149;
+  --highlight: #fbbf24;
+  --danger: #f87171;
+  --danger-soft: rgb(248 113 113 / 14%);
+  --mark: #4a3a12;
+  --focus: #7dd3fc;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow: 0 6px 16px rgb(0 0 0 / 28%);
+  --shadow-lg: 0 24px 48px -16px rgb(0 0 0 / 55%);
+  --pal-accent: var(--pal-accent-d);
+  --pal-accent-strong: var(--pal-accent-strong-d);
+  --pal-accent-soft: var(--pal-accent-soft-d);
+  --pal-accent-text: var(--pal-accent-text-d);
+  --pal-button: var(--pal-button-d);
+  --pal-glow-1: var(--pal-glow-1-d);
+  --pal-glow-2: var(--pal-glow-2-d);
 }
 
 * {
@@ -255,7 +386,7 @@ a:hover {
 
 .brand-mark {
   flex: none;
-  filter: drop-shadow(0 4px 10px rgb(16 185 129 / 30%));
+  filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--accent) 30%, transparent));
 }
 
 @media (max-width: 720px) {
@@ -439,6 +570,50 @@ legend {
   background: var(--accent-soft);
   color: var(--accent-strong);
   font-weight: 600;
+}
+
+/* The colour choices show their palette. */
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.swatch-teal {
+  background: linear-gradient(135deg, #06b6d4, #10b981);
+}
+
+.swatch-indigo {
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+}
+
+.swatch-rose {
+  background: linear-gradient(135deg, #f43f5e, #fb923c);
+}
+
+.swatch-amber {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+}
+
+/* A round, icon-only header button (the light and dark switch). */
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .button {
@@ -630,7 +805,7 @@ kbd {
   font: 700 0.75rem var(--display);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #0f766e;
+  color: var(--accent);
 }
 
 .demo-card:nth-child(1) {
@@ -668,7 +843,7 @@ kbd {
 }
 
 .demo-rating span:nth-child(3) {
-  background: #10b981;
+  background: var(--accent);
 }
 
 @media (max-width: 1150px) {
@@ -1097,21 +1272,37 @@ main:has(.study-card) {
 }
 
 @media (prefers-color-scheme: dark) {
-  .ratings .rate-1 {
+  :root:not([data-theme="light"]) .ratings .rate-1 {
     --rate: #fca5a5;
   }
 
-  .ratings .rate-2 {
+  :root:not([data-theme="light"]) .ratings .rate-2 {
     --rate: #fcd34d;
   }
 
-  .ratings .rate-3 {
+  :root:not([data-theme="light"]) .ratings .rate-3 {
     --rate: #6ee7b7;
   }
 
-  .ratings .rate-4 {
+  :root:not([data-theme="light"]) .ratings .rate-4 {
     --rate: #7dd3fc;
   }
+}
+
+:root[data-theme="dark"] .ratings .rate-1 {
+  --rate: #fca5a5;
+}
+
+:root[data-theme="dark"] .ratings .rate-2 {
+  --rate: #fcd34d;
+}
+
+:root[data-theme="dark"] .ratings .rate-3 {
+  --rate: #6ee7b7;
+}
+
+:root[data-theme="dark"] .ratings .rate-4 {
+  --rate: #7dd3fc;
 }
 
 .ratings .button[class*="rate-"] {

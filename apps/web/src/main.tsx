@@ -8,8 +8,11 @@ import { BrowserRouter } from "react-router";
 import { registerSW } from "virtual:pwa-register";
 
 import { App } from "./App";
+import { restoreAppearance } from "./lib/appearance";
 
 registerSW({ immediate: true });
+// Paint in the last look used here before anything renders.
+restoreAppearance();
 
 const root = document.getElementById("root");
 if (root !== null) {

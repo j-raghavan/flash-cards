@@ -26,6 +26,7 @@ import { forgetOnboarding, startOnboarding } from "../onboarding/state";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
+import { AppearancePanel } from "./AppearancePanel";
 import { TwoFactorPanel } from "./TwoFactorPanel";
 
 /** How long the server waits before it sends another confirmation link. */
@@ -509,6 +510,7 @@ export function AccountPage() {
   return (
     <section>
       <h1>Account</h1>
+      <AppearancePanel />
       <EmailPanel user={user} />
       <SessionsPanel />
       <TwoFactorPanel email={user.email} />

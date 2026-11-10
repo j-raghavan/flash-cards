@@ -5,9 +5,11 @@ import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react
 import { describeError } from "../api/client";
 import { auth } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
+import { useAppearance } from "../lib/useAppearance";
 import { useOfflineSync } from "../offline/useOfflineSync";
 import { BrandMark } from "./BrandMark";
 import { SiteFooter } from "./SiteFooter";
+import { ThemeToggle } from "./ThemeToggle";
 import { ErrorText, Loading } from "./ui";
 
 function VerifyBanner() {
@@ -47,6 +49,7 @@ export function Layout() {
   const navigate = useNavigate();
   const sync = useOfflineSync(user?.id ?? null);
   const [error, setError] = useState<string | null>(null);
+  const look = useAppearance();
 
   if (loading) {
     return <Loading />;
@@ -78,6 +81,7 @@ export function Layout() {
           <NavLink to="/account">Account</NavLink>
           {user.role === "admin" ? <NavLink to="/admin">Admin</NavLink> : null}
         </nav>
+        <ThemeToggle choice={look} />
         <button
           type="button"
           className="link-button"
@@ -120,7 +124,7 @@ export function Layout() {
       ) : null}
       {user.email_verified ? null : <VerifyBanner />}
       <main id="main" tabIndex={-1}>
-        <ErrorText message={error} />
+        <ErrorText message={error ?? look.error} />
         <Outlet />
       </main>
       <SiteFooter />
