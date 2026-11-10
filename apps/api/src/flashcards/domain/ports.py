@@ -103,6 +103,13 @@ class UserRepository(Protocol):
         """
         ...
 
+    async def list_active_admin_ids(self) -> list[str]:
+        """The ids of every active admin, in id order, without locking anything.
+
+        Their decks form the shared library (ADR 0024), read on every request.
+        """
+        ...
+
     async def list_all(self) -> list[User]:
         """Every user, oldest first (admin user management)."""
         ...
@@ -195,6 +202,10 @@ class DeckRepository(Protocol):
 
     async def list_for_owner(self, owner_id: str) -> list[Deck]:
         """Return the owner's decks, oldest first."""
+        ...
+
+    async def list_for_owners(self, owner_ids: Sequence[str]) -> list[Deck]:
+        """The decks of any of these owners, oldest first (created_at, then id)."""
         ...
 
     async def update(self, deck: Deck) -> None:

@@ -331,6 +331,39 @@ async def test_deck_sql_crud(engine: AsyncEngine) -> None:
         assert await repo.list_for_owner("bob") == []
 
 
+async def test_sql_library_reads(engine: AsyncEngine) -> None:
+    """Active admin ids and decks of several owners, as the library reads them."""
+    from datetime import timedelta
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        users = SqlUserRepository(s)
+        for uid, role in (("b-admin", Role.ADMIN), ("a-admin", Role.ADMIN), ("m", Role.MEMBER)):
+            await users.add(
+                User(id=uid, email=f"{uid}@e.com", password_hash="h", role=role,
+                     created_at=_now())
+            )
+        await users.add(
+            User(id="c-admin", email="c@e.com", password_hash="h", role=Role.ADMIN,
+                 created_at=_now(), suspended_at=_now())
+        )
+        start = _now()
+        decks = SqlDeckRepository(s)
+        for deck_id, owner, minutes in (
+            ("d3", "m", 2), ("d2", "a-admin", 1), ("d1", "b-admin", 1), ("d0", "c-admin", 0)
+        ):
+            await decks.add(
+                Deck(id=deck_id, owner_id=owner, name=deck_id, parent_id=None,
+                     created_at=start + timedelta(minutes=minutes))
+            )
+    async with sm() as s:
+        assert await SqlUserRepository(s).list_active_admin_ids() == ["a-admin", "b-admin"]
+        decks = SqlDeckRepository(s)
+        found = await decks.list_for_owners(["a-admin", "b-admin", "m"])
+        assert [d.id for d in found] == ["d1", "d2", "d3"]  # oldest first, then by id
+        assert await decks.list_for_owners([]) == []
+
+
 async def test_note_and_card_sql_roundtrip(engine: AsyncEngine) -> None:
     from flashcards.domain.notes import Card, Note, NoteType
 

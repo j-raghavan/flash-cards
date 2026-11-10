@@ -127,6 +127,9 @@ class InMemoryUserRepository:
     async def lock_active_admins(self) -> list[User]:
         return sorted((u for u in self._by_id.values() if u.is_active_admin), key=lambda u: u.id)
 
+    async def list_active_admin_ids(self) -> list[str]:
+        return [user.id for user in await self.lock_active_admins()]  # nothing to lock here
+
     async def list_all(self) -> list[User]:
         return sorted(self._by_id.values(), key=lambda u: (u.created_at, u.id))
 
@@ -202,6 +205,11 @@ class InMemoryDeckRepository:
     async def list_for_owner(self, owner_id: str) -> list[Deck]:
         owned = [d for d in self._by_id.values() if d.owner_id == owner_id]
         return sorted(owned, key=lambda d: d.created_at)
+
+    async def list_for_owners(self, owner_ids: Sequence[str]) -> list[Deck]:
+        wanted = set(owner_ids)
+        found = [d for d in self._by_id.values() if d.owner_id in wanted]
+        return sorted(found, key=lambda d: (d.created_at, d.id))
 
     async def update(self, deck: Deck) -> None:
         self._by_id[deck.id] = deck

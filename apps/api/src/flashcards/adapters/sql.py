@@ -228,6 +228,10 @@ class SqlInviteRepository:
         return sorted(revoked)
 
 
+# An active admin: the admin role and not suspended (User.is_active_admin).
+_ACTIVE_ADMIN = (UserRow.role == Role.ADMIN.value, UserRow.suspended_at.is_(None))
+
+
 class SqlUserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -258,12 +262,15 @@ class SqlUserRepository:
 
     async def lock_active_admins(self) -> list[User]:
         rows = await self._session.scalars(
-            select(UserRow)
-            .where(UserRow.role == Role.ADMIN.value, UserRow.suspended_at.is_(None))
-            .order_by(UserRow.id)
-            .with_for_update()
+            select(UserRow).where(*_ACTIVE_ADMIN).order_by(UserRow.id).with_for_update()
         )
         return [user_from_row(row) for row in rows]
+
+    async def list_active_admin_ids(self) -> list[str]:
+        ids = await self._session.scalars(
+            select(UserRow.id).where(*_ACTIVE_ADMIN).order_by(UserRow.id)
+        )
+        return list(ids)
 
     async def list_all(self) -> list[User]:
         rows = await self._session.scalars(
@@ -382,6 +389,14 @@ class SqlDeckRepository:
     async def list_for_owner(self, owner_id: str) -> list[Deck]:
         rows = await self._session.scalars(
             select(DeckRow).where(DeckRow.owner_id == owner_id).order_by(DeckRow.created_at)
+        )
+        return [deck_from_row(row) for row in rows]
+
+    async def list_for_owners(self, owner_ids: Sequence[str]) -> list[Deck]:
+        rows = await self._session.scalars(
+            select(DeckRow)
+            .where(DeckRow.owner_id.in_(list(owner_ids)))
+            .order_by(DeckRow.created_at, DeckRow.id)
         )
         return [deck_from_row(row) for row in rows]
 
