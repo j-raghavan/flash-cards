@@ -126,6 +126,25 @@ Generating a deck from a YouTube link is off by default: the link answers that n
 
 YouTube refuses many data-centre IP ranges and changes its pages from time to time, so retrieval is best-effort; refused fetches are logged as `no YouTube transcript for <id>: <reason>` and the user is offered the paste box. Keep the image current so the transcript library keeps up with YouTube.
 
+### Home network over plain HTTP
+
+For an instance used only inside one home or classroom network, the site can be served over plain HTTP to the local network, with nothing installed on the devices that use it:
+
+```sh
+FLASHCARDS_HTTP_BIND=0.0.0.0
+FLASHCARDS_HTTP_PORT=8000
+FLASHCARDS_SESSION_COOKIE_SECURE=false
+FLASHCARDS_PUBLIC_BASE_URL=http://<host address>:8000
+```
+
+People then open `http://<host address>:8000`. Without HTTPS, browsers turn off some features:
+
+- **Offline:** offline study and installing the app to the home screen are unavailable (service workers need HTTPS).
+- **Passkeys:** passkeys for two-step sign-in do not work; authenticator apps still do.
+- **Traffic:** passwords and cards cross the network unencrypted. Use it only on a network you trust, and never forward the port from the internet.
+
+Moving to HTTPS later (a reverse proxy with a certificate, or Tailscale) changes only these settings; the data is unaffected.
+
 ## The web app and routing
 
 The site is one origin, because the API sends no CORS headers and its session cookie is `SameSite=Lax`. The `web` service (`apps/web/Caddyfile`) routes requests as follows:

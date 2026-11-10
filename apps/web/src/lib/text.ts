@@ -34,6 +34,19 @@ export function safeNextPath(next: string | null): string {
   return next;
 }
 
+/**
+ * A random version 4 UUID. crypto.randomUUID exists only in secure contexts
+ * (HTTPS or localhost); on a plain-HTTP home server the key is built from
+ * crypto.getRandomValues, which every context has.
+ */
 export function newIdempotencyKey(): string {
-  return crypto.randomUUID();
+  if (typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  // Version 4 in the 13th digit; the RFC 4122 variant (8, 9, a or b) in the 17th.
+  const variant = ((Number.parseInt(hex.charAt(16), 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20)}`;
 }

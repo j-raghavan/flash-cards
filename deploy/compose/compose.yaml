@@ -143,9 +143,11 @@ services:
       api:
         condition: service_healthy
     ports:
-      # Loopback only, plain HTTP. Put an HTTPS reverse proxy in front (the
-      # proxy profile below, or one already running on the host).
-      - "127.0.0.1:${FLASHCARDS_HTTP_PORT:-8000}:8080"
+      # Plain HTTP, loopback only by default: put an HTTPS reverse proxy in front
+      # (the proxy profile below, or one already on the host). FLASHCARDS_HTTP_BIND
+      # =0.0.0.0 serves the local network directly (runbook: "Home network over
+      # plain HTTP").
+      - "${FLASHCARDS_HTTP_BIND:-127.0.0.1}:${FLASHCARDS_HTTP_PORT:-8000}:8080"
     networks: [frontend]
 
   # Optional HTTPS front end: docker compose --profile proxy up -d
