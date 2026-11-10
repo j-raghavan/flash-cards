@@ -84,3 +84,29 @@ def test_delete_account_revokes_access(member: TestClient) -> None:
 
 def test_delete_requires_auth(client: TestClient) -> None:
     assert client.delete("/account").status_code == 401
+
+
+def test_export_and_deletion_cover_progress_on_library_cards(
+    member: TestClient, admin_client: TestClient
+) -> None:
+    deck_id = admin_client.post("/decks", json={"name": "Library"}).json()["id"]
+    [card] = admin_client.post(
+        f"/decks/{deck_id}/notes",
+        json={"note_type": "basic", "fields": {"front": "Q", "back": "A"}},
+    ).json()
+    admin_client.post(f"/cards/{card['id']}/review", json={"rating": 3})
+    member.post(f"/cards/{card['id']}/review", json={"rating": 1})
+
+    body = member.get("/account/export").json()
+    # The member's progress on the admin's card, by card id; the card stays the admin's.
+    assert [s["card_id"] for s in body["schedules"]] == [card["id"]]
+    assert [r["card_id"] for r in body["review_logs"]] == [card["id"]]
+    assert body["decks"] == [] and body["cards"] == []
+
+    assert member.delete("/account").status_code == 204
+
+    admin_export = admin_client.get("/account/export").json()
+    assert [s["card_id"] for s in admin_export["schedules"]] == [card["id"]]
+    assert [r["rating"] for r in admin_export["review_logs"]] == [3]
+    stats = admin_client.get(f"/decks/{deck_id}/stats").json()
+    assert stats["new"] == 0 and stats["total"] == 1

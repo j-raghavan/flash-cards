@@ -938,3 +938,49 @@ async def test_sql_apkg_round_trip_keeps_history_and_schedule(engine: AsyncEngin
         assert [log.rating for log in logs] == [Rating.GOOD]
         bob_decks = await SqlDeckRepository(s).list_for_owner("bob")
         assert sorted(deck.name for deck in bob_decks) == ["Spanish", "Verbs"]
+
+
+async def test_sql_account_export_and_delete_cover_library_progress(engine: AsyncEngine) -> None:
+    """A member's progress on an admin's card is exported and erased with the member,
+    and the admin's own progress on the card stays (ADR 0024)."""
+    from flashcards.domain.notes import NoteType
+    from flashcards.domain.scheduling import Rating
+
+    sm = create_sessionmaker(engine)
+    hasher = Argon2PasswordHasher()
+    admin = User(
+        id="admin", email="admin@e.com", password_hash="h", role=Role.ADMIN, created_at=_now()
+    )
+    member = User(
+        id="member", email="member@e.com", password_hash="h", role=Role.MEMBER, created_at=_now()
+    )
+    async with sm() as s, s.begin():
+        await SqlUserRepository(s).add(admin)
+        await SqlUserRepository(s).add(member)
+        services = build_services(_sql_repositories(s, hasher))
+        deck = await services.decks.create(owner_id="admin", name="Library")
+        _note, (card,) = await services.notes.create_note(
+            owner_id="admin",
+            deck_id=deck.id,
+            note_type=NoteType.BASIC,
+            fields={"front": "Q", "back": "A"},
+        )
+        await services.reviews.submit(owner_id="admin", card_id=card.id, rating=Rating.GOOD)
+        await services.reviews.submit(owner_id="member", card_id=card.id, rating=Rating.AGAIN)
+    async with sm() as s, s.begin():
+        exported = await build_services(_sql_repositories(s, hasher)).account.export(user=member)
+    assert [x.card_id for x in exported.schedules] == [card.id]
+    assert [log.card_id for log in exported.review_logs] == [card.id]
+    assert exported.cards == ()
+
+    async with sm() as s, s.begin():
+        await build_services(_sql_repositories(s, hasher)).account.delete(user=member)
+    async with sm() as s:
+        schedules = SqlScheduleRepository(s)
+        assert await schedules.list_for_user("member") == []
+        assert await SqlReviewLogRepository(s).list_for_owner("member") == []
+        admins_row = await schedules.get("admin", card.id)
+        assert admins_row is not None and admins_row.last_reviewed_at is not None
+        assert [log.rating for log in await SqlReviewLogRepository(s).list_for_owner("admin")] == [
+            Rating.GOOD
+        ]
