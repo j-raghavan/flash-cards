@@ -137,7 +137,7 @@ async def _card(access: ReadAccess, user_id: str, owner: str) -> object:
 
 
 async def _note(access: ReadAccess, user_id: str, owner: str) -> object:
-    return await access.note(user_id, f"n-{owner}")
+    return await access.note_cards(user_id, f"n-{owner}")
 
 
 async def _note_type(access: ReadAccess, user_id: str, owner: str) -> object:
@@ -263,6 +263,27 @@ async def test_decks_are_the_callers_and_the_librarys_oldest_first(world: _World
     assert [deck.id for deck in await world.access.decks(MEMBER)] == [
         f"d-{ADMIN}", "d-a-tie", f"d-{MEMBER}"
     ]
+
+
+async def test_a_card_suspended_by_its_owner_is_hidden_from_everyone_else(
+    world: _World,
+) -> None:
+    card = await world.cards.get(f"c-{ADMIN}")
+    assert card is not None
+    await world.cards.update(card.suspended(NOW))
+
+    for read in (_card, _render):
+        with pytest.raises(CardNotFound):
+            await read(world.access, MEMBER, ADMIN)
+    with pytest.raises(CardNotFound):
+        await world.access.study_card(MEMBER, f"c-{ADMIN}")
+    assert await world.access.deck_cards(MEMBER, f"d-{ADMIN}") == []
+    _note, cards = await world.access.note_cards(MEMBER, f"n-{ADMIN}")
+    assert cards == []
+    # The owner keeps seeing and studying it.
+    assert (await world.access.card(ADMIN, f"c-{ADMIN}")).is_suspended
+    assert (await world.access.study_card(ADMIN, f"c-{ADMIN}")).is_suspended
+    assert len(await world.access.deck_cards(ADMIN, f"d-{ADMIN}")) == 1
 
 
 async def test_deck_cards_lists_a_library_decks_cards(world: _World) -> None:

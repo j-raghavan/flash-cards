@@ -2,8 +2,9 @@
 """Read access to study material, the shared library included (ADR 0024).
 
 This is the one place the readable rule lives: a caller may read what they own
-and what any active admin owns. Writes never come through here; they keep the
-owner checks of their own services, so a library deck stays read-only to
+and what any active admin owns, except a card its owner has suspended, which is
+hidden from everyone but the owner. Writes never come through here; they keep
+the owner checks of their own services, so a library deck stays read-only to
 everyone but its owner.
 
 Nothing is cached: the active admins are read on every call, so demoting,
@@ -60,9 +61,11 @@ class ReadAccess:
         return await self._deck_in(await self.scope(user_id), deck_id)
 
     async def deck_cards(self, user_id: str, deck_id: str) -> list[Card]:
-        """A readable deck's cards, oldest first; raises DeckNotFound."""
-        deck = await self.deck(user_id, deck_id)
-        return await self._cards.list_for_deck(deck.id)
+        """A readable deck's visible cards, oldest first; raises DeckNotFound."""
+        scope = await self.scope(user_id)
+        deck = await self._deck_in(scope, deck_id)
+        cards = await self._cards.list_for_deck(deck.id)
+        return [card for card in cards if _visible(scope, card)]
 
     async def card(self, user_id: str, card_id: str) -> Card:
         return await self._card_in(await self.scope(user_id), card_id)
@@ -72,12 +75,16 @@ class ReadAccess:
         review about to write rows that reference it; raises CardNotFound."""
         scope = await self.scope(user_id)
         card = await self._cards.share_lock(card_id)
-        if card is None or not scope.can_read(card.owner_id):
+        if card is None or not _visible(scope, card):
             raise CardNotFound(card_id)
         return card
 
-    async def note(self, user_id: str, note_id: str) -> Note:
-        return await self._note_in(await self.scope(user_id), note_id)
+    async def note_cards(self, user_id: str, note_id: str) -> tuple[Note, list[Card]]:
+        """A readable note and its visible cards, by ordinal; raises NoteNotFound."""
+        scope = await self.scope(user_id)
+        note = await self._note_in(scope, note_id)
+        cards = await self._cards.list_for_notes([note.id])
+        return note, [card for card in cards if _visible(scope, card)]
 
     async def note_type(self, user_id: str, note_type_id: str) -> CustomNoteType:
         return await self._note_type_in(await self.scope(user_id), note_type_id)
@@ -109,7 +116,7 @@ class ReadAccess:
 
     async def _card_in(self, scope: ReadScope, card_id: str) -> Card:
         card = await self._cards.get(card_id)
-        if card is None or not scope.can_read(card.owner_id):
+        if card is None or not _visible(scope, card):
             raise CardNotFound(card_id)
         return card
 
@@ -124,3 +131,8 @@ class ReadAccess:
         if note_type is None or not scope.can_read(note_type.owner_id):
             raise NoteTypeNotFound(note_type_id)
         return note_type
+
+
+def _visible(scope: ReadScope, card: Card) -> bool:
+    """Readable, and not suspended by an owner other than the caller (ADR 0024)."""
+    return scope.owns(card.owner_id) or (scope.can_read(card.owner_id) and not card.is_suspended)

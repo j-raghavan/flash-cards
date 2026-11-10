@@ -143,7 +143,9 @@ async def get_card(
     container: Container = Depends(get_container, scope="function"),
 ) -> CardDetailOut:
     card, note, template = await container.read_access.render_card(caller.user.id, card_id)
-    return CardDetailOut.from_card_and_note(card.seen_by(caller.user.id), note, template)
+    return CardDetailOut.from_card_and_note(
+        card.seen_by(caller.user.id), note, template, owned=card.owner_id == caller.user.id
+    )
 
 
 @router.post("/cards/{card_id}/suspend", response_model=CardOut)
@@ -174,9 +176,12 @@ async def get_note(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> NoteOut:
-    note = await container.read_access.note(caller.user.id, note_id)
-    cards = await container.notes.cards_of(note)
-    return NoteOut.from_note(note, [card.seen_by(caller.user.id) for card in cards])
+    note, cards = await container.read_access.note_cards(caller.user.id, note_id)
+    return NoteOut.from_note(
+        note,
+        [card.seen_by(caller.user.id) for card in cards],
+        owned=note.owner_id == caller.user.id,
+    )
 
 
 @router.patch("/notes/{note_id}", response_model=NoteOut)
@@ -193,7 +198,7 @@ async def update_note(
         tags=body.tags,
         occlusion=body.occlusion.to_domain() if body.occlusion is not None else None,
     )
-    return NoteOut.from_note(note, cards)
+    return NoteOut.from_note(note, cards, owned=True)  # only the owner edits a note
 
 
 @router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)

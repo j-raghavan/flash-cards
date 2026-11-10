@@ -174,13 +174,48 @@ async def test_the_admins_bury_hides_a_card_only_from_the_admin(rig: _Rig) -> No
     assert (admin_stats.due, member_stats.due) == (1, 2)
 
 
-async def test_the_admins_suspension_hides_a_card_from_everyone(rig: _Rig) -> None:
+async def test_the_admins_suspension_hides_a_card_from_everyone_else(rig: _Rig) -> None:
     first, second = rig.card_ids
     await rig.notes.suspend_card(owner_id=ADMIN, card_id=first)
 
     assert await rig.queue(MEMBER) == [second]
     stats = await rig.reviews.deck_stats(owner_id=MEMBER, deck_id=rig.deck_id)
-    assert (stats.suspended, stats.due) == (1, 1)
+    assert (stats.total, stats.suspended, stats.due) == (1, 0, 1)
+    with pytest.raises(CardNotFound):
+        await rig.answer(MEMBER, first)
+    # The admin still sees the card as suspended in their own stats.
+    admin_stats = await rig.reviews.deck_stats(owner_id=ADMIN, deck_id=rig.deck_id)
+    assert (admin_stats.total, admin_stats.suspended) == (2, 1)
+
+
+async def test_undo_needs_the_card_to_be_readable_still(rig: _Rig) -> None:
+    first, second = rig.card_ids
+    suspended_answer = await rig.answer(MEMBER, first)
+    await rig.notes.suspend_card(owner_id=ADMIN, card_id=first)
+    before = await rig.schedules.get(MEMBER, first)
+
+    with pytest.raises(CardNotFound):
+        await rig.reviews.undo(owner_id=MEMBER, review_id=suspended_answer)
+    assert await rig.schedules.get(MEMBER, first) == before
+    assert [log.id for log in await rig.logs.list_for_owner(MEMBER)] == [suspended_answer]
+
+    # The owner's own suspended card is still theirs to undo.
+    own = await rig.answer(ADMIN, second)
+    await rig.notes.suspend_card(owner_id=ADMIN, card_id=second)
+    assert (await rig.reviews.undo(owner_id=ADMIN, review_id=own)).card_id == second
+
+
+@pytest.mark.parametrize("how", ["demote", "suspend"])
+async def test_undo_after_the_admin_leaves_is_not_found(rig: _Rig, how: str) -> None:
+    card = rig.card_ids[0]
+    review_id = await rig.answer(MEMBER, card)
+    before = await rig.schedules.get(MEMBER, card)
+    await rig.leave_library(how)
+
+    with pytest.raises(CardNotFound):
+        await rig.reviews.undo(owner_id=MEMBER, review_id=review_id)
+    assert await rig.schedules.get(MEMBER, card) == before
+    assert [log.id for log in await rig.logs.list_for_owner(MEMBER)] == [review_id]
 
 
 async def test_member_stats_and_forecast_cover_library_cards(rig: _Rig) -> None:

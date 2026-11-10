@@ -139,6 +139,10 @@ class ReviewService:
         log = await self._logs.get(review_id)
         if log is None or log.owner_id != owner_id:
             raise ReviewNotFound(review_id)
+        # The card must still be readable: a library deck whose admin is no longer
+        # active, or a card its owner suspended, answers CardNotFound and nothing
+        # changes. The row stays locked against deletion while the schedule moves.
+        await self._access.study_card(owner_id, log.card_id)
         last = await self._logs.last_answer(owner_id)
         if last is None or last.review_id != log.id or last.undone:
             raise UndoRejected("Only the most recent answer can be undone.")

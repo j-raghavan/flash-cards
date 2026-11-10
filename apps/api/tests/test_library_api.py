@@ -157,10 +157,30 @@ def test_bury_and_flag_are_the_owners_own_markers(library: Library) -> None:
     assert (in_note["flag"], in_note["buried_until"]) == (0, None)
 
 
-def test_suspension_is_shown_to_everyone(library: Library) -> None:
-    library.admin.post(f"/cards/{library.basic_card}/suspend")
+def test_a_suspended_library_card_is_hidden_from_members(library: Library) -> None:
+    admin, member, card = library.admin, library.member, library.basic_card
+    admin.post(f"/cards/{card}/suspend")
 
-    assert library.member.get(f"/cards/{library.basic_card}").json()["suspended"] is True
+    assert member.get(f"/cards/{card}").status_code == 404
+    assert card not in {c["id"] for c in member.get(f"/decks/{library.deck_id}/cards").json()}
+    assert card not in {c["id"] for c in member.get(f"/decks/{library.deck_id}/review").json()}
+    assert member.get(f"/notes/{library.basic_note}").json()["cards"] == []
+    assert member.post(f"/cards/{card}/review", json={"rating": 3}).status_code == 404
+    # The admin still sees it, suspended.
+    assert admin.get(f"/cards/{card}").json()["suspended"] is True
+    assert admin.post(f"/cards/{card}/unsuspend").status_code == 200
+    assert member.get(f"/cards/{card}").status_code == 200
+
+
+def test_card_and_note_payloads_say_who_owns_them(library: Library) -> None:
+    card, note = library.basic_card, library.basic_note
+
+    assert library.member.get(f"/cards/{card}").json()["owned"] is False
+    assert library.member.get(f"/notes/{note}").json()["owned"] is False
+    assert library.admin.get(f"/cards/{card}").json()["owned"] is True
+    assert library.admin.get(f"/notes/{note}").json()["owned"] is True
+    edited = library.admin.patch(f"/notes/{note}", json={"tags": ["bio"]})
+    assert edited.status_code == 200 and edited.json()["owned"] is True
 
 
 # Every write a member might try on library material: (method, path, json body).

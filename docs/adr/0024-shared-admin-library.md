@@ -35,11 +35,12 @@ Review logs, the last-answer row and the review idempotency key are already per 
   - The migration fills `user_id` from each card's `owner_id`, so every existing schedule becomes its owner's. No row is dropped or rewritten otherwise.
   - The schedule port takes the user: `get(user_id, card_id)`, `get_many(user_id, card_ids)`, `list_for_user(user_id)`, `upsert(user_id, schedule)` and `delete(user_id, card_id)` (undo of a first answer). Two deletes span users: `delete_for_card(card_id)` (every user's rows, used when a card is deleted or re-derived) and `delete_for_user(user_id)` (account deletion).
 - **Review, undo and the due queue** read and write the caller's schedule. Review logs, the last-answer row and idempotency already work per reviewer.
+- **Undo needs the card to be readable still.** Undoing an answer on a library card whose admin is no longer active, or on a card its owner has since suspended, answers 404 and changes nothing.
 - **Deck stats, proficiency and the due forecast** count the caller's schedules over the cards they can read.
 - **Bury and flag belong to the card's owner.** They are still columns on `cards`, so they are the owner's personal markers:
   - for a reader who does not own the card, the due queue and deck stats ignore `buried_until`, so an admin burying a card does not hide it from members;
   - every card payload returned to a non-owner reports flag `0` and no bury date.
-- **Suspension applies to everyone.** A card the admin suspends is hidden from every member's queue and stats, since the admin suspends a card when it should not be studied at all.
+- **A suspended card is hidden from everyone but its owner.** The admin suspends a card when it should not be studied at all, so for a member it is not in the deck's cards, the due queue, deck stats or its note's cards, and opening, answering or undoing it answers 404. The owner keeps seeing it as suspended, as today.
 
 ### Access
 
@@ -60,7 +61,7 @@ Review logs, the last-answer row and the review idempotency key are already per 
 
 These are enhancements. Library decks simply do not offer them until they land, so the core works without them.
 
-1. **Per-member suspend, bury and flag on library cards.** Until then, a card the admin suspends is suspended for everyone, the admin's bury and flag are ignored for members, and members cannot suspend, bury or flag library cards.
+1. **Per-member suspend, bury and flag on library cards.** Until then, a card the admin suspends is hidden from everyone else, the admin's bury and flag are ignored for members, and members cannot suspend, bury or flag library cards.
 2. **Library cards in the card browser, goals and plans.** Until then, these show only the member's own cards.
 3. **AI features on library decks:** document chat, deck summary, mock exams and typed-answer grading. Until then, they are offered on the member's own decks only.
 4. **Export of library decks.** Members can still clone a library deck through a share link if the admin creates one.
