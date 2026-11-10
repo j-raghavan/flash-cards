@@ -6,6 +6,7 @@ import { describeError } from "../api/client";
 import { auth } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
 import { useOfflineSync } from "../offline/useOfflineSync";
+import { BrandMark } from "./BrandMark";
 import { SiteFooter } from "./SiteFooter";
 import { ErrorText, Loading } from "./ui";
 
@@ -64,6 +65,7 @@ export function Layout() {
       </a>
       <header className="site-header">
         <Link to="/" className="brand">
+          <BrandMark />
           Flash-Cards
         </Link>
         <nav aria-label="Main">

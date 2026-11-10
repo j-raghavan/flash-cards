@@ -51,6 +51,35 @@ describe("deck list", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ name: "Biology", parent_id: null });
   });
 
+  it("shows each top-level deck as a tile with its initial and subdeck count", async () => {
+    mockApi({
+      ...me,
+      "GET /decks": {
+        body: [
+          deck("a", "biology"),
+          deck("b", "Cells", "a"),
+          deck("c", "Organelles", "b"),
+          deck("d", "Spanish"),
+          deck("e", "Verbs", "d"),
+          deck("f", "Chemistry"),
+          deck("g", "   "),
+        ],
+      },
+    });
+    renderApp("/");
+    const tile = (name: string) =>
+      (screen.getAllByRole("link", { name }).at(0) as HTMLElement).closest("li.deck-tile") as HTMLElement;
+    await screen.findByRole("link", { name: "biology" });
+    expect(tile("biology")).toHaveTextContent(/^Bbiology2 subdecks/);
+    expect(within(tile("Spanish")).getByText("1 subdeck")).toBeInTheDocument();
+    expect(within(tile("Chemistry")).queryByText(/subdeck/)).toBeNull();
+    // A tile's colour is stable for a deck and one of the defined tones.
+    expect(tile("Chemistry").querySelector(".deck-avatar")?.className).toMatch(/^deck-avatar tone-[0-5]$/);
+    // A name without a letter still gets a placeholder initial.
+    const blank = screen.getAllByRole("listitem").find((item) => item.textContent.startsWith("#"));
+    expect(blank).toBeDefined();
+  });
+
   it("shows nested decks and can create one inside another", async () => {
     const calls = mockApi({
       ...me,
@@ -168,6 +197,8 @@ describe("deck detail", () => {
         return { status: 204 };
       },
     });
+    // Home with no decks would otherwise open the guided setup for a new user.
+    finishOnboarding(USER.id);
     renderApp("/decks/a");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Delete deck" }));

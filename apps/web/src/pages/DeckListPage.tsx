@@ -26,6 +26,46 @@ function DeckTree({ nodes }: { nodes: DeckNode[] }) {
   );
 }
 
+/** A stable colour for a deck's tile, from its id. */
+function deckTone(id: string): number {
+  let hash = 0;
+  for (const char of id) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 997;
+  }
+  return hash % TONES;
+}
+
+const TONES = 6;
+
+function countDecks(nodes: DeckNode[]): number {
+  return nodes.reduce((total, node) => total + 1 + countDecks(node.children), 0);
+}
+
+/** Top-level decks as tiles; their subdecks are listed inside. */
+function DeckGrid({ nodes }: { nodes: DeckNode[] }) {
+  return (
+    <ul className="deck-tree deck-grid">
+      {nodes.map((node) => {
+        const subdecks = countDecks(node.children);
+        return (
+          <li key={node.deck.id} className="deck-tile">
+            <span className={`deck-avatar tone-${String(deckTone(node.deck.id))}`} aria-hidden="true">
+              {Array.from(node.deck.name.trim())[0]?.toUpperCase() ?? "#"}
+            </span>
+            <Link to={`/decks/${node.deck.id}`}>{node.deck.name}</Link>
+            {subdecks > 0 ? (
+              <p className="deck-meta">
+                {subdecks} {subdecks === 1 ? "subdeck" : "subdecks"}
+              </p>
+            ) : null}
+            {node.children.length > 0 ? <DeckTree nodes={node.children} /> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function CreateDeckForm({
   all,
   initialParent = "",
@@ -94,7 +134,20 @@ export function DeckListPage() {
 
   return (
     <section>
-      <h1>Decks</h1>
+      <div className="page-head">
+        <div>
+          <h1>Decks</h1>
+          <p className="muted">Pick a deck to study, add cards or generate them with AI.</p>
+        </div>
+        <p className="row">
+          <Link className="button" to="/import">
+            Import decks from Anki
+          </Link>
+          <Link className="button" to="/note-types">
+            Custom note types
+          </Link>
+        </p>
+      </div>
       {list.loading && list.data === undefined ? <Loading /> : null}
       <ErrorText message={list.error} />
       {list.data === undefined ? null : (
@@ -106,13 +159,12 @@ export function DeckListPage() {
               <Link to="/welcome">guided setup</Link> walks you through it.
             </p>
           ) : (
-            <DeckTree nodes={buildDeckTree(list.data)} />
+            <DeckGrid nodes={buildDeckTree(list.data)} />
           )}
-          <CreateDeckForm all={list.data} onCreated={list.reload} />
-          <p className="row">
-            <Link to="/import">Import decks from Anki</Link>
-            <Link to="/note-types">Custom note types</Link>
-          </p>
+          <div className="panel new-deck">
+            <h2>New deck</h2>
+            <CreateDeckForm all={list.data} onCreated={list.reload} />
+          </div>
         </>
       )}
     </section>

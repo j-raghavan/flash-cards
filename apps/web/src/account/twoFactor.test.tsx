@@ -14,7 +14,13 @@ const webauthn = vi.hoisted(() => ({
 }));
 vi.mock("@simplewebauthn/browser", () => webauthn);
 
-const OFF: TwoFactorStatus = { enabled: false, totp: false, totp_available: true, passkeys: [], recovery_codes_left: 0 };
+const OFF: TwoFactorStatus = {
+  enabled: false,
+  totp: false,
+  totp_available: true,
+  passkeys: [],
+  recovery_codes_left: 0,
+};
 const LAPTOP = { id: "p1", name: "Laptop", created_at: "2026-11-01T09:00:00Z", last_used_at: null };
 const PHONE = { id: "p2", name: "Phone", created_at: "2026-11-02T09:00:00Z", last_used_at: "2026-11-05T09:00:00Z" };
 const CODES = Array.from({ length: 10 }, (_, i) => `aaaa-bbbb-cccc-${String(1000 + i)}`);
@@ -25,8 +31,12 @@ function api(status: () => TwoFactorStatus, routes: Routes = {}): Call[] {
   return mockApi({
     "GET /auth/me": { body: USER },
     "GET /auth/sessions": { body: [] },
-    "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 0, used_pages: 0, max_document_pages: 300, quota_applies: true } },
-    "GET /legal/ai-disclosure": { body: { ai_enabled: false, trains_on_user_content: false, statements: [], provider: null } },
+    "GET /account/ai-quota": {
+      body: { period: "2026-11", monthly_pages: 0, used_pages: 0, max_document_pages: 300, quota_applies: true },
+    },
+    "GET /legal/ai-disclosure": {
+      body: { ai_enabled: false, trains_on_user_content: false, statements: [], provider: null },
+    },
     "GET /auth/two-factor": () => ({ body: status() }),
     ...routes,
   });

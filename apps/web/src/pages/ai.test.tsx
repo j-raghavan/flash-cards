@@ -22,8 +22,18 @@ const job = (over: Partial<Job> = {}): Job => ({
 });
 
 const DRAFTS: Draft[] = [
-  { id: "x1", note_type: "basic", fields: { front: "What is $E$?", back: "Energy, see [notes](https://evil.example/b)" }, source_page: 1 },
-  { id: "x2", note_type: "cloze", fields: { text: "{{c1::Paris}} is a city <https://evil.example/c>" }, source_page: 2 },
+  {
+    id: "x1",
+    note_type: "basic",
+    fields: { front: "What is $E$?", back: "Energy, see [notes](https://evil.example/b)" },
+    source_page: 1,
+  },
+  {
+    id: "x2",
+    note_type: "cloze",
+    fields: { text: "{{c1::Paris}} is a city <https://evil.example/c>" },
+    source_page: 2,
+  },
 ];
 
 function lastSource(): FakeEventSource {

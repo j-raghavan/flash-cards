@@ -296,47 +296,44 @@ export function StudyPage() {
   );
 
   // Take the last answer back and show its card again, as a question.
-  const undo = useCallback(
-    (target: { last: LastAnswer; reviewId: string; queue: Card[] }) => {
-      const { last, reviewId } = target;
-      setUndoing(true);
-      setSubmitError(null);
-      const request = reviews.undo(reviewId).then(
-        (result) => {
-          const now = where.current;
-          setGoal(result.daily_goal);
-          answered.current.delete(last.card.id);
-          setReviewed((n) => n - 1);
-          setRevealedAt(null);
-          setSuggested(null);
+  const undo = useCallback((target: { last: LastAnswer; reviewId: string; queue: Card[] }) => {
+    const { last, reviewId } = target;
+    setUndoing(true);
+    setSubmitError(null);
+    const request = reviews.undo(reviewId).then(
+      (result) => {
+        const now = where.current;
+        setGoal(result.daily_goal);
+        answered.current.delete(last.card.id);
+        setReviewed((n) => n - 1);
+        setRevealedAt(null);
+        setSuggested(null);
+        setLastAnswer(null);
+        if (last.round === now.round) {
+          setIndex(last.index);
+        } else {
+          // A new round began after the answer: put the card first in it.
+          const rest = (now.queue ?? target.queue).slice(now.index).filter((c) => c.id !== last.card.id);
+          setQueue([last.card, ...rest]);
+          setIndex(0);
+        }
+      },
+      (failure: unknown) => {
+        setSubmitError(describeError(failure));
+        // The server refused (too late, already undone): nothing left to undo.
+        // A lost connection or a server error leaves the undo to try again.
+        if (failure instanceof ApiError && failure.status < 500) {
           setLastAnswer(null);
-          if (last.round === now.round) {
-            setIndex(last.index);
-          } else {
-            // A new round began after the answer: put the card first in it.
-            const rest = (now.queue ?? target.queue).slice(now.index).filter((c) => c.id !== last.card.id);
-            setQueue([last.card, ...rest]);
-            setIndex(0);
-          }
-        },
-        (failure: unknown) => {
-          setSubmitError(describeError(failure));
-          // The server refused (too late, already undone): nothing left to undo.
-          // A lost connection or a server error leaves the undo to try again.
-          if (failure instanceof ApiError && failure.status < 500) {
-            setLastAnswer(null);
-          }
-        },
-      );
-      // A new round waits for the undo too, so its queue includes the card.
-      inFlight.current.add(request);
-      void request.finally(() => {
-        inFlight.current.delete(request);
-        setUndoing(false);
-      });
-    },
-    [],
-  );
+        }
+      },
+    );
+    // A new round waits for the undo too, so its queue includes the card.
+    inFlight.current.add(request);
+    void request.finally(() => {
+      inFlight.current.delete(request);
+      setUndoing(false);
+    });
+  }, []);
 
   // After an edit, show the card as it is now; an edit can remove it (a cloze
   // deletion taken out), which then shows as a card that will not load.
@@ -566,7 +563,7 @@ export function StudyPage() {
             <button
               key={rating}
               type="button"
-              className={rating === (suggestion ?? 3) ? "button primary" : "button"}
+              className={`button rate-${String(rating)}${rating === (suggestion ?? 3) ? " primary" : ""}`}
               aria-keyshortcuts={rating === suggestion ? `${String(rating)} Enter` : String(rating)}
               disabled={undoing}
               onClick={() => {

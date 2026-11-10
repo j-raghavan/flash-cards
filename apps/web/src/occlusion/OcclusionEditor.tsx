@@ -175,8 +175,8 @@ function Masks({ occlusion, onChange }: { occlusion: Occlusion; onChange: (occlu
   return (
     <>
       <p className="muted" id="occlusion-hint">
-        Drag over the image to hide a part. Each card number becomes one card; masks with the same number are
-        hidden together.
+        Drag over the image to hide a part. Each card number becomes one card; masks with the same number are hidden
+        together.
       </p>
       <div
         className="occlusion occlusion-surface"

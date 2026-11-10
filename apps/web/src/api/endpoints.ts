@@ -190,8 +190,7 @@ export const admin = {
   invites: () => request<Invite[]>("/admin/invites"),
   createInvite: (email: string | null, role: Role, ttlDays: number) =>
     request<CreatedInvite>("/admin/invites", { method: "POST", json: { email, role, ttl_days: ttlDays } }),
-  revokeInvite: (inviteId: string) =>
-    request<undefined>(`/admin/invites/${id(inviteId)}/revoke`, { method: "POST" }),
+  revokeInvite: (inviteId: string) => request<undefined>(`/admin/invites/${id(inviteId)}/revoke`, { method: "POST" }),
   users: () => request<AdminUser[]>("/admin/users"),
   suspend: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/suspend`, { method: "POST" }),
   unsuspend: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/unsuspend`, { method: "POST" }),

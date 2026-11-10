@@ -330,8 +330,8 @@ function InvitesPanel() {
       {resent === null ? null : (
         <div className="panel" role="status">
           <p>
-            <strong>Invite emailed again to {resent.email}.</strong> The previous link no longer works. The new link
-            is shown only once and works until {formatTime(resent.expires_at)}.
+            <strong>Invite emailed again to {resent.email}.</strong> The previous link no longer works. The new link is
+            shown only once and works until {formatTime(resent.expires_at)}.
           </p>
           <CopyField label="New invite link" value={inviteUrl(resent.token)} />
         </div>

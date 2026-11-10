@@ -180,8 +180,8 @@ function QuotasForm({
         />
       </label>
       <p className="muted" id="quota-cap-hint">
-        Estimated cost of all AI work on this instance per calendar month. Once reached, new AI work is refused until the
-        next month. Leave empty for no cap.
+        Estimated cost of all AI work on this instance per calendar month. Once reached, new AI work is refused until
+        the next month. Leave empty for no cap.
       </p>
       {capError === null ? null : (
         <p className="error" id="quota-cap-error">

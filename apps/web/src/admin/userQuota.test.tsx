@@ -18,7 +18,10 @@ const account = (id: string, email: string): AdminUser => ({
   suspended: false,
   created_at: "2026-10-01T00:00:00Z",
 });
-const base = { "GET /auth/me": { body: ADMIN }, "GET /admin/users": { body: [account("a1", "root@example.com"), account("u2", "bob@example.com")] } };
+const base = {
+  "GET /auth/me": { body: ADMIN },
+  "GET /admin/users": { body: [account("a1", "root@example.com"), account("u2", "bob@example.com")] },
+};
 
 const quota = (over: Partial<UserQuota> = {}): UserQuota => ({
   user_id: "u2",
@@ -48,7 +51,9 @@ describe("per-user AI quota", () => {
     const input = await screen.findByLabelText("Monthly AI pages for bob@example.com (pages)");
     expect(input).toHaveFocus();
     expect(input).toHaveValue("");
-    expect(screen.getByText(/8 pages used of 10 pages in November 2026\. The instance default applies\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(/8 pages used of 10 pages in November 2026\. The instance default applies\./),
+    ).toBeInTheDocument();
     expect(input).toHaveAccessibleDescription(/8 pages used of 10 pages.*Leave empty to use the instance default\./);
     expect(screen.queryByRole("button", { name: "Use the default" })).not.toBeInTheDocument();
 
@@ -62,7 +67,10 @@ describe("per-user AI quota", () => {
     await user.click(screen.getByRole("button", { name: "Use the default" }));
     expect(await screen.findByText("Override cleared: the instance default of 10 pages applies.")).toBeInTheDocument();
     expect(input).toHaveValue("");
-    expect(calls.filter((c) => c.method === "PUT").map((c) => c.body)).toEqual([{ monthly_pages: 50 }, { monthly_pages: null }]);
+    expect(calls.filter((c) => c.method === "PUT").map((c) => c.body)).toEqual([
+      { monthly_pages: 50 },
+      { monthly_pages: null },
+    ]);
 
     // Saving an empty field also clears the override.
     await user.click(screen.getByRole("button", { name: "Save quota" }));

@@ -79,17 +79,7 @@ interface Row {
   pages?: number;
 }
 
-function UsageFigure({
-  title,
-  head,
-  rows,
-  priced,
-}: {
-  title: string;
-  head: string;
-  rows: Row[];
-  priced: boolean;
-}) {
+function UsageFigure({ title, head, rows, priced }: { title: string; head: string; rows: Row[]; priced: boolean }) {
   // Cost when prices are set; otherwise tokens are the only measure there is.
   const measure = (row: Row): number => (priced ? row.cost_micro_usd : row.input_tokens + row.output_tokens);
   const format = priced ? formatUsd : (n: number) => `${count(n)} tokens`;
@@ -190,8 +180,8 @@ function Report({ report, emails }: { report: UsageReport; emails: Map<string, s
       {unpriced ? (
         <div className="panel" role="note">
           <p>
-            <strong>Prices are not configured.</strong> Tokens are recorded but every cost shows as $0.00, and the
-            spend cap has no effect. Set <code>FLASHCARDS_AI_INPUT_USD_PER_MTOK</code> and{" "}
+            <strong>Prices are not configured.</strong> Tokens are recorded but every cost shows as $0.00, and the spend
+            cap has no effect. Set <code>FLASHCARDS_AI_INPUT_USD_PER_MTOK</code> and{" "}
             <code>FLASHCARDS_AI_OUTPUT_USD_PER_MTOK</code> on the server to estimate costs.
           </p>
         </div>

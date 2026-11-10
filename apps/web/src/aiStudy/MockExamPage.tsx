@@ -66,13 +66,7 @@ function ExamTimer({ endsAt, onExpire }: { endsAt: number; onExpire: () => void 
   }, [left]);
 
   const announcement =
-    left <= 0
-      ? "Time is up."
-      : left <= MINUTE
-        ? "One minute left."
-        : left <= 5 * MINUTE
-          ? "Five minutes left."
-          : "";
+    left <= 0 ? "Time is up." : left <= MINUTE ? "One minute left." : left <= 5 * MINUTE ? "Five minutes left." : "";
   return (
     <>
       <p className="muted exam-timer" role="timer" aria-label="Time left">
@@ -394,12 +388,9 @@ export function MockExamPage() {
   useDocumentTitle("Mock exam");
   const [stage, setStage] = useState<Stage>({ name: "setup" });
 
-  const onGraded = useCallback(
-    (exam: MockExam, result: ExamResult, answers: Record<string, string>) => {
-      setStage({ name: "result", exam, result, answers });
-    },
-    [],
-  );
+  const onGraded = useCallback((exam: MockExam, result: ExamResult, answers: Record<string, string>) => {
+    setStage({ name: "result", exam, result, answers });
+  }, []);
 
   return (
     <section>

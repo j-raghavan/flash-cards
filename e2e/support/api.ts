@@ -13,7 +13,11 @@ export const PASSWORD = "e2e correct horse battery";
 
 /** A fresh address per user, so tests never share accounts or data. */
 export function uniqueEmail(label: string): string {
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 24);
   return `e2e-${slug || "user"}-${randomUUID().slice(0, 8)}@example.com`;
 }
 

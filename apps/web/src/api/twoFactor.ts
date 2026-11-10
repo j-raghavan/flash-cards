@@ -94,8 +94,7 @@ export const twoFactor = {
     request<PasskeyAdded>("/auth/two-factor/passkeys", { method: "POST", json: { token, credential, name } }),
   removePasskey: (passkeyId: string, proof: Proof) =>
     request<undefined>(`/auth/two-factor/passkeys/${id(passkeyId)}`, { method: "DELETE", json: proof }),
-  adminReset: (userId: string) =>
-    request<AdminUser>(`/admin/users/${id(userId)}/two-factor/reset`, { method: "POST" }),
+  adminReset: (userId: string) => request<AdminUser>(`/admin/users/${id(userId)}/two-factor/reset`, { method: "POST" }),
 };
 
 /** The recovery codes as a text file to keep. */

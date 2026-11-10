@@ -92,7 +92,10 @@ describe("import wizard", () => {
   });
 
   it("treats an answer without a dry run as a finished import", async () => {
-    mockApi({ ...me, "POST /import/apkg": { status: 201, body: { decks_created: 1, notes_imported: 3, notes_skipped: 0 } } });
+    mockApi({
+      ...me,
+      "POST /import/apkg": { status: 201, body: { decks_created: 1, notes_imported: 3, notes_skipped: 0 } },
+    });
     renderApp("/import");
     const user = userEvent.setup();
     await user.upload(await screen.findByLabelText(/Anki package/), apkg());
@@ -190,7 +193,9 @@ describe("import wizard", () => {
     const user = userEvent.setup();
     const group = await screen.findByRole("group", { name: "Export this deck" });
     await user.click(within(group).getByRole("button", { name: "Anki package" }));
-    expect(await screen.findByText(/2 custom or image occlusion notes were left out; JSON keeps them/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/2 custom or image occlusion notes were left out; JSON keeps them/),
+    ).toBeInTheDocument();
     await user.click(within(group).getByRole("button", { name: "JSON" }));
     expect(await screen.findByText("Downloaded.")).toBeInTheDocument();
     expect(saved).toEqual(["Bio.apkg", "deck.json"]);

@@ -15,7 +15,9 @@ const spending = (cost: number, tokens = 1000): UsageReport => ({
   cost_micro_usd: cost,
   spend_cap_micro_usd: null,
   by_user: [],
-  by_provider: [{ provider: "anthropic", model: "m", calls: 1, input_tokens: tokens, output_tokens: 0, cost_micro_usd: cost }],
+  by_provider: [
+    { provider: "anthropic", model: "m", calls: 1, input_tokens: tokens, output_tokens: 0, cost_micro_usd: cost },
+  ],
 });
 
 async function openQuotas(): Promise<ReturnType<typeof userEvent.setup>> {
@@ -70,7 +72,10 @@ describe("instance quotas", () => {
     expect(cap).toHaveValue("50");
     expect(pages).toHaveAccessibleDescription(/AI pages each user may generate/);
     expect(await screen.findByText("$12.50 spent of the $50.00 cap.")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "$12.50 spent of the $50.00 cap." })).toHaveAttribute("value", "12500000");
+    expect(screen.getByRole("progressbar", { name: "$12.50 spent of the $50.00 cap." })).toHaveAttribute(
+      "value",
+      "12500000",
+    );
 
     await user.clear(pages);
     await user.type(pages, "40");

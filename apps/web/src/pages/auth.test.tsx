@@ -276,7 +276,10 @@ describe("public sign-up", () => {
   it("registers, never signs in, and asks to check email", async () => {
     const calls = mockApi({
       ...open,
-      "POST /auth/register": { status: 202, body: { detail: "If the address can be registered, an email is on its way." } },
+      "POST /auth/register": {
+        status: 202,
+        body: { detail: "If the address can be registered, an email is on its way." },
+      },
     });
     renderApp("/signup");
     const user = userEvent.setup();

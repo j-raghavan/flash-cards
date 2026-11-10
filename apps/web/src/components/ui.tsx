@@ -112,7 +112,8 @@ export function ConfirmButton({ label, prompt, confirmLabel, onConfirm }: Confir
   );
 }
 
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * A modal dialog: focus moves into it when it opens, Tab and Shift+Tab stay
@@ -241,7 +242,13 @@ export function ProficiencyRing({
   const circumference = 2 * Math.PI * radius;
   return (
     <figure className="ring" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${String(clamped)}%`}>
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        role="img"
+        aria-label={`${label} ${String(clamped)}%`}
+      >
         <circle className="ring-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} fill="none" />
         <circle
           className="ring-value"

@@ -101,8 +101,8 @@ function RecoveryCodesView({ codes, email, onDone }: { codes: string[]; email: s
   return (
     <div className="stack" role="region" aria-label="Your recovery codes">
       <p>
-        <strong>Save these recovery codes now.</strong> Each one signs you in once if you lose your authenticator
-        app or passkey. They are shown only this time.
+        <strong>Save these recovery codes now.</strong> Each one signs you in once if you lose your authenticator app or
+        passkey. They are shown only this time.
       </p>
       <ol className="recovery-codes">
         {codes.map((code) => (

@@ -6,13 +6,7 @@
 import { useState, type SubmitEvent } from "react";
 
 import { decks } from "../api/endpoints";
-import {
-  MAX_DAILY_GOAL,
-  MIN_DAILY_GOAL,
-  progress,
-  type StudySettings,
-  type Today,
-} from "../api/studyProgress";
+import { MAX_DAILY_GOAL, MIN_DAILY_GOAL, progress, type StudySettings, type Today } from "../api/studyProgress";
 import { ErrorText, Loading } from "../components/ui";
 import { deckOptions } from "../lib/deckTree";
 import { useDocumentTitle } from "../lib/useDocumentTitle";

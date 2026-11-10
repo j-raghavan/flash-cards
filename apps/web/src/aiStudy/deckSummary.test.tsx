@@ -20,7 +20,7 @@ describe("deck summary", () => {
       "POST /decks/d1/summary": {
         body: {
           summary:
-            "Cells make **energy**. <img src=x onerror=alert(1)><a href=\"javascript:alert(1)\">x</a> [more](https://evil.example/s)",
+            'Cells make **energy**. <img src=x onerror=alert(1)><a href="javascript:alert(1)">x</a> [more](https://evil.example/s)',
           key_points: ["ATP stores energy", "<script>alert(1)</script>Mitochondria", "See https://evil.example/kp"],
         },
       },

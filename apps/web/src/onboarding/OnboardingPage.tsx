@@ -37,15 +37,7 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   study: "First session",
 };
 
-function StepFrame({
-  step,
-  children,
-  onSkip,
-}: {
-  step: OnboardingStep;
-  children: ReactNode;
-  onSkip: () => void;
-}) {
+function StepFrame({ step, children, onSkip }: { step: OnboardingStep; children: ReactNode; onSkip: () => void }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     // A new step replaces the old one; move focus to it so it is announced.
@@ -132,15 +124,7 @@ function DeckStep({ all, onChosen }: { all: Deck[]; onChosen: (deckId: string) =
   );
 }
 
-function MaterialStep({
-  deckId,
-  onLeave,
-  onNext,
-}: {
-  deckId: string | null;
-  onLeave: () => void;
-  onNext: () => void;
-}) {
+function MaterialStep({ deckId, onLeave, onNext }: { deckId: string | null; onLeave: () => void; onNext: () => void }) {
   return (
     <>
       <p>Bring in what you study from. Come back here from the home page when you are done.</p>

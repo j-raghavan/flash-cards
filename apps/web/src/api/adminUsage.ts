@@ -73,7 +73,9 @@ export const adminUsage = {
     request<CreatedInvite>(`/admin/invites/${id(inviteId)}/resend`, { method: "POST" }),
   /** The month's usage; null asks for the current month. */
   usage: (period: string | null) =>
-    request<UsageReport>(period === null ? "/admin/usage" : `/admin/usage?${new URLSearchParams({ period }).toString()}`),
+    request<UsageReport>(
+      period === null ? "/admin/usage" : `/admin/usage?${new URLSearchParams({ period }).toString()}`,
+    ),
 };
 
 // --- money ---

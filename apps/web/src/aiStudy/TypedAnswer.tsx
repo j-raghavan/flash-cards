@@ -164,8 +164,8 @@ export function TypedAnswer({ cardId, revealed, onEvaluated, onReveal }: TypedAn
           </p>
           <CardContent aiOutput markdown={phase.evaluation.explanation} />
           <p className="muted">
-            Suggested rating: {RATING_NAMES[suggestedRating(phase.evaluation)]}. Press Enter to accept it, or 1 to 4
-            to choose another.
+            Suggested rating: {RATING_NAMES[suggestedRating(phase.evaluation)]}. Press Enter to accept it, or 1 to 4 to
+            choose another.
           </p>
         </div>
       ) : null}

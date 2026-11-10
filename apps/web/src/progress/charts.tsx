@@ -226,13 +226,7 @@ export function Forecast({ days }: { days: ForecastDay[] }) {
         <text className="axis" x={PAD.left - 6} y={PAD.top + 4} textAnchor="end">
           {max}
         </text>
-        <line
-          className="baseline"
-          x1={PAD.left}
-          x2={PLOT_W - PAD.right}
-          y1={PAD.top + innerH}
-          y2={PAD.top + innerH}
-        />
+        <line className="baseline" x1={PAD.left} x2={PLOT_W - PAD.right} y1={PAD.top + innerH} y2={PAD.top + innerH} />
         <text className="axis" x={PAD.left - 6} y={PAD.top + innerH + 4} textAnchor="end">
           0
         </text>

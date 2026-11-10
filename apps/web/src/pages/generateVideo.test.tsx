@@ -27,7 +27,11 @@ beforeEach(() => {
 
 describe("generate from a video or a transcript", () => {
   it("starts a job from a YouTube link", async () => {
-    const calls = mockApi({ ...me, "POST /ai/generate/youtube": { status: 202, body: JOB }, "GET /ai/jobs/j9": { body: JOB } });
+    const calls = mockApi({
+      ...me,
+      "POST /ai/generate/youtube": { status: 202, body: JOB },
+      "GET /ai/jobs/j9": { body: JOB },
+    });
     renderApp("/decks/d1/generate");
     const user = userEvent.setup();
     const go = await screen.findByRole("button", { name: "Use the video's transcript" });
