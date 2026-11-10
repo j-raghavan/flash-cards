@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     openai_model: str = "local-model"
     # Seconds to wait on the endpoint. Local models on CPU can be slow to answer.
     openai_timeout_seconds: float = 300.0
+    # The request field that caps the answer's length. OpenAI's reasoning models
+    # (GPT-5, the o-series) refuse "max_tokens" and need "max_completion_tokens".
+    openai_output_limit_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
+    # Sent as reasoning_effort when set, for reasoning models only; which values a
+    # model accepts varies. Their reasoning counts against the output budget, so a
+    # low effort leaves room for the answer. Unset sends nothing, which other
+    # servers expect.
+    openai_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = None
     # Synchronous AI requests (grading, summaries, mock exams, chat) running at once.
     # Keep it below the database pool size: each holds a connection while it waits
     # on the model.

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import json
+from typing import get_args
 
 import httpx
 import pytest
@@ -12,7 +13,11 @@ from pydantic import ValidationError
 from pydantic_settings import SettingsConfigDict
 
 from flashcards.adapters.llm import NullLLMProvider
-from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider
+from flashcards.adapters.openai_llm import (
+    OpenAICompatibleLLMProvider,
+    OutputLimitField,
+    ReasoningEffort,
+)
 from flashcards.api.app import _llm_from_settings
 from flashcards.config import Settings
 from flashcards.domain.ai import (
@@ -59,7 +64,11 @@ class _Capture:
 
 
 def _provider(
-    response: httpx.Response, *, api_key: str | None = None
+    response: httpx.Response,
+    *,
+    api_key: str | None = None,
+    output_limit_field: OutputLimitField = "max_tokens",
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> tuple[OpenAICompatibleLLMProvider, _Capture]:
     capture = _Capture()
 
@@ -69,7 +78,12 @@ def _provider(
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     provider = OpenAICompatibleLLMProvider(
-        base_url="http://llm.local/v1/", model="local-model", api_key=api_key, client=client
+        base_url="http://llm.local/v1/",
+        model="local-model",
+        api_key=api_key,
+        output_limit_field=output_limit_field,
+        reasoning_effort=reasoning_effort,
+        client=client,
     )
     return provider, capture
 
@@ -108,7 +122,26 @@ async def test_text_upload_is_data_not_instructions_and_no_tools() -> None:
         "json_schema": {"name": "result", "schema": DRAFT_CARDS_SCHEMA, "strict": True},
     }
     assert payload["max_tokens"] == 1024
+    assert "max_completion_tokens" not in payload
+    assert "reasoning_effort" not in payload
     assert "tools" not in payload
+
+
+async def test_reasoning_models_get_max_completion_tokens_and_an_effort() -> None:
+    provider, capture = _provider(
+        httpx.Response(200, json=_body()),
+        output_limit_field="max_completion_tokens",
+        reasoning_effort="low",
+    )
+
+    await provider.generate_structured(
+        _request(LlmDocument(media_type="text/plain", data=b"notes"))
+    )
+
+    payload = capture.payload()
+    assert payload["max_completion_tokens"] == 1024
+    assert "max_tokens" not in payload
+    assert payload["reasoning_effort"] == "low"
 
 
 async def test_png_pages_become_data_url_image_parts() -> None:
@@ -326,6 +359,53 @@ def test_llm_from_settings_selects_openai_compatible() -> None:
         )
     )
     assert isinstance(chosen, Provider)
+    assert chosen._output_limit_field == "max_tokens"
+    assert chosen._reasoning_effort is None
+
+
+def test_llm_from_settings_passes_the_reasoning_model_options(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from flashcards.adapters.openai_llm import OpenAICompatibleLLMProvider as Provider
+
+    chosen = _llm_from_settings(
+        _HermeticSettings(
+            llm_provider="openai_compatible",
+            openai_base_url="https://api.openai.com/v1",
+            openai_output_limit_field="max_completion_tokens",
+            openai_reasoning_effort="minimal",
+        )
+    )
+    assert isinstance(chosen, Provider)
+    assert chosen._output_limit_field == "max_completion_tokens"
+    assert chosen._reasoning_effort == "minimal"
+    assert "openai_reasoning_effort is not set" not in caplog.text
+
+
+def test_max_completion_tokens_without_an_effort_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _llm_from_settings(
+        _HermeticSettings(
+            llm_provider="openai_compatible",
+            openai_base_url="https://api.openai.com/v1",
+            openai_output_limit_field="max_completion_tokens",
+        )
+    )
+    assert "openai_reasoning_effort is not set" in caplog.text
+
+
+def test_settings_and_adapter_accept_the_same_values() -> None:
+    fields = Settings.model_fields
+    assert get_args(fields["openai_output_limit_field"].annotation) == get_args(OutputLimitField)
+    effort = get_args(fields["openai_reasoning_effort"].annotation)
+    assert len(effort) == 2 and effort[1] is type(None)
+    assert get_args(effort[0]) == get_args(ReasoningEffort)
+
+
+def test_an_unknown_reasoning_effort_fails_at_startup() -> None:
+    with pytest.raises(ValidationError):
+        _HermeticSettings.model_validate({"openai_reasoning_effort": "extreme"})
 
 
 def test_llm_from_settings_openai_without_base_url_is_null_and_warns(

@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from typing import Literal
 
 import httpx
 
@@ -31,6 +32,14 @@ _DEFAULT_TIMEOUT = 300.0
 # A structured answer is small; refuse to parse anything far larger.
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 
+# The request field that caps the answer's length. Most OpenAI-compatible servers
+# take ``max_tokens``; OpenAI's reasoning models (GPT-5, the o-series) refuse it
+# and take ``max_completion_tokens``, which also covers their hidden reasoning.
+OutputLimitField = Literal["max_tokens", "max_completion_tokens"]
+# Which values a model accepts varies: "minimal" is GPT-5 only, "none" is newer
+# GPT-5.x only, and the o-series takes low, medium or high.
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high"]
+
 
 class OpenAICompatibleLLMProvider:
     def __init__(
@@ -40,10 +49,14 @@ class OpenAICompatibleLLMProvider:
         model: str,
         api_key: str | None = None,
         timeout_seconds: float = _DEFAULT_TIMEOUT,
+        output_limit_field: OutputLimitField = "max_tokens",
+        reasoning_effort: ReasoningEffort | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
+        self._output_limit_field = output_limit_field
+        self._reasoning_effort = reasoning_effort
         self._client = client or httpx.AsyncClient(timeout=timeout_seconds)
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
@@ -52,9 +65,9 @@ class OpenAICompatibleLLMProvider:
 
     async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
         content = [_to_content_part(document) for document in request.documents]
-        payload = {
+        payload: dict[str, object] = {
             "model": self._model,
-            "max_tokens": request.max_output_tokens,
+            self._output_limit_field: request.max_output_tokens,
             "messages": [
                 {"role": "system", "content": request.instructions},
                 {"role": "user", "content": content},
@@ -68,6 +81,8 @@ class OpenAICompatibleLLMProvider:
                 },
             },
         }
+        if self._reasoning_effort is not None:
+            payload["reasoning_effort"] = self._reasoning_effort
         # Error messages stay generic: they can reach users (a failed job's error), so
         # the endpoint URL and server detail go only to the server log.
         try:

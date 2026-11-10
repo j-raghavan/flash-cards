@@ -49,6 +49,24 @@ Add an explicit provider selector and a second adapter.
 New settings (env prefix `FLASHCARDS_`): `llm_provider`, `openai_base_url`,
 `openai_api_key` (optional; many local servers ignore it), `openai_model`.
 
+Two later settings support OpenAI's reasoning models (GPT-5, the o-series), which
+refuse `max_tokens`:
+
+- `openai_output_limit_field` names the field that caps the answer:
+  `max_tokens` (the default, which local servers expect) or
+  `max_completion_tokens`.
+- `openai_reasoning_effort` (`none`, `minimal`, `low`, `medium` or `high`) is
+  sent as `reasoning_effort` when set, and omitted otherwise. Which values a model
+  accepts varies by model. A reasoning model's hidden reasoning counts against the
+  output budget, so a low effort leaves room for the answer. The adapter fails an
+  answer cut off by the budget as truncated, and the server warns at startup when
+  `max_completion_tokens` is set without an effort.
+
+The draft-card schema spells out each card type as a closed shape (Basic: `front`
+and `back`; Cloze: `text`) joined with `anyOf`. OpenAI's strict mode and
+Anthropic's structured outputs both refuse objects with open keys, and the parser
+rejects any other field name, so a server that ignores the schema cannot add one.
+
 ## Consequences
 
 - Self-hosters can run entirely on a local model, which matches the project's
