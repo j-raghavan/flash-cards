@@ -4,7 +4,7 @@
 // card's text opens a read-only view of it, as it is studied.
 
 import { useState, type SubmitEvent } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import { cards, decks } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
@@ -394,7 +394,10 @@ export function BrowserPage() {
       </form>
 
       {ignoredDeck ? (
-        <p className="muted">That deck is in the library, so its cards are not listed here; showing your own cards.</p>
+        <p className="muted">
+          That deck is in the library, so its cards are not listed here; showing your own cards. You can{" "}
+          <Link to={`/decks/${String(asked.deck_id)}/read`}>read its cards</Link> instead.
+        </p>
       ) : null}
       <p role="status" className="muted">
         {message}

@@ -10,6 +10,7 @@ import { ForgotPasswordPage, LoginPage, ResetPasswordPage, SignupPage, VerifyEma
 import { BrowserPage } from "./pages/BrowserPage";
 import { DeckDetailPage } from "./pages/DeckDetailPage";
 import { DeckListPage } from "./pages/DeckListPage";
+import { DeckReaderPage } from "./pages/DeckReaderPage";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GoalPage, GoalsPage } from "./pages/GoalsPage";
 import { ImportPage } from "./pages/ImportPage";
@@ -78,6 +79,7 @@ export function AppRoutes() {
         />
         <Route path="/decks/:deckId" element={<DeckDetailPage />} />
         <Route path="/decks/:deckId/study" element={<StudyPage />} />
+        <Route path="/decks/:deckId/read" element={<DeckReaderPage />} />
         <Route
           path="/decks/:deckId/notes/new"
           element={

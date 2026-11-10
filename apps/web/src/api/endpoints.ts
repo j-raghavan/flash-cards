@@ -72,6 +72,8 @@ export const decks = {
   rename: (deckId: string, name: string) => request<Deck>(`/decks/${id(deckId)}`, { method: "PATCH", json: { name } }),
   remove: (deckId: string) => request<undefined>(`/decks/${id(deckId)}`, { method: "DELETE" }),
   stats: (deckId: string) => request<DeckStats>(`/decks/${id(deckId)}/stats`),
+  /** Every card of a readable deck (library decks included), oldest first. */
+  cards: (deckId: string) => request<Card[]>(`/decks/${id(deckId)}/cards`),
   dueQueue: (deckId: string, limit = 100) => request<Card[]>(`/decks/${id(deckId)}/review?limit=${limit}`),
 };
 

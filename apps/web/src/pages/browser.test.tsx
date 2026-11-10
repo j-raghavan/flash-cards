@@ -328,6 +328,38 @@ describe("card view", () => {
     expect(opener).toHaveFocus();
   });
 
+  it("moves focus to the other button on a page of two, where both ends are one step apart", async () => {
+    mockApi({ ...three, "GET /cards": { body: { total: 2, cards: [row(1), row(2)] } } });
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Card 1" }));
+    const dialog = await screen.findByRole("dialog", { name: "Card 1 of 2" });
+    await user.click(within(dialog).getByRole("button", { name: "Next card" }));
+    expect(await screen.findByRole("dialog", { name: "Card 2 of 2" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Previous card" })).toHaveFocus();
+    await user.click(within(dialog).getByRole("button", { name: "Previous card" }));
+    expect(await screen.findByRole("dialog", { name: "Card 1 of 2" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Next card" })).toHaveFocus();
+  });
+
+  it("leaves the arrow keys to a text field, and to a handler that already took them", async () => {
+    mockApi(three);
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Card 2" }));
+    await screen.findByRole("dialog", { name: "Card 2 of 3" });
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("dialog", { name: "Card 2 of 3" })).toBeInTheDocument();
+    field.remove();
+    const taken = new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true });
+    taken.preventDefault();
+    window.dispatchEvent(taken);
+    expect(screen.getByRole("dialog", { name: "Card 2 of 3" })).toBeInTheDocument();
+  });
+
   it("keeps focus in the dialog when a button reaches an end of the page", async () => {
     mockApi(three);
     renderApp("/cards");

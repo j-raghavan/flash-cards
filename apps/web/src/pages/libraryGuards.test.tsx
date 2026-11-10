@@ -107,6 +107,7 @@ describe("browser deck filter", () => {
     renderApp("/cards?deck=l1");
     expect(await screen.findByRole("button", { name: "Own card" })).toBeInTheDocument();
     expect(screen.getByText(/That deck is in the library/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "read its cards" })).toHaveAttribute("href", "/decks/l1/read");
     const browses = calls.filter((c) => c.path.startsWith("/cards?")).map((c) => c.path);
     expect(browses).toHaveLength(1);
     expect(browses[0]).not.toContain("deck_id");
