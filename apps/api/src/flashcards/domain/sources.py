@@ -12,6 +12,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from flashcards.domain.figures import FigureBox
+
 
 class PageKind(enum.StrEnum):
     TEXT = "text"  # born-digital: the extracted text is authoritative
@@ -91,5 +93,9 @@ class ExtractedPage:
     ref: SourceRef
     kind: PageKind
     text: str | None = None
+    # The page as an image: always for an IMAGE page, and for a TEXT page that has
+    # pictures or drawings, so the model sees them too (F-AI-5).
     image: bytes | None = None
-    image_media_type: str | None = None  # image/png or image/jpeg when kind is IMAGE
+    image_media_type: str | None = None  # image/png or image/jpeg when image is set
+    # Exact boxes of the figures found in a PDF page, to snap the model's boxes to.
+    figure_boxes: tuple[FigureBox, ...] = ()

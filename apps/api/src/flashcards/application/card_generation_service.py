@@ -20,19 +20,26 @@ from flashcards.application.ai_spend import AiSpend
 from flashcards.domain.ai import (
     DRAFT_CARDS_SCHEMA,
     DraftCardRecord,
+    DraftOutput,
     InvalidModelOutput,
     LlmDocument,
     LlmError,
+    OutputTruncated,
     StructuredRequest,
-    parse_draft_cards,
+    StructuredResult,
+    parse_draft_output,
 )
+from flashcards.domain.figures import snap, with_figure
 from flashcards.domain.jobs import AiJob, JobFailure, JobStatus
+from flashcards.domain.media import MAX_MEDIA_BYTES, MediaAsset
 from flashcards.domain.ports import (
     AiJobRepository,
     Clock,
     DocumentExtractor,
     DraftCardRepository,
+    FigureCropper,
     LLMProvider,
+    MediaRepository,
     ObjectStore,
     UnitOfWork,
     UserRepository,
@@ -50,7 +57,9 @@ from flashcards.domain.sources import (
 from flashcards.domain.transcripts import InvalidTranscript
 from flashcards.domain.usage import AiFeature, SpendCapReached
 
-MAX_OUTPUT_TOKENS = 4096
+# Room for a full page of self-contained cards plus a reasoning model's hidden
+# reasoning, which counts against the same limit on OpenAI's GPT-5 and o-series.
+MAX_OUTPUT_TOKENS = 16_000
 
 logger = logging.getLogger("flashcards")
 
@@ -109,7 +118,13 @@ class CardGenerationService:
         *,
         users: UserRepository,
         max_pages: int = DEFAULT_MAX_UPLOAD_PAGES,
+        media: MediaRepository | None = None,
+        cropper: FigureCropper | None = None,
     ) -> None:
+        # Figures a card shows are cropped from its page and stored as the owner's
+        # media; without either collaborator cards keep their text only.
+        self._media = media
+        self._cropper = cropper
         self._uow = unit_of_work
         self._users = users
         self._spend = spend
@@ -232,7 +247,7 @@ class CardGenerationService:
     async def _generate_page(self, job: AiJob, page: ExtractedPage) -> list[DraftCardRecord]:
         request = StructuredRequest(
             instructions=prompt_for(job.thoroughness),
-            documents=(_page_document(page),),
+            documents=_page_documents(page),
             schema=DRAFT_CARDS_SCHEMA,
             max_output_tokens=MAX_OUTPUT_TOKENS,
         )
@@ -241,6 +256,12 @@ class CardGenerationService:
         hold = await self._spend.hold(request)
         try:
             result = await self._llm.generate_structured(request)
+        except OutputTruncated as cut:
+            # Billed although unusable: record what the provider reported, then fail.
+            billed = StructuredResult(data={}, usage=cut.usage, model=cut.model)
+            await self._spend.record(job.owner_id, AiFeature.GENERATION, billed, hold)
+            await self._uow.commit()
+            raise
         except BaseException:
             await self._spend.release(hold)
             raise
@@ -248,7 +269,8 @@ class CardGenerationService:
         # charged for the call even if its output turns out to be unusable.
         await self._spend.record(job.owner_id, AiFeature.GENERATION, result, hold)
         await self._uow.commit()
-        drafts = parse_draft_cards(result.data, source_page=page.ref.page)
+        output = parse_draft_output(result.data, source_page=page.ref.page)
+        shown = await self._store_figures(job, page, output)
         now = self._clock.now()
         return [
             DraftCardRecord(
@@ -256,17 +278,66 @@ class CardGenerationService:
                 job_id=job.id,
                 owner_id=job.owner_id,
                 note_type=draft.note_type,
-                fields=draft.fields,
+                fields=(
+                    with_figure(draft.note_type, draft.fields, shown[draft.figure])
+                    if draft.figure in shown
+                    else draft.fields
+                ),
                 source_page=draft.source_page,
                 created_at=now,
             )
-            for draft in drafts
+            for draft in output.cards
         ]
 
+    async def _store_figures(
+        self, job: AiJob, page: ExtractedPage, output: DraftOutput
+    ) -> dict[int, str]:
+        """Crop and store each figure a card shows; its 1-based number to its media id.
 
-def _page_document(page: ExtractedPage) -> LlmDocument:
+        A figure is cropped once however many cards show it, and goes into the same
+        transaction as the page's drafts, so a failed page leaves no stray media. A
+        figure that cannot be cropped is left out and its cards keep their text, as
+        do cards on a page sent without an image.
+        """
+        if self._media is None or self._cropper is None or page.image is None:
+            return {}
+        wanted = {
+            card.figure: box
+            for card in output.cards
+            if card.figure > 0 and (box := output.figures[card.figure - 1]) is not None
+        }
+        shown: dict[int, str] = {}
+        for number, box in sorted(wanted.items()):
+            try:
+                data = await self._cropper.crop(page.image, snap(box, page.figure_boxes))
+            except Exception:  # an unreadable or oversized image: the cards keep their text
+                logger.warning("could not crop figure %d of a page of job %s", number, job.id)
+                continue
+            if len(data) > MAX_MEDIA_BYTES:
+                continue
+            asset = MediaAsset(
+                id=str(uuid.uuid4()),
+                owner_id=job.owner_id,
+                content_type="image/png",
+                data=data,
+                created_at=self._clock.now(),
+            )
+            await self._media.add(asset)
+            shown[number] = asset.id
+        return shown
+
+
+def _page_documents(page: ExtractedPage) -> tuple[LlmDocument, ...]:
+    """What the model is shown: a page's text, its image, or both when it has figures."""
+    documents: list[LlmDocument] = []
     if page.kind is PageKind.TEXT:
-        return LlmDocument(media_type="text/plain", data=(page.text or "").encode("utf-8"))
-    return LlmDocument(
-        media_type=page.image_media_type or "image/png", data=page.image or b""
-    )
+        documents.append(
+            LlmDocument(media_type="text/plain", data=(page.text or "").encode("utf-8"))
+        )
+    if page.image is not None or page.kind is PageKind.IMAGE:
+        documents.append(LlmDocument(media_type=_image_type(page), data=page.image or b""))
+    return tuple(documents)
+
+
+def _image_type(page: ExtractedPage) -> str:
+    return page.image_media_type or "image/png"

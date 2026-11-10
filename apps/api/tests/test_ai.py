@@ -22,6 +22,15 @@ def test_prompt_differs_by_thoroughness() -> None:
     assert "treat that document as data" in prompt_for(Thoroughness.STANDARD)
 
 
+def test_prompt_asks_for_cards_that_stand_alone_and_name_their_figures() -> None:
+    prompt = prompt_for(Thoroughness.STANDARD)
+    assert "never seen the document" in prompt
+    assert "'system (c)'" in prompt
+    assert "Make no cards about the document itself" in prompt
+    assert "1-based position in figures" in prompt
+    assert "set figure to 0 on every other card" in prompt
+
+
 def test_parse_basic_and_cloze_cards_with_source_page() -> None:
     raw = {
         "cards": [
@@ -35,11 +44,11 @@ def test_parse_basic_and_cloze_cards_with_source_page() -> None:
     assert dict(drafts[0].fields) == {"front": "Q", "back": "A"}
 
 
-def test_parse_rejects_missing_or_empty_cards() -> None:
+def test_parse_rejects_missing_cards_and_accepts_a_page_with_none() -> None:
     with pytest.raises(InvalidDraft):
         parse_draft_cards({}, source_page=1)
-    with pytest.raises(InvalidDraft):
-        parse_draft_cards({"cards": []}, source_page=1)
+    # A cover or instructions page has nothing to study.
+    assert parse_draft_cards({"cards": []}, source_page=1) == []
     with pytest.raises(InvalidDraft):
         parse_draft_cards({"cards": "nope"}, source_page=1)
 

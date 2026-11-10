@@ -13,6 +13,7 @@ from flashcards.domain.audit import AuditEvent
 from flashcards.domain.chat import Passage
 from flashcards.domain.deck_export import DeckExport, ExportFormat
 from flashcards.domain.decks import Deck
+from flashcards.domain.figures import FigureBox
 from flashcards.domain.goals import Goal
 from flashcards.domain.invites import Invite
 from flashcards.domain.jobs import AiJob
@@ -664,6 +665,16 @@ class MediaTypeSniffer(Protocol):
         """Return the media content type from the bytes, or raise UnsupportedMedia.
 
         The declared Content-Type and filename are never trusted.
+        """
+        ...
+
+
+class FigureCropper(Protocol):
+    async def crop(self, image: bytes, box: FigureBox) -> bytes:
+        """The part of a page image inside the box, as a PNG (raises UnreadableDocument).
+
+        The image is untrusted, so implementations decode it off the event loop and
+        bound the pixels they render.
         """
         ...
 

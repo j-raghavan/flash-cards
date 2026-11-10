@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from flashcards.adapters.apkg import ApkgReader
 from flashcards.adapters.deck_export import FileDeckExportWriter
-from flashcards.adapters.extraction import PyMuPDFExtractor
+from flashcards.adapters.extraction import PyMuPDFExtractor, PyMuPDFFigureCropper
 from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.job_queue import InProcessJobQueue
 from flashcards.adapters.llm import NullLLMProvider
@@ -103,6 +103,7 @@ from flashcards.domain.ports import (
     DeckRepository,
     DocumentExtractor,
     DraftCardRepository,
+    FigureCropper,
     GoalRepository,
     InviteRepository,
     JobQueue,
@@ -195,6 +196,8 @@ class Repositories:
     # Most pages (or transcript chunks) one AI source document may have
     # (FLASHCARDS_MAX_UPLOAD_PAGES).
     max_upload_pages: int = DEFAULT_MAX_UPLOAD_PAGES
+    # Crops the figures generated cards show out of their page (domain.figures).
+    figure_cropper: FigureCropper = field(default_factory=PyMuPDFFigureCropper)
     # Lets the generation worker commit progress as it goes (ADR 0012).
     unit_of_work: UnitOfWork = field(default_factory=NullUnitOfWork)
     # Holds on the spend cap (ADR 0019). SQL mode passes its own; otherwise holds
@@ -331,6 +334,8 @@ def build_services(repos: Repositories) -> Container:
         spend,
         max_pages=repos.max_upload_pages,
         users=repos.users,
+        media=repos.media,
+        cropper=repos.figure_cropper,
     )
     note_types = NoteTypeService(
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock

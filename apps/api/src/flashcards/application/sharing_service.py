@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
 from flashcards.domain.decks import Deck, DeckNotFound
+from flashcards.domain.figures import media_ids, with_media_ids
 from flashcards.domain.invites import hash_token
 from flashcards.domain.media import MediaAsset
 from flashcards.domain.note_types import MAX_NOTE_TYPES_PER_OWNER, CustomNoteType, TooManyNoteTypes
@@ -254,7 +255,7 @@ class SharingService:
                     owner_id=owner_id,
                     deck_id=created.id,
                     note_type=note.note_type,
-                    fields=dict(note.fields),
+                    fields=dict(with_media_ids(note.fields, image_copies)),
                     tags=note.tags,
                     custom=type_copies[note.note_type_id] if note.note_type_id else None,
                     occlusion=occlusion,
@@ -262,8 +263,14 @@ class SharingService:
         return await self._decks.get(owner_id=owner_id, deck_id=new_ids[link.deck_id])
 
     async def _images(self, link: ShareLink, notes: list[Note]) -> list[MediaAsset]:
-        """The distinct occlusion images the clone copies, within the byte cap."""
+        """The distinct images the clone copies, within the byte cap.
+
+        Occlusion images, and the figures generated cards show in their text. A
+        figure reference naming media the link owner does not own (text anyone
+        could have typed) is not copied, and stays as written.
+        """
         image_ids = dict.fromkeys(n.occlusion.image_id for n in notes if n.occlusion is not None)
+        figure_ids = dict.fromkeys(i for n in notes for i in media_ids(n.fields))
         images: list[MediaAsset] = []
         total = 0
         for image_id in image_ids:
@@ -271,10 +278,15 @@ class SharingService:
             # Checked when the note was saved, and media outlives the owner's notes.
             if asset is None or asset.owner_id != link.owner_id:  # pragma: no cover
                 raise ShareNotFound(link.id)
+            images.append(asset)
+        for figure_id in (i for i in figure_ids if i not in image_ids):
+            asset = await self._media.get(figure_id)
+            if asset is not None and asset.owner_id == link.owner_id:
+                images.append(asset)
+        for asset in images:
             total += len(asset.data)
             if total > MAX_CLONE_MEDIA_BYTES:
                 raise CloneTooLarge(link.id)
-            images.append(asset)
         return images
 
     async def _owned(self, owner_id: str, link_id: str) -> ShareLink:

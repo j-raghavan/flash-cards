@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 
-import { renderMarkdown } from "./markdown";
+import { mediaSource, renderMarkdown } from "./markdown";
 
 function dom(html: string): HTMLElement {
   const div = document.createElement("div");
@@ -80,6 +80,18 @@ describe("renderMarkdown", () => {
 
   it("keeps KaTeX styling", () => {
     expect(dom(renderMarkdown("$x^2$")).querySelector(".katex [style]")).not.toBeNull();
+  });
+
+  it("shows a generated card's media: figure from the API, escaping its id", () => {
+    const root = dom(renderMarkdown("![Figure](media:abc-1)\n\nWhich side is shaded? ![x](media:a/b%3F)"));
+    const sources = [...root.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+    expect(sources).toEqual(["/api/media/abc-1", "/api/media/a%2Fb%253F"]);
+    expect(root.querySelector("img")?.getAttribute("alt")).toBe("Figure");
+  });
+
+  it("leaves other image sources for the sanitizer", () => {
+    expect(mediaSource("/api/media/1")).toBe("/api/media/1");
+    expect(mediaSource("https://tracker.example/p.gif")).toBe("https://tracker.example/p.gif");
   });
 
   it("loads images only from this app or inline data", () => {

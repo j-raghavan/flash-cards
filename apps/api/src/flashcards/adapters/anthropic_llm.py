@@ -28,6 +28,7 @@ from anthropic.types import (
 from flashcards.domain.ai import (
     LlmDocument,
     LlmError,
+    OutputTruncated,
     StructuredRequest,
     StructuredResult,
     TokenUsage,
@@ -63,12 +64,15 @@ class AnthropicLLMProvider:
 
         if response.stop_reason == "refusal":
             raise LlmError("the model declined the request")
-
-        data = _parse_json_object(_first_text(response))
         usage = TokenUsage(
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
         )
+        if response.stop_reason == "max_tokens":
+            # The provider worked and billed the call; the cut-off output is unusable.
+            raise OutputTruncated(usage, response.model)
+
+        data = _parse_json_object(_first_text(response))
         return StructuredResult(data=data, usage=usage, model=response.model)
 
 

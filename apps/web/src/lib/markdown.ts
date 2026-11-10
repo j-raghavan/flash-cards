@@ -6,9 +6,33 @@
 
 import DOMPurify from "dompurify";
 import katex from "katex";
-import { marked } from "marked";
+import { marked, type Tokens } from "marked";
 
-marked.use({ gfm: true, breaks: true, async: false });
+import { apiUrl } from "../api/client";
+
+marked.use({
+  gfm: true,
+  breaks: true,
+  async: false,
+  // A figure a generated card shows is stored as media and named `media:<id>` in
+  // the card's text, so the text does not depend on where the API is mounted.
+  walkTokens(token) {
+    if (token.type === "image") {
+      const image = token as Tokens.Image;
+      image.href = mediaSource(image.href);
+    }
+  },
+});
+
+const MEDIA_SCHEME = "media:";
+
+/** The API URL of a `media:<id>` image; any other source is left as written. */
+export function mediaSource(href: string): string {
+  if (!href.startsWith(MEDIA_SCHEME)) {
+    return href;
+  }
+  return apiUrl(`/media/${encodeURIComponent(href.slice(MEDIA_SCHEME.length))}`);
+}
 
 let hooksInstalled = false;
 
