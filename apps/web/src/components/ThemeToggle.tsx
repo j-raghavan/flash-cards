@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The header's quick switch between light and dark. It picks the other one of
-// what the page shows now; the full choice (and the colour) is on the Account page.
+// what the page shows now, which follows the device live when the user has not
+// picked; the full choice (and the colour) is on the Account page.
 
-import { isDark } from "../lib/appearance";
+import { useSyncExternalStore } from "react";
+
+import { deviceIsDark, isDark, onDeviceThemeChange } from "../lib/appearance";
 import type { AppearanceChoice } from "../lib/useAppearance";
 
 function Sun() {
@@ -25,7 +28,8 @@ function Moon() {
 }
 
 export function ThemeToggle({ choice }: { choice: AppearanceChoice }) {
-  const dark = isDark(choice.appearance.theme);
+  const deviceDark = useSyncExternalStore(onDeviceThemeChange, deviceIsDark);
+  const dark = isDark(choice.appearance.theme, deviceDark);
   const label = dark ? "Switch to light theme" : "Switch to dark theme";
   return (
     <button

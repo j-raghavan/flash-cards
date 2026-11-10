@@ -51,6 +51,7 @@ export function applyAppearance(appearance: Appearance): void {
   const root = document.documentElement;
   root.dataset.theme = appearance.theme;
   root.dataset.accent = appearance.accent;
+  paintBrowserBar(appearance.theme);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(appearance));
   } catch {
@@ -73,10 +74,38 @@ function savedAppearance(): { theme?: unknown; accent?: unknown } | null {
   }
 }
 
-/** Whether the page is dark right now: picked, or following a dark device. */
-export function isDark(theme: Theme): boolean {
-  if (theme !== "system") {
-    return theme === "dark";
+// The page background in each mode, which the browser's own bar (theme-color)
+// matches: index.html has one tag per system mode.
+const BAR_COLOUR = { light: "#f4f7fb", dark: "#0b1120" } as const;
+
+/** Make the browser bar match a picked mode; following the device, each tag keeps its own. */
+function paintBrowserBar(theme: Theme): void {
+  for (const tag of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    const mode = (tag.getAttribute("media") ?? "").includes("dark") ? "dark" : "light";
+    tag.content = BAR_COLOUR[theme === "system" ? mode : theme];
   }
-  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+const DARK_DEVICE = "(prefers-color-scheme: dark)";
+
+/** Whether the device asks for dark; false where it cannot say. */
+export function deviceIsDark(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia(DARK_DEVICE).matches;
+}
+
+/** Call back whenever the device switches between light and dark; returns the unsubscribe. */
+export function onDeviceThemeChange(callback: () => void): () => void {
+  if (typeof window.matchMedia !== "function") {
+    return () => undefined;
+  }
+  const query = window.matchMedia(DARK_DEVICE);
+  query.addEventListener("change", callback);
+  return () => {
+    query.removeEventListener("change", callback);
+  };
+}
+
+/** Whether the page is dark right now: picked, or following a dark device. */
+export function isDark(theme: Theme, deviceDark: boolean = deviceIsDark()): boolean {
+  return theme === "system" ? deviceDark : theme === "dark";
 }

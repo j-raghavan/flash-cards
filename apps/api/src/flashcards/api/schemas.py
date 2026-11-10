@@ -865,6 +865,8 @@ class UserExportOut(BaseModel):
     email: str
     role: Role
     created_at: datetime
+    theme: Theme
+    accent: Accent
 
 
 class DeckExportOut(BaseModel):
@@ -963,6 +965,8 @@ class AccountExportOut(BaseModel):
                 email=export.user.email,
                 role=export.user.role,
                 created_at=export.user.created_at,
+                theme=export.user.appearance.theme,
+                accent=export.user.appearance.accent,
             ),
             decks=[
                 DeckExportOut(

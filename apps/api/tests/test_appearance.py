@@ -64,6 +64,10 @@ def test_the_look_is_saved_on_the_account_and_sent_with_the_user(
     }
     assert ada.patch("/account/appearance", json={}).json() == {"theme": "dark", "accent": "rose"}
 
+    # It is part of the account's data export.
+    exported = ada.get("/account/export").json()["user"]
+    assert (exported["theme"], exported["accent"]) == ("dark", "rose")
+
     # It follows the user to a new sign-in, and is theirs alone.
     other = TestClient(app)
     login = other.post("/auth/login", json={"email": "ada@example.com", "password": PASSWORD})

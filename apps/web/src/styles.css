@@ -70,6 +70,9 @@
   --pal-accent-strong-l: #115e59;
   --pal-accent-soft-l: #ccfbf1;
   --pal-accent-text-l: #ffffff;
+  --deep-1: #0e7490;
+  --deep-2: #047857;
+  --deep-3: #3f6212;
   --brand-1: #06b6d4;
   --brand-2: #10b981;
   --brand-3: #84cc16;
@@ -90,6 +93,9 @@
   --pal-accent-strong-l: #4338ca;
   --pal-accent-soft-l: #e0e7ff;
   --pal-accent-text-l: #ffffff;
+  --deep-1: #4338ca;
+  --deep-2: #6d28d9;
+  --deep-3: #86198f;
   --brand-1: #6366f1;
   --brand-2: #8b5cf6;
   --brand-3: #d946ef;
@@ -110,6 +116,9 @@
   --pal-accent-strong-l: #9f1239;
   --pal-accent-soft-l: #ffe4e6;
   --pal-accent-text-l: #ffffff;
+  --deep-1: #be123c;
+  --deep-2: #9f1239;
+  --deep-3: #9a3412;
   --brand-1: #f43f5e;
   --brand-2: #fb7185;
   --brand-3: #fb923c;
@@ -126,14 +135,17 @@
 }
 
 :root[data-accent="amber"] {
-  --pal-accent-l: #b45309;
+  --pal-accent-l: #a64b08;
   --pal-accent-strong-l: #92400e;
   --pal-accent-soft-l: #fef3c7;
   --pal-accent-text-l: #ffffff;
+  --deep-1: #a64b08;
+  --deep-2: #c2410c;
+  --deep-3: #9a3412;
   --brand-1: #f59e0b;
   --brand-2: #f97316;
   --brand-3: #ef4444;
-  --pal-button-l: linear-gradient(135deg, #b45309 0%, #c2410c 50%, #9a3412 100%);
+  --pal-button-l: linear-gradient(135deg, #a64b08 0%, #c2410c 50%, #9a3412 100%);
   --pal-glow-1-l: rgb(245 158 11 / 16%);
   --pal-glow-2-l: rgb(249 115 22 / 12%);
   --pal-accent-d: #fbbf24;
@@ -725,8 +737,8 @@ kbd {
     padding: 48px clamp(32px, 5vw, 72px);
     overflow: hidden;
     color: #ffffff;
-    /* Deep enough that white text passes AA everywhere on it. */
-    background: linear-gradient(135deg, #0e7490 0%, #047857 60%, #3f6212 100%);
+    /* Deep enough that white text passes AA everywhere on it, in every palette. */
+    background: linear-gradient(135deg, var(--deep-1) 0%, var(--deep-2) 60%, var(--deep-3) 100%);
     border-radius: 28px;
     box-shadow: var(--shadow-lg);
   }

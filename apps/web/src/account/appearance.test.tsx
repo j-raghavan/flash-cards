@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AuthProvider } from "../auth/AuthContext";
+import { AuthProvider, useAuth } from "../auth/AuthContext";
 import { appearanceOf, applyAppearance, isDark, restoreAppearance } from "../lib/appearance";
 import { useAppearance } from "../lib/useAppearance";
 import { USER, mockApi, renderApp } from "../test/helpers";
@@ -12,11 +12,40 @@ import { USER, mockApi, renderApp } from "../test/helpers";
 const KEY = "flashcards.appearance";
 const root = document.documentElement;
 
-function deviceIsDark(dark: boolean): void {
+/** A device in light or dark mode; flip() switches it, as at sunset, and tells listeners. */
+function deviceIsDark(dark: boolean): { flip: () => void } {
+  let current = dark;
+  const listeners = new Set<() => void>();
   vi.stubGlobal(
     "matchMedia",
-    vi.fn((query: string) => ({ matches: dark && query === "(prefers-color-scheme: dark)" })),
+    vi.fn((query: string) => ({
+      get matches() {
+        return current && query === "(prefers-color-scheme: dark)";
+      },
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    })),
   );
+  return {
+    flip: () => {
+      current = !current;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
+}
+
+/** Answers held until the test releases them, to make changes overlap. */
+function heldAnswers() {
+  const held: { body: unknown; release: (answer: { status?: number; body: unknown }) => void }[] = [];
+  return {
+    held,
+    route: (call: { body?: unknown }) =>
+      new Promise<{ status?: number; body: unknown }>((release) => {
+        held.push({ body: call.body, release });
+      }),
+  };
 }
 
 afterEach(() => {
@@ -72,6 +101,27 @@ describe("appearance helpers", () => {
       }
       restoreAppearance();
       expect([root.dataset.theme, root.dataset.accent]).toEqual(["system", "teal"]);
+    }
+  });
+
+  it("makes the browser bar match a picked mode, and each system tag its own otherwise", () => {
+    document.head.insertAdjacentHTML(
+      "beforeend",
+      '<meta name="theme-color" content="#f4f7fb" media="(prefers-color-scheme: light)" />' +
+        '<meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)" />' +
+        '<meta name="theme-color" content="#f4f7fb" />',
+    );
+    const tags = (): string[] =>
+      [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((tag) => tag.content);
+    applyAppearance({ theme: "dark", accent: "teal" });
+    expect(tags()).toEqual(["#0b1120", "#0b1120", "#0b1120"]);
+    applyAppearance({ theme: "light", accent: "teal" });
+    expect(tags()).toEqual(["#f4f7fb", "#f4f7fb", "#f4f7fb"]);
+    applyAppearance({ theme: "system", accent: "teal" });
+    // A tag for no particular mode counts as the light one.
+    expect(tags()).toEqual(["#f4f7fb", "#0b1120", "#f4f7fb"]);
+    for (const tag of document.querySelectorAll('meta[name="theme-color"]')) {
+      tag.remove();
     }
   });
 
@@ -161,6 +211,126 @@ describe("appearance choice", () => {
         { theme: "dark" },
       ]);
     });
+  });
+
+  it("turns the header switch around when the device changes mode", async () => {
+    const device = deviceIsDark(false);
+    mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [] } });
+    const { unmount } = renderApp("/");
+    expect(await screen.findByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
+    act(() => {
+      device.flip();
+    });
+    expect(screen.getByRole("button", { name: "Switch to light theme" })).toBeInTheDocument();
+    unmount(); // and stops listening
+    expect(() => {
+      device.flip();
+    }).not.toThrow();
+  });
+
+  it("keeps a header switch working where the device cannot say its mode", async () => {
+    vi.stubGlobal("matchMedia", undefined);
+    mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [] } });
+    renderApp("/");
+    expect(await screen.findByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
+  });
+
+  it("lets the newest of overlapping changes decide the look, whatever order the answers come in", async () => {
+    const answers = heldAnswers();
+    mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [] }, "PATCH /account/appearance": answers.route });
+    renderApp("/");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Switch to dark theme" }));
+    await user.click(screen.getByRole("button", { name: "Switch to light theme" }));
+    expect(root.dataset.theme).toBe("light");
+    await waitFor(() => {
+      expect(answers.held).toHaveLength(2);
+    });
+    // The newer answer arrives first; the older one, arriving last, changes nothing.
+    await act(async () => {
+      answers.held[1]?.release({ body: { theme: "light", accent: "teal" } });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      answers.held[0]?.release({ body: { theme: "dark", accent: "teal" } });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(root.dataset.theme).toBe("light");
+    });
+    expect(screen.getByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
+  });
+
+  it("falls back to the newest saved look when the latest of overlapping changes fails", async () => {
+    const answers = heldAnswers();
+    mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [] }, "PATCH /account/appearance": answers.route });
+    renderApp("/");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Switch to dark theme" }));
+    await user.click(screen.getByRole("button", { name: "Switch to light theme" }));
+    await waitFor(() => {
+      expect(answers.held).toHaveLength(2);
+    });
+    await act(async () => {
+      answers.held[0]?.release({ body: { theme: "dark", accent: "teal" } });
+      await Promise.resolve();
+    });
+    // An older answer only records what is saved; the page still shows the newer pick.
+    expect(root.dataset.theme).toBe("light");
+    await act(async () => {
+      answers.held[1]?.release({ status: 500, body: { detail: "Could not save." } });
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not save.");
+    expect(root.dataset.theme).toBe("dark");
+  });
+
+  it("ignores an older change failing while a newer one is on its way", async () => {
+    const answers = heldAnswers();
+    mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [] }, "PATCH /account/appearance": answers.route });
+    renderApp("/");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Switch to dark theme" }));
+    await user.click(screen.getByRole("button", { name: "Switch to light theme" }));
+    await waitFor(() => {
+      expect(answers.held).toHaveLength(2);
+    });
+    await act(async () => {
+      answers.held[0]?.release({ status: 500, body: { detail: "Could not save." } });
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(root.dataset.theme).toBe("light");
+    await act(async () => {
+      answers.held[1]?.release({ body: { theme: "light", accent: "teal" } });
+      await Promise.resolve();
+    });
+    expect(root.dataset.theme).toBe("light");
+  });
+
+  it("does not bring back a user who signed out while a change was saving", async () => {
+    const answers = heldAnswers();
+    mockApi({ "GET /auth/me": { body: USER }, "PATCH /account/appearance": answers.route });
+    const wrapper = ({ children }: { children: ReactNode }) => <AuthProvider>{children}</AuthProvider>;
+    const { result } = renderHook(() => ({ auth: useAuth(), look: useAppearance() }), { wrapper });
+    await waitFor(() => {
+      expect(result.current.auth.user).not.toBeNull();
+    });
+    let saving: Promise<void> = Promise.resolve();
+    act(() => {
+      saving = result.current.look.change({ theme: "dark" });
+    });
+    await waitFor(() => {
+      expect(answers.held).toHaveLength(1);
+    });
+    act(() => {
+      result.current.auth.signedOut();
+    });
+    await act(async () => {
+      answers.held[0]?.release({ body: { theme: "dark", accent: "teal" } });
+      await saving;
+    });
+    expect(result.current.auth.user).toBeNull();
   });
 
   it("does nothing without a signed-in user", async () => {
