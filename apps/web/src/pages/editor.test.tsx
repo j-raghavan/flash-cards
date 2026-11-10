@@ -124,13 +124,24 @@ describe("edit card", () => {
     renderApp("/notes/n1/edit");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Delete note" }));
-    expect(screen.getByRole("alertdialog")).toHaveTextContent("its 1 card and their review history");
+    expect(screen.getByRole("alertdialog")).toHaveAccessibleDescription(
+      "Delete this note, its 1 card and their review history?",
+    );
     await user.click(screen.getByRole("button", { name: "Delete for good" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
     fail = false;
     await user.click(screen.getByRole("button", { name: "Delete note" }));
     await user.click(screen.getByRole("button", { name: "Delete for good" }));
     expect(await screen.findByRole("heading", { name: "Deck not found" })).toBeInTheDocument();
+  });
+
+  it("warns an admin that deleting a note erases members' progress on its cards", async () => {
+    mockApi({ "GET /auth/me": { body: { ...USER, role: "admin" } }, "GET /notes/n1": { body: note() } });
+    renderApp("/notes/n1/edit");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Delete note" }));
+    expect(screen.getByRole("alertdialog")).toHaveAccessibleDescription(
+      "Delete this note, its 1 card and their review history? It is in every member's library: members who studied its cards lose their progress on them.",
+    );
   });
 
   it("edits the fields of custom and image occlusion notes as plain fields", async () => {

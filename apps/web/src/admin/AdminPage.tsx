@@ -3,11 +3,11 @@
 // invites, instance quotas, AI usage and the audit log. Admins can also create
 // accounts and set passwords directly, for instances without outgoing mail. The server checks the admin role on every call; this screen only
 // hides itself from members and keeps admins from acting on their own account.
-// An admin's decks are the members' library (ADR 0024), so making someone an
-// admin, or unsuspending one, asks first.
+// An admin's decks are the members' library (ADR 0024), so any change that adds
+// an account's decks to the library or takes them out of it asks first.
 // Loaded on first visit, so members never download it.
 
-import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
 import { adminUsage } from "../api/adminUsage";
 import { describeError } from "../api/client";
@@ -37,6 +37,43 @@ export function inviteUrl(token: string): string {
 }
 
 // --- users ---
+
+/** A change that publishes an account's decks to every member, or withdraws them. */
+type LibraryChange = "promote" | "unsuspend" | "demote" | "suspend";
+
+const WITHDRAWN = "Their decks leave the library for every member; members keep their progress.";
+
+const LIBRARY_CHANGES: Record<
+  LibraryChange,
+  { label: (email: string) => string; prompt: (email: string) => string; confirm: string; done: string }
+> = {
+  promote: {
+    label: (email) => `Make ${email} an admin`,
+    prompt: (email) =>
+      `Make ${email} an admin? Every deck they own, including decks made as a member, becomes visible to every member at once, read-only.`,
+    confirm: "Make admin and share their decks",
+    done: "Role set to admin.",
+  },
+  unsuspend: {
+    label: (email) => `Unsuspend ${email}`,
+    prompt: (email) =>
+      `Unsuspend ${email}? They are an admin, so every deck they own becomes visible to every member again, read-only.`,
+    confirm: "Unsuspend and share their decks",
+    done: "Unsuspended.",
+  },
+  demote: {
+    label: (email) => `Make ${email} a member`,
+    prompt: (email) => `Make ${email} a member? ${WITHDRAWN}`,
+    confirm: "Make member",
+    done: "Role set to member.",
+  },
+  suspend: {
+    label: (email) => `Suspend ${email}`,
+    prompt: (email) => `Suspend ${email}? Their sessions end. ${WITHDRAWN}`,
+    confirm: "Suspend",
+    done: "Suspended; their sessions have ended.",
+  },
+};
 
 function UserRow({
   account,
@@ -75,8 +112,9 @@ function UserRow({
     setQuotaOpen(false);
     quotaButton.current?.focus();
   };
-  // A change that publishes this account's decks to every member waits for a yes.
-  const [publishing, setPublishing] = useState<"promote" | "unsuspend" | null>(null);
+  // A change to what this account adds to the library waits for a yes.
+  const [publishing, setPublishing] = useState<LibraryChange | null>(null);
+  const promptId = useId();
   const roleSelect = useRef<HTMLSelectElement>(null);
   const suspendButton = useRef<HTMLButtonElement>(null);
   const keepCancel = useRef<HTMLButtonElement>(null);
@@ -93,7 +131,19 @@ function UserRow({
     }
   }, [action.busy, publishing]);
   const publishingTrigger = (): HTMLElement | null =>
-    publishing === "promote" ? roleSelect.current : suspendButton.current;
+    publishing === "promote" || publishing === "demote" ? roleSelect.current : suspendButton.current;
+  const runChange = (change: LibraryChange): void => {
+    const done = LIBRARY_CHANGES[change].done;
+    if (change === "promote") {
+      act(() => admin.setRole(account.id, "admin"), done);
+    } else if (change === "demote") {
+      act(() => admin.setRole(account.id, "member"), done);
+    } else if (change === "unsuspend") {
+      act(() => admin.unsuspend(account.id), done);
+    } else {
+      act(() => admin.suspend(account.id), done);
+    }
+  };
 
   const act = (run: () => Promise<AdminUser>, done: string): void => {
     setNote(null);
@@ -117,12 +167,8 @@ function UserRow({
             value={account.role}
             disabled={self || action.busy}
             onChange={(event) => {
-              const role = event.target.value as Role;
-              if (role === "admin") {
-                setPublishing("promote");
-              } else {
-                act(() => admin.setRole(account.id, role), `Role set to ${role}.`);
-              }
+              // Either way the account's decks join or leave the library.
+              setPublishing((event.target.value as Role) === "admin" ? "promote" : "demote");
             }}
           >
             <option value="member">Member</option>
@@ -167,7 +213,7 @@ function UserRow({
                       if (account.role === "admin") {
                         setPublishing("unsuspend");
                       } else {
-                        act(() => admin.unsuspend(account.id), "Unsuspended.");
+                        runChange("unsuspend");
                       }
                     }}
                   >
@@ -181,7 +227,11 @@ function UserRow({
                     disabled={action.busy}
                     aria-label={`Suspend ${account.email}`}
                     onClick={() => {
-                      act(() => admin.suspend(account.id), "Suspended; their sessions have ended.");
+                      if (account.role === "admin") {
+                        setPublishing("suspend");
+                      } else {
+                        runChange("suspend");
+                      }
                     }}
                   >
                     Suspend
@@ -240,7 +290,11 @@ function UserRow({
                 <ConfirmButton
                   label={`Delete ${account.email}`}
                   confirmLabel="Delete account"
-                  prompt={`Delete ${account.email} and all their decks, cards and history? This cannot be undone.`}
+                  prompt={
+                    account.role === "admin"
+                      ? `Delete ${account.email} and all their decks, cards and history, and every member's progress on their decks? This cannot be undone.`
+                      : `Delete ${account.email} and all their decks, cards and history? This cannot be undone.`
+                  }
                   onConfirm={async () => {
                     setRemoveError(null);
                     try {
@@ -268,7 +322,8 @@ function UserRow({
             <div
               className="confirm"
               role="alertdialog"
-              aria-label={publishing === "promote" ? `Make ${account.email} an admin` : `Unsuspend ${account.email}`}
+              aria-label={LIBRARY_CHANGES[publishing].label(account.email)}
+              aria-describedby={promptId}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   publishingTrigger()?.focus();
@@ -276,26 +331,18 @@ function UserRow({
                 }
               }}
             >
-              <p>
-                {publishing === "promote"
-                  ? `Make ${account.email} an admin? Every deck they own, including decks made as a member, becomes visible to every member at once, read-only.`
-                  : `Unsuspend ${account.email}? They are an admin, so every deck they own becomes visible to every member again, read-only.`}
-              </p>
+              <p id={promptId}>{LIBRARY_CHANGES[publishing].prompt(account.email)}</p>
               <div className="row">
                 <button
                   type="button"
                   className="button primary"
                   onClick={() => {
                     refocus.current = publishingTrigger();
-                    if (publishing === "promote") {
-                      act(() => admin.setRole(account.id, "admin"), "Role set to admin.");
-                    } else {
-                      act(() => admin.unsuspend(account.id), "Unsuspended.");
-                    }
+                    runChange(publishing);
                     setPublishing(null);
                   }}
                 >
-                  {publishing === "promote" ? "Make admin and share their decks" : "Unsuspend and share their decks"}
+                  {LIBRARY_CHANGES[publishing].confirm}
                 </button>
                 <button
                   type="button"

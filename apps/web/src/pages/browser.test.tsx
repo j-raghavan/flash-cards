@@ -179,6 +179,7 @@ describe("card browser", () => {
     await user.selectOptions(screen.getByLabelText("Action"), "delete");
     await user.click(screen.getByRole("button", { name: "Apply" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete the notes behind 1 card?");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("library"); // a member's cards are their own
     await user.click(screen.getByLabelText("Select Card 2"));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete the notes behind 2 cards?");
     expect(calls.some((c) => c.path === "/cards/bulk")).toBe(false);
@@ -186,6 +187,22 @@ describe("card browser", () => {
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await user.click(screen.getByRole("button", { name: "Delete for good" }));
     expect(await screen.findByText("too many")).toBeInTheDocument();
+  });
+
+  it("warns an admin that a bulk delete erases members' progress on those cards", async () => {
+    mockApi({
+      ...base,
+      "GET /auth/me": { body: { ...USER, role: "admin" } },
+      "GET /cards": { body: { total: 1, cards: [row(1)] } },
+    });
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByLabelText("Select Card 1"));
+    await user.selectOptions(screen.getByLabelText("Action"), "delete");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Delete the notes behind 1 card? Every card of those notes goes too. They are in every member's library: members who studied them lose their progress on them.",
+    );
   });
 
   it("explains an empty result and a failed search", async () => {

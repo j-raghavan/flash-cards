@@ -7,6 +7,7 @@ import { lazy, Suspense, useId, useRef, useState, type KeyboardEvent, type RefOb
 import { Link, useNavigate, useParams } from "react-router";
 
 import { describeError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { notes, noteTypes, type NoteExtras } from "../api/endpoints";
 import type { Fields, Note, NoteType, Occlusion } from "../api/types";
 import { LibraryNotice } from "../components/LibraryGuard";
@@ -322,6 +323,7 @@ export function EditNotePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   useDocumentTitle("Edit card");
+  const admin = useAuth().user?.role === "admin";
 
   if (note.error !== null) {
     return <ErrorText message={note.error} />;
@@ -348,7 +350,10 @@ export function EditNotePage() {
         <ConfirmButton
           label="Delete note"
           confirmLabel="Delete for good"
-          prompt={`Delete this note, its ${loaded.cards.length} card${loaded.cards.length === 1 ? "" : "s"} and their review history?`}
+          prompt={`Delete this note, its ${loaded.cards.length} card${loaded.cards.length === 1 ? "" : "s"} and their review history?${
+            // An admin's notes are in every member's library (ADR 0024).
+            admin ? " It is in every member's library: members who studied its cards lose their progress on them." : ""
+          }`}
           onConfirm={async () => {
             setDeleteError(null);
             await notes.remove(loaded.id).then(

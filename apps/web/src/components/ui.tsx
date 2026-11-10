@@ -59,6 +59,7 @@ export function ConfirmButton({ label, prompt, confirmLabel, onConfirm }: Confir
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const promptId = useId();
 
   useEffect(() => {
     if (asking) {
@@ -80,8 +81,8 @@ export function ConfirmButton({ label, prompt, confirmLabel, onConfirm }: Confir
     );
   }
   return (
-    <div className="confirm" role="alertdialog" aria-label={label}>
-      <p>{prompt}</p>
+    <div className="confirm" role="alertdialog" aria-label={label} aria-describedby={promptId}>
+      <p id={promptId}>{prompt}</p>
       <div className="row">
         <button
           type="button"
