@@ -131,6 +131,7 @@ describe("deck list", () => {
     await screen.findByRole("link", { name: "Biology" });
     expect(screen.queryByRole("heading", { name: "Your decks" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Library" })).toBeNull();
+    expect(screen.queryByText(/your decks are shared/)).toBeNull(); // a member's decks are private
   });
 
   it("lets a member with only library decks study them, still offering the guided setup", async () => {
@@ -205,6 +206,22 @@ describe("deck detail", () => {
     renderApp("/decks/l1");
     expect(await screen.findByText("This library deck has no cards yet.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "import an Anki deck" })).toBeNull();
+  });
+
+  it("warns an admin that deleting a deck erases members' progress on it, and says their decks are shared", async () => {
+    const admin = { "GET /auth/me": { body: { ...USER, role: "admin" } } };
+    mockApi({ ...admin, "GET /decks": { body: decks }, "GET /decks/c/stats": { body: STATS } });
+    const { unmount } = renderApp("/decks/c");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Delete deck" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "Delete “Membranes” and every card in it? It is in every member's library: members who studied it lose their progress on it. This cannot be undone.",
+    );
+    unmount();
+    renderApp("/");
+    expect(
+      await screen.findByText("As an admin, your decks are shared with every member as a read-only library."),
+    ).toBeInTheDocument();
   });
 
   it("renames a deck", async () => {

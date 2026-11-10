@@ -7,6 +7,7 @@ import { lazy, Suspense, useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { describeError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { exportDeck, saveFile, type ExportFormat } from "../api/ankiRoundTrip";
 import { decks } from "../api/endpoints";
 import type { Deck, DeckStats } from "../api/types";
@@ -155,6 +156,7 @@ function RenameForm({ deck, onRenamed }: { deck: Deck; onRenamed: (deck: Deck) =
 export function DeckDetailPage() {
   const { deckId = "" } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const all = useResource(() => decks.list(), `decks:${deckId}`);
   const stats = useResource(() => decks.stats(deckId), `stats:${deckId}`);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -282,11 +284,16 @@ export function DeckDetailPage() {
             <ConfirmButton
               label="Delete deck"
               confirmLabel="Delete for good"
-              prompt={
+              prompt={`${
                 subdecks > 0
-                  ? `Delete “${deck.name}”, its ${subdecks} sub-deck${subdecks === 1 ? "" : "s"} and every card in them? This cannot be undone.`
-                  : `Delete “${deck.name}” and every card in it? This cannot be undone.`
-              }
+                  ? `Delete “${deck.name}”, its ${subdecks} sub-deck${subdecks === 1 ? "" : "s"} and every card in them?`
+                  : `Delete “${deck.name}” and every card in it?`
+              }${
+                // An admin's deck is in every member's library (ADR 0024).
+                user?.role === "admin"
+                  ? " It is in every member's library: members who studied it lose their progress on it."
+                  : ""
+              } This cannot be undone.`}
               onConfirm={remove}
             />
           </div>

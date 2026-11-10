@@ -6,6 +6,7 @@ import { useState, type SubmitEvent } from "react";
 import { Link } from "react-router";
 
 import { decks } from "../api/endpoints";
+import { useAuth } from "../auth/AuthContext";
 import type { Deck } from "../api/types";
 import { ErrorText, Loading } from "../components/ui";
 import { OnboardingPrompt } from "../onboarding/OnboardingPrompt";
@@ -135,6 +136,7 @@ export function CreateDeckForm({
 function DeckSections({ all, onCreated }: { all: Deck[]; onCreated: () => void }) {
   const own = ownedDecks(all);
   const library = all.filter((deck) => !deck.owned);
+  const admin = useAuth().user?.role === "admin";
   return (
     <>
       {/* The guided setup opens by itself only when there is nothing to study,
@@ -142,7 +144,12 @@ function DeckSections({ all, onCreated }: { all: Deck[]; onCreated: () => void }
       <OnboardingPrompt deckCount={all.length} />
       {library.length === 0 ? null : <h2>Your decks</h2>}
       {own.length > 0 ? (
-        <DeckGrid nodes={buildDeckTree(own)} />
+        <>
+          <DeckGrid nodes={buildDeckTree(own)} />
+          {admin ? (
+            <p className="muted">As an admin, your decks are shared with every member as a read-only library.</p>
+          ) : null}
+        </>
       ) : library.length > 0 ? (
         <p className="empty">
           No decks of your own yet. Study a library deck, or create one below; the{" "}

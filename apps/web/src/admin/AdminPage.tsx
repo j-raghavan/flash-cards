@@ -3,6 +3,8 @@
 // invites, instance quotas, AI usage and the audit log. Admins can also create
 // accounts and set passwords directly, for instances without outgoing mail. The server checks the admin role on every call; this screen only
 // hides itself from members and keeps admins from acting on their own account.
+// An admin's decks are the members' library (ADR 0024), so making someone an
+// admin, or unsuspending one, asks first.
 // Loaded on first visit, so members never download it.
 
 import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
@@ -73,6 +75,25 @@ function UserRow({
     setQuotaOpen(false);
     quotaButton.current?.focus();
   };
+  // A change that publishes this account's decks to every member waits for a yes.
+  const [publishing, setPublishing] = useState<"promote" | "unsuspend" | null>(null);
+  const roleSelect = useRef<HTMLSelectElement>(null);
+  const suspendButton = useRef<HTMLButtonElement>(null);
+  const keepCancel = useRef<HTMLButtonElement>(null);
+  const refocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (publishing !== null) {
+      keepCancel.current?.focus();
+    }
+  }, [publishing]);
+  useEffect(() => {
+    if (refocus.current !== null && !action.busy) {
+      refocus.current.focus();
+      refocus.current = null;
+    }
+  }, [action.busy, publishing]);
+  const publishingTrigger = (): HTMLElement | null =>
+    publishing === "promote" ? roleSelect.current : suspendButton.current;
 
   const act = (run: () => Promise<AdminUser>, done: string): void => {
     setNote(null);
@@ -91,12 +112,17 @@ function UserRow({
         </th>
         <td>
           <select
+            ref={roleSelect}
             aria-label={`Role of ${account.email}`}
             value={account.role}
             disabled={self || action.busy}
             onChange={(event) => {
               const role = event.target.value as Role;
-              act(() => admin.setRole(account.id, role), `Role set to ${role}.`);
+              if (role === "admin") {
+                setPublishing("promote");
+              } else {
+                act(() => admin.setRole(account.id, role), `Role set to ${role}.`);
+              }
             }}
           >
             <option value="member">Member</option>
@@ -134,10 +160,15 @@ function UserRow({
                   <button
                     type="button"
                     className="button"
+                    ref={suspendButton}
                     disabled={action.busy}
                     aria-label={`Unsuspend ${account.email}`}
                     onClick={() => {
-                      act(() => admin.unsuspend(account.id), "Unsuspended.");
+                      if (account.role === "admin") {
+                        setPublishing("unsuspend");
+                      } else {
+                        act(() => admin.unsuspend(account.id), "Unsuspended.");
+                      }
                     }}
                   >
                     Unsuspend
@@ -146,6 +177,7 @@ function UserRow({
                   <button
                     type="button"
                     className="button"
+                    ref={suspendButton}
                     disabled={action.busy}
                     aria-label={`Suspend ${account.email}`}
                     onClick={() => {
@@ -230,6 +262,57 @@ function UserRow({
           <ErrorText message={removeError} />
         </td>
       </tr>
+      {publishing === null ? null : (
+        <tr>
+          <td colSpan={5}>
+            <div
+              className="confirm"
+              role="alertdialog"
+              aria-label={publishing === "promote" ? `Make ${account.email} an admin` : `Unsuspend ${account.email}`}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  publishingTrigger()?.focus();
+                  setPublishing(null);
+                }
+              }}
+            >
+              <p>
+                {publishing === "promote"
+                  ? `Make ${account.email} an admin? Every deck they own, including decks made as a member, becomes visible to every member at once, read-only.`
+                  : `Unsuspend ${account.email}? They are an admin, so every deck they own becomes visible to every member again, read-only.`}
+              </p>
+              <div className="row">
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => {
+                    refocus.current = publishingTrigger();
+                    if (publishing === "promote") {
+                      act(() => admin.setRole(account.id, "admin"), "Role set to admin.");
+                    } else {
+                      act(() => admin.unsuspend(account.id), "Unsuspended.");
+                    }
+                    setPublishing(null);
+                  }}
+                >
+                  {publishing === "promote" ? "Make admin and share their decks" : "Unsuspend and share their decks"}
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  ref={keepCancel}
+                  onClick={() => {
+                    publishingTrigger()?.focus();
+                    setPublishing(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
       {passwordOpen ? (
         <tr id={`password-row-${account.id}`}>
           <td colSpan={5}>
@@ -394,6 +477,10 @@ function UsersPanel({ selfId }: { selfId: string }) {
           users.setData((current = []) => [...current, user]);
         }}
       />
+      <p className="muted">
+        Decks owned by an admin are shared with every member as a read-only library; each member keeps their own
+        progress on them.
+      </p>
       <div className="table-wrap">
         <table className="browser">
           <caption className="visually-hidden">Users</caption>
