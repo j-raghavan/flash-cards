@@ -29,8 +29,9 @@ The API's log is written to `e2e/.run/api.log`. Tests read emails (password rese
 | `card-browser.spec.ts`   | Tag filter in the card browser, then a bulk suspend of the matches                                                                                                                                                                                                                                                                                    |
 | `offline-review.spec.ts` | Answer with the browser offline, reconnect, and the review is recorded exactly once                                                                                                                                                                                                                                                                   |
 | `account-export.spec.ts` | Download my data from the account page, and the file's contents                                                                                                                                                                                                                                                                                       |
+| `library.spec.ts`        | An admin's deck in a member's library: listed and marked, a study-only deck page, a session with no edit control, and the admin's own progress untouched                                                                                                                                                                                              |
 
-Every test signs up its own users, so tests are independent and run in parallel.
+Every test signs up its own users, so tests are independent and run in parallel. The one exception is `library.spec.ts`: every member sees an active admin's decks, so it runs in its own project (`chromium-library`) after the others have finished.
 
 ## Running locally
 

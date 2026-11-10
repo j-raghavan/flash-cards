@@ -55,6 +55,17 @@ export class Api {
     await this.post(`/decks/${deckId}/notes`, { note_type: "basic", fields: { front, back }, tags });
   }
 
+  async deleteDeck(deckId: string): Promise<void> {
+    const response = await this.ctx.delete(`/api/decks/${deckId}`, { headers: HEADERS });
+    if (!response.ok()) {
+      throw new Error(`DELETE /decks/${deckId} failed: ${String(response.status())} ${await response.text()}`);
+    }
+  }
+
+  async deckStats(deckId: string): Promise<DeckStats> {
+    return this.get<DeckStats>(`/decks/${deckId}/stats`);
+  }
+
   async exportAccount(): Promise<AccountExport> {
     return this.get<AccountExport>("/account/export");
   }
@@ -63,6 +74,14 @@ export class Api {
 export interface Deck {
   id: string;
   name: string;
+}
+
+export interface DeckStats {
+  total: number;
+  new: number;
+  learning: number;
+  review: number;
+  due: number;
 }
 
 export interface AccountExport {
@@ -90,8 +109,12 @@ export async function createInvite(role: "member" | "admin" = "member"): Promise
 }
 
 /** Sign up through the API with a fresh invite; the context is then signed in. */
-export async function signUpWithApi(ctx: APIRequestContext, email: string): Promise<Api> {
-  const token = await createInvite();
+export async function signUpWithApi(
+  ctx: APIRequestContext,
+  email: string,
+  role: "member" | "admin" = "member",
+): Promise<Api> {
+  const token = await createInvite(role);
   const api = new Api(ctx);
   await api.post("/auth/signup", { token, email, password: PASSWORD });
   return api;

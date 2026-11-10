@@ -23,6 +23,8 @@ mkdirSync(RUN_DIR, { recursive: true });
 const localVenv = resolve(repo, "apps/api/.venv/bin/python");
 const python = process.env.E2E_PYTHON ?? (existsSync(localVenv) ? localVenv : "python");
 
+const LIBRARY_SPEC = /library\.spec\.ts$/;
+
 // Firefox and WebKit run only when asked for: E2E_BROWSERS=chromium,firefox,webkit.
 const browsers = (process.env.E2E_BROWSERS ?? "chromium").split(",").map((name) => name.trim());
 const allProjects = [
@@ -30,6 +32,19 @@ const allProjects = [
   { name: "firefox", use: { ...devices["Desktop Firefox"] } },
   { name: "webkit", use: { ...devices["Desktop Safari"] } },
 ];
+
+const chosenProjects = allProjects
+  .filter((project) => browsers.includes(project.name))
+  .map((project) => ({ ...project, testIgnore: LIBRARY_SPEC }));
+// Every member sees an active admin's decks (ADR 0024), so the library spec runs
+// once the other tests are done: its admin deck would otherwise appear on their
+// fresh members' home pages and skip the guided setup they expect.
+const libraryProjects = chosenProjects.map((project) => ({
+  name: `${project.name}-library`,
+  use: project.use,
+  testMatch: LIBRARY_SPEC,
+  dependencies: chosenProjects.map((p) => p.name),
+}));
 
 export default defineConfig({
   testDir: "./tests",
@@ -53,7 +68,7 @@ export default defineConfig({
     // IndexedDB queue, which needs no service worker once the page has loaded.
     serviceWorkers: "block",
   },
-  projects: allProjects.filter((project) => browsers.includes(project.name)),
+  projects: [...chosenProjects, ...libraryProjects],
   webServer: [
     {
       command: `"${python}" -m uvicorn flashcards.api.app:app --host 127.0.0.1 --port ${String(API_PORT)} --log-config api-logging.json`,
