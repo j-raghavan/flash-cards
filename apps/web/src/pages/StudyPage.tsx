@@ -16,9 +16,8 @@ import { cards, decks, notes } from "../api/endpoints";
 import { reviews, type DailyGoal } from "../api/studyProgress";
 import type { Card, CardDetail, Rating } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { OcclusionImage } from "../components/OcclusionImage";
-import { CardContent, Dialog, ErrorText, Loading } from "../components/ui";
-import { cardSides } from "../lib/cardSides";
+import { CardFaces } from "../components/CardFaces";
+import { Dialog, ErrorText, Loading } from "../components/ui";
 import { newIdempotencyKey } from "../lib/text";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
@@ -481,9 +480,6 @@ export function StudyPage() {
     );
   }
 
-  const sides = detail === null ? null : cardSides(detail.note_type, detail.fields, detail.ordinal, detail.template);
-  const occlusion = detail?.occlusion ?? null;
-
   return (
     <section className="study">
       {header}
@@ -527,7 +523,7 @@ export function StudyPage() {
           </button>
         </div>
       ) : null}
-      {sides === null ? (
+      {detail === null ? (
         cardError === null ? (
           <Loading label="Loading card…" />
         ) : null
@@ -538,19 +534,10 @@ export function StudyPage() {
           tabIndex={-1}
           ref={cardRef}
         >
-          <CardContent markdown={sides.front} className="front" />
-          {occlusion === null ? null : (
-            <OcclusionImage occlusion={occlusion} ordinal={card.ordinal} revealed={revealed} />
-          )}
-          {revealed ? (
-            <>
-              <hr />
-              <CardContent markdown={sides.back} className="back" />
-            </>
-          ) : null}
+          <CardFaces detail={detail} revealed={revealed} />
         </article>
       )}
-      {sides !== null && studyMode === "ai" ? (
+      {detail !== null && studyMode === "ai" ? (
         <Suspense fallback={<Loading />}>
           <TypedAnswer
             key={position}
@@ -566,7 +553,7 @@ export function StudyPage() {
           />
         </Suspense>
       ) : null}
-      {sides === null ? null : revealed ? (
+      {detail === null ? null : revealed ? (
         <div className="ratings" role="group" aria-label="How well did you know it?" tabIndex={-1} ref={ratingsRef}>
           {RATINGS.map(({ rating, label }) => (
             <button

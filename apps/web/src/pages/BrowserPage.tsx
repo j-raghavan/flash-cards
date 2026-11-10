@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The card browser (F-DECK-2, F-DECK-3): filter, search, sort, page, select and
-// apply bulk actions. Filters live in the URL so a view can be bookmarked.
+// apply bulk actions. Filters live in the URL so a view can be bookmarked. A
+// card's text opens a read-only view of it, as it is studied.
 
 import { useState, type SubmitEvent } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 
 import { cards, decks } from "../api/endpoints";
 import {
@@ -21,6 +22,7 @@ import { parseTags } from "../lib/text";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { BrowserCardView } from "./BrowserCardView";
 
 const PAGE_SIZE = 50;
 
@@ -222,6 +224,8 @@ export function BrowserPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState(params.get("q") ?? "");
   const [tag, setTag] = useState(params.get("tag") ?? "");
+  // The position, in this result page, of the card being viewed.
+  const [viewing, setViewing] = useState<number | null>(null);
 
   // The browser covers the user's own cards only, so it offers only their decks.
   const deckChoices = deckOptions(ownedDecks(deckList.data ?? []));
@@ -410,7 +414,7 @@ export function BrowserPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {rows.map((row, position) => {
                 const title = row.preview === "" ? "(empty)" : row.preview;
                 return (
                   <tr key={row.card_id}>
@@ -429,7 +433,16 @@ export function BrowserPage() {
                       />
                     </td>
                     <td>
-                      <Link to={`/notes/${row.note_id}/edit`}>{title}</Link>
+                      <button
+                        type="button"
+                        className="link-button card-open"
+                        aria-haspopup="dialog"
+                        onClick={() => {
+                          setViewing(position);
+                        }}
+                      >
+                        {title}
+                      </button>
                       {row.flag > 0 ? <span className="flag"> flag {row.flag}</span> : null}
                     </td>
                     <td>{row.deck_name}</td>
@@ -443,6 +456,16 @@ export function BrowserPage() {
           </table>
         </div>
       ) : null}
+      {viewing === null ? null : (
+        <BrowserCardView
+          rows={rows}
+          index={viewing}
+          onMove={setViewing}
+          onClose={() => {
+            setViewing(null);
+          }}
+        />
+      )}
       {total > PAGE_SIZE ? (
         <nav className="row pager" aria-label="Pages">
           <button

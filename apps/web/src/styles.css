@@ -1235,6 +1235,41 @@ table.browser td a {
   text-decoration: none;
 }
 
+table.browser td .card-open {
+  color: var(--text);
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+}
+
+table.browser td .card-open:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* The browser's card view: the studied card's look, inside a dialog. */
+.card-view-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 12px 0 0;
+}
+
+.card-view-meta dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.card-view-meta dd {
+  margin: 0;
+}
+
+.study-card.card-view {
+  min-height: 0;
+  padding: 28px 24px 24px;
+  box-shadow: var(--shadow-sm);
+}
+
 table.browser td a:hover {
   color: var(--accent);
   text-decoration: underline;
