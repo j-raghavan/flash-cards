@@ -181,6 +181,25 @@ async def test_delete_note_cascades_only_its_own_cards(fx: _Fixture) -> None:
     assert await fx.schedule_repo.get(ALICE, kept_cards[0].id) is not None
 
 
+async def test_delete_deck_purges_every_users_schedules(fx: _Fixture) -> None:
+    parent = await fx.decks.create(owner_id=ALICE, name="Deck")
+    child = await fx.decks.create(owner_id=ALICE, name="Child", parent_id=parent.id)
+    _note, (card,) = await fx.notes.create_note(
+        owner_id=ALICE, deck_id=child.id, note_type=NoteType.BASIC,
+        fields={"front": "Q", "back": "A"},
+    )
+    await fx.seed_card(card.id)
+    owners_row = await fx.schedule_repo.get(ALICE, card.id)
+    assert owners_row is not None
+    await fx.schedule_repo.upsert(BOB, owners_row)
+    await fx.schedule_repo.upsert(BOB, replace(owners_row, card_id="elsewhere"))
+
+    await fx.library.delete_deck(owner_id=ALICE, deck_id=parent.id)
+
+    assert await fx.schedule_repo.get(ALICE, card.id) is None
+    assert [s.card_id for s in await fx.schedule_repo.list_for_user(BOB)] == ["elsewhere"]
+
+
 async def test_delete_note_purges_every_users_schedules(fx: _Fixture) -> None:
     deck = await fx.decks.create(owner_id=ALICE, name="Deck")
     doomed, doomed_cards = await fx.notes.create_note(

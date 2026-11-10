@@ -95,6 +95,23 @@ async def test_editing_a_cloze_keeps_surviving_cards_and_their_history() -> None
     assert await rig.cards.get(before[2]) is None
 
 
+async def test_rederiving_a_cloze_purges_every_users_progress_on_removed_cards() -> None:
+    rig = _Rig()
+    note_id, before = await rig.cloze("The {{c1::nucleus}} holds {{c2::DNA}}")
+    for card_id in before.values():
+        await rig.reviews.submit(owner_id=ALICE, card_id=card_id, rating=Rating.GOOD)
+        schedule = await rig.schedules.get(ALICE, card_id)
+        assert schedule is not None
+        await rig.schedules.upsert("reader", schedule)  # another user's own progress
+
+    await rig.library.update_note(
+        owner_id=ALICE, note_id=note_id, fields={"text": "The {{c1::nucleus}}"}
+    )
+
+    assert await rig.schedules.get("reader", before[2]) is None  # gone with c2
+    assert await rig.schedules.get("reader", before[1]) is not None  # c1 survives
+
+
 async def test_editing_only_tags_leaves_the_cards_alone() -> None:
     rig = _Rig()
     note_id, before = await rig.cloze("{{c1::x}}", tags=("old",))

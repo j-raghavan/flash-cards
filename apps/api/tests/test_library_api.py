@@ -303,3 +303,92 @@ def test_a_member_studies_the_library_end_to_end(
     assert late.status_code == 404  # an offline answer replayed after access is gone
     # The former admin keeps studying their own deck.
     assert admin.get(f"/decks/{deck_id}").json()["owned"] is True
+
+
+def _admin_view(library: Library) -> list[object]:
+    """Everything the admin sees of their library material."""
+    admin = library.admin
+    return [
+        admin.get(f"/decks/{library.deck_id}").json(),
+        admin.get(f"/decks/{library.deck_id}/cards").json(),
+        admin.get(f"/decks/{library.deck_id}/stats").json(),
+        admin.get(f"/cards/{library.basic_card}").json(),
+        admin.get(f"/notes/{library.basic_note}").json(),
+        admin.get("/goals").json(),
+    ]
+
+
+# Every bulk action, as (action, extra body); a move names its target separately.
+BULK: list[tuple[str, dict[str, object]]] = [
+    ("suspend", {}),
+    ("unsuspend", {}),
+    ("bury", {}),
+    ("unbury", {}),
+    ("flag", {"flag": 2}),
+    ("delete", {}),
+    ("add_tags", {"tags": ["x"]}),
+    ("remove_tags", {"tags": ["x"]}),
+    ("move", {}),
+]
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+@pytest.mark.parametrize(("action", "extra"), BULK)
+def test_bulk_changes_to_library_cards_fail_closed(
+    library: Library, action: str, extra: dict[str, object], mixed: bool
+) -> None:
+    member = library.member
+    own_deck = member.post("/decks", json={"name": "Mine"}).json()["id"]
+    [own] = member.post(
+        f"/decks/{own_deck}/notes",
+        json={"note_type": "basic", "fields": {"front": "x", "back": "y"}},
+    ).json()
+    before = _admin_view(library)
+    ids = [own["id"], library.basic_card] if mixed else [library.basic_card]
+    body: dict[str, object] = {"card_ids": ids, "action": action, **extra}
+    if action == "move":
+        body["deck_id"] = own_deck  # a library card into the member's own deck
+
+    assert member.post("/cards/bulk", json=body).status_code == 404
+    if action == "move":  # and the member's own card into the library deck
+        into = {"card_ids": [own["id"]], "action": "move", "deck_id": library.deck_id}
+        assert member.post("/cards/bulk", json=into).status_code == 404
+    assert _admin_view(library) == before
+    assert member.get(f"/cards/{own['id']}").json()["deck_id"] == own_deck  # all or nothing
+
+
+def test_owner_only_features_refuse_library_decks(library: Library) -> None:
+    member, deck = library.member, library.deck_id
+    goal = {"name": "Exam", "exam_date": "2027-01-01T00:00:00Z", "desired_grade": 0.8}
+    own_deck = member.post("/decks", json={"name": "Mine"}).json()["id"]
+    own_goal = member.post("/goals", json={**goal, "deck_ids": [own_deck]}).json()["id"]
+    job = library.admin.post(
+        "/ai/generate/transcript", json={"deck_id": deck, "transcript": "Cells. " * 50}
+    )
+    assert job.status_code == 202  # the admin's own job on the library deck
+    before = _admin_view(library)
+
+    assert member.get("/cards", params={"deck_id": deck}).status_code == 404
+    assert member.post("/goals", json={**goal, "deck_ids": [deck]}).status_code == 404
+    assert member.patch(f"/goals/{own_goal}", json={"deck_ids": [deck]}).status_code == 404
+    transcript = {"deck_id": deck, "transcript": "Cells. " * 50}
+    assert member.post("/ai/generate/transcript", json=transcript).status_code == 404
+    upload = member.post(
+        "/ai/generate",
+        data={"deck_id": deck},
+        files={"file": ("notes.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+    assert upload.status_code == 404
+    approve = member.post(f"/ai/jobs/{job.json()['id']}/approve", json={"draft_ids": ["d"]})
+    assert approve.status_code == 404
+    assert _admin_view(library) == before
+
+
+def test_a_library_sub_deck_keeps_its_parent(library: Library) -> None:
+    child = library.admin.post(
+        "/decks", json={"name": "Cells", "parent_id": library.deck_id}
+    ).json()["id"]
+
+    decks = {d["id"]: d for d in library.member.get("/decks").json()}
+
+    assert decks[child]["parent_id"] == library.deck_id and decks[child]["owned"] is False

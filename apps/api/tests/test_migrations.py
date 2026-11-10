@@ -191,3 +191,28 @@ def test_0019_keeps_every_schedule_as_its_owners(pg_url: str) -> None:
 
     assert asyncio.run(_remaining()) == ["c1"]
     command.downgrade(cfg, "base")
+
+
+def test_migrations_match_the_models(pg_url: str) -> None:
+    """After upgrading to head, autogenerate finds nothing to change: no schema drift."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from sqlalchemy.engine import Connection
+
+    _reset(pg_url)
+    command.upgrade(_alembic_config(pg_url), "head")
+
+    def _diff(conn: Connection) -> list[object]:
+        context = MigrationContext.configure(conn, opts={"compare_type": True})
+        return list(compare_metadata(context, Base.metadata))
+
+    async def _run() -> list[object]:
+        engine = create_engine(pg_url)
+        async with engine.connect() as conn:
+            found: list[object] = await conn.run_sync(_diff)
+        await engine.dispose()
+        return found
+
+    differences = asyncio.run(_run())
+    command.downgrade(_alembic_config(pg_url), "base")
+    assert differences == []
