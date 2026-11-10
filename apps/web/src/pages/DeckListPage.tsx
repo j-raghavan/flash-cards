@@ -7,6 +7,7 @@ import { Link } from "react-router";
 
 import { decks } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
+import { isOwned } from "../lib/ownership";
 import type { Deck } from "../api/types";
 import { ErrorText, Loading } from "../components/ui";
 import { OnboardingPrompt } from "../onboarding/OnboardingPrompt";
@@ -135,7 +136,7 @@ export function CreateDeckForm({
 
 function DeckSections({ all, onCreated }: { all: Deck[]; onCreated: () => void }) {
   const own = ownedDecks(all);
-  const library = all.filter((deck) => !deck.owned);
+  const library = all.filter((deck) => !isOwned(deck));
   const admin = useAuth().user?.role === "admin";
   return (
     <>

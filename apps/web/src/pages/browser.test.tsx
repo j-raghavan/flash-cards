@@ -330,6 +330,17 @@ describe("card view", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("offers Edit for a card whose payload does not say who owns it", async () => {
+    const unmarked = detail(1);
+    delete unmarked.owned;
+    mockApi({ ...three, "GET /cards/c1": { body: unmarked } });
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Card 1" }));
+    const dialog = await screen.findByRole("dialog", { name: "Card 1 of 3" });
+    expect(await within(dialog).findByRole("link", { name: "Edit" })).toHaveAttribute("href", "/notes/n1/edit");
+  });
+
   it("offers no Edit for a card that is not the caller's, and shows a card loading or failing", async () => {
     let release = (): void => undefined;
     const loaded = new Promise<void>((resolve) => {

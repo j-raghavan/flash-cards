@@ -197,6 +197,15 @@ describe("deck detail", () => {
     expect(screen.queryByRole("heading", { name: "Ask your source documents" })).toBeNull();
   });
 
+  it("keeps the owner's controls for a deck whose payload does not say who owns it", async () => {
+    const unmarked: Deck = { id: "u", name: "Older", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+    mockApi({ ...me, "GET /decks": { body: [unmarked] }, "GET /decks/u/stats": { body: STATS } });
+    renderApp("/decks/u");
+    expect(await screen.findByRole("button", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add card" })).toBeInTheDocument();
+    expect(screen.queryByText("From the library")).toBeNull();
+  });
+
   it("says an empty library deck has no cards, without offering to add any", async () => {
     mockApi({
       ...me,

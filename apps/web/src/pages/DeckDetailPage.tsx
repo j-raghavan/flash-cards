@@ -13,6 +13,7 @@ import { decks } from "../api/endpoints";
 import type { Deck, DeckStats } from "../api/types";
 import { ConfirmButton, ErrorText, Loading, ProficiencyRing } from "../components/ui";
 import { buildDeckTree, deckPath, descendantCount, flattenTree } from "../lib/deckTree";
+import { isOwned } from "../lib/ownership";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { CreateDeckForm } from "./DeckListPage";
@@ -182,6 +183,7 @@ export function DeckDetailPage() {
   }
 
   const { deck, children } = node;
+  const owned = isOwned(deck);
   const subdecks = descendantCount(node);
   const path = deckPath(list, deckId);
 
@@ -211,7 +213,7 @@ export function DeckDetailPage() {
         ))}
       </nav>
       <h1>{deck.name}</h1>
-      {deck.owned ? null : (
+      {owned ? null : (
         <p className="muted">
           <span className="badge">From the library</span> Shared by your admin. You can study it and see your progress;
           only the admin can change it.
@@ -222,7 +224,7 @@ export function DeckDetailPage() {
       {stats.loading ? <Loading label="Loading statistics…" /> : null}
       {stats.data === undefined ? null : <StatsPanel stats={stats.data} />}
       {stats.data?.total === 0 ? (
-        deck.owned ? (
+        owned ? (
           <p className="empty">
             This deck has no cards yet. Add one by hand, generate drafts from a file, or{" "}
             <Link to="/import">import an Anki deck</Link>.
@@ -236,7 +238,7 @@ export function DeckDetailPage() {
         <Link className="button primary" to={`/decks/${deckId}/study`}>
           Study now
         </Link>
-        {deck.owned ? (
+        {owned ? (
           <>
             <Link className="button" to={`/decks/${deckId}/notes/new`}>
               Add card
@@ -270,7 +272,7 @@ export function DeckDetailPage() {
         </>
       ) : null}
 
-      {deck.owned ? (
+      {owned ? (
         <>
           <Suspense fallback={null}>
             <DeckSummaryPanel key={deckId} deckId={deckId} />

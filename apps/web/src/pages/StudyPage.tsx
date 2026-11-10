@@ -20,6 +20,7 @@ import { CardFaces } from "../components/CardFaces";
 import { Dialog, ErrorText, Loading } from "../components/ui";
 import { newIdempotencyKey } from "../lib/text";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { isOwned } from "../lib/ownership";
 import { useResource } from "../lib/useResource";
 import { pending, submitReview } from "../offline/reviewQueue";
 import { NoteEditor } from "./NoteEditorPage";
@@ -200,11 +201,11 @@ export function StudyPage() {
   const detail = shown.position === position ? shown.detail : null;
   const cardError = shown.position === position ? shown.error : null;
   const revealed = revealedAt === position;
-  // Editing and AI grading are the owner's; the saved mode stays for the user's own
-  // cards. While the next card loads, the last one shown says which kind of deck this is.
-  const ownCard = detail?.owned === true;
-  const libraryCard = (detail ?? shown.detail)?.owned === false;
-  const studyMode: StudyMode = libraryCard ? "self" : mode;
+  // Editing and AI grading are the owner's. Until the card on screen is known to be
+  // the user's own, the session reveals answers and offers no mode switch; the
+  // saved mode stays for their own cards.
+  const ownCard = detail !== null && isOwned(detail);
+  const studyMode: StudyMode = ownCard ? mode : "self";
   const suggestion = suggested?.position === position ? suggested.rating : null;
 
   useEffect(() => {
@@ -489,7 +490,7 @@ export function StudyPage() {
         </p>
         {goal === null ? null : <GoalProgress goal={goal} />}
       </div>
-      {libraryCard ? null : (
+      {ownCard ? (
         <fieldset className="segmented study-mode">
           <legend>Answer by</legend>
           {(
@@ -513,7 +514,7 @@ export function StudyPage() {
             </label>
           ))}
         </fieldset>
-      )}
+      ) : null}
       <ErrorText message={submitError} />
       {cardError !== null ? (
         <div>

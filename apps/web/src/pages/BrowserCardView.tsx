@@ -12,6 +12,7 @@ import { cards } from "../api/endpoints";
 import type { BrowserRow } from "../api/types";
 import { CardFaces } from "../components/CardFaces";
 import { Dialog, ErrorText, Loading } from "../components/ui";
+import { isOwned } from "../lib/ownership";
 import { useResource } from "../lib/useResource";
 
 function CardBody({ row, revealed }: { row: BrowserRow; revealed: boolean }) {
@@ -28,7 +29,7 @@ function CardBody({ row, revealed }: { row: BrowserRow; revealed: boolean }) {
           <article className="study-card card-view" aria-label="Card content">
             <CardFaces detail={detail.data} revealed={revealed} />
           </article>
-          {detail.data.owned ? (
+          {isOwned(detail.data) ? (
             <p className="row">
               <Link className="button" to={`/notes/${row.note_id}/edit`}>
                 Edit

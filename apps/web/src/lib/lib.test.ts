@@ -122,6 +122,9 @@ describe("deckTree", () => {
   it("keeps only the caller's own decks for a picker", () => {
     const library = { ...deck("l", "L"), owned: false };
     expect(ownedDecks([deck("a", "A"), library]).map((d) => d.id)).toEqual(["a"]);
+    // A deck from an API that does not say is the caller's own.
+    const unmarked: Deck = { id: "u", name: "U", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+    expect(ownedDecks([unmarked, library]).map((d) => d.id)).toEqual(["u"]);
   });
 });
 

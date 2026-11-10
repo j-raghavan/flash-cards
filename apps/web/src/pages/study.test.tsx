@@ -366,6 +366,41 @@ describe("library cards", () => {
     expect(localStorage.getItem("flashcards.studyMode")).toBe("ai");
   });
 
+  it("offers no mode switch while a card loads, so a saved typed-answer mode never reaches a library card", async () => {
+    localStorage.setItem("flashcards.studyMode", "ai");
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1")] },
+      "GET /cards/c1": async () => {
+        await gate;
+        return { body: library("c1", "Library question", "Library answer") };
+      },
+    });
+    renderApp("/decks/d1/study");
+    expect(await screen.findByText("Loading card…")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Answer by" })).toBeNull();
+    expect(screen.queryByLabelText("Typing it (AI checks)")).toBeNull();
+    release();
+    expect(await screen.findByText("Library question")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Answer by" })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("button", { name: /Show answer/ })).toBeInTheDocument();
+  });
+
+  it("treats a card whose payload does not say who owns it as the user's own", async () => {
+    const unmarked = basic("c1", "Older question", "Older answer");
+    delete unmarked.owned;
+    mockApi({ ...me, "GET /decks/d1/review": { body: [card("c1")] }, "GET /cards/c1": { body: unmarked } });
+    renderApp("/decks/d1/study");
+    expect(await screen.findByText("Older question")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Edit card/ })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Answer by" })).toBeInTheDocument();
+  });
+
   it("queues an answer on a library card when offline, like any other", async () => {
     mockApi({
       ...me,
