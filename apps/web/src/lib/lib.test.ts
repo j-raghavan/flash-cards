@@ -142,6 +142,16 @@ describe("text helpers", () => {
   it("makes unique idempotency keys", () => {
     expect(newIdempotencyKey()).not.toBe(newIdempotencyKey());
   });
+
+  it("makes version 4 UUIDs without crypto.randomUUID (plain-HTTP pages)", () => {
+    const real = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });
+    const keys = new Set(Array.from({ length: 50 }, () => newIdempotencyKey()));
+    expect(keys.size).toBe(50);
+    for (const key of keys) {
+      expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    }
+  });
 });
 
 describe("forgetAllJobs", () => {
