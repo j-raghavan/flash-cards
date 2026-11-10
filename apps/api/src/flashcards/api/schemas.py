@@ -190,10 +190,19 @@ class DeckOut(BaseModel):
     name: str
     parent_id: str | None
     created_at: datetime
+    # False for a library deck: an active admin's deck the caller may study but
+    # not change (ADR 0024).
+    owned: bool
 
     @classmethod
-    def from_deck(cls, deck: Deck) -> DeckOut:
-        return cls(id=deck.id, name=deck.name, parent_id=deck.parent_id, created_at=deck.created_at)
+    def from_deck(cls, deck: Deck, *, owned: bool) -> DeckOut:
+        return cls(
+            id=deck.id,
+            name=deck.name,
+            parent_id=deck.parent_id,
+            created_at=deck.created_at,
+            owned=owned,
+        )
 
 
 TagIn = Annotated[str, StringConstraints(max_length=MAX_TAG_LENGTH)]
@@ -250,13 +259,16 @@ class CardDetailOut(CardOut):
     note_type_id: str | None = None
     template: CardTemplateOut | None = None
     occlusion: OcclusionModel | None = None
+    # False for a library card: study it, but no edit or AI grading (ADR 0024).
+    owned: bool
 
     @classmethod
     def from_card_and_note(
-        cls, card: Card, note: Note, template: CardTemplate | None = None
+        cls, card: Card, note: Note, template: CardTemplate | None = None, *, owned: bool
     ) -> CardDetailOut:
         return cls(
             **CardOut.from_card(card).model_dump(),
+            owned=owned,
             note_type=note.note_type,
             fields=dict(note.fields),
             tags=list(note.tags),
@@ -339,10 +351,13 @@ class NoteOut(BaseModel):
     cards: list[CardOut]
     note_type_id: str | None = None
     occlusion: OcclusionModel | None = None
+    # False for a library note: read-only to the caller (ADR 0024).
+    owned: bool
 
     @classmethod
-    def from_note(cls, note: Note, cards: list[Card]) -> NoteOut:
+    def from_note(cls, note: Note, cards: list[Card], *, owned: bool) -> NoteOut:
         return cls(
+            owned=owned,
             id=note.id,
             deck_id=note.deck_id,
             note_type=note.note_type,

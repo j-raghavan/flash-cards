@@ -82,6 +82,7 @@ from flashcards.application.planner_service import PlannerService
 from flashcards.application.progress_service import ProgressService
 from flashcards.application.public_signup_service import PublicSignupService
 from flashcards.application.quota_service import QuotaService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.registration_service import RegistrationService
 from flashcards.application.review_service import ReviewService
 from flashcards.application.second_factor_sign_in_service import SecondFactorSignInService
@@ -219,6 +220,8 @@ class Container:
     decks: DeckService
     notes: NoteService
     note_types: NoteTypeService
+    # Who reads which decks, the shared library included (ADR 0024).
+    read_access: ReadAccess
     reviews: ReviewService
     library: LibraryService
     card_browser: CardBrowserService
@@ -265,7 +268,12 @@ def build_services(repos: Repositories) -> Container:
     )
     decks = DeckService(repos.decks, repos.clock)
     notes = NoteService(decks, repos.notes, repos.cards, repos.clock)
-    reviews = ReviewService(notes, repos.schedules, repos.review_logs, repos.scheduler, repos.clock)
+    read_access = ReadAccess(
+        repos.users, repos.decks, repos.notes, repos.cards, repos.note_types, repos.media
+    )
+    reviews = ReviewService(
+        read_access, repos.schedules, repos.review_logs, repos.scheduler, repos.clock
+    )
     library = LibraryService(
         decks,
         notes,
@@ -326,7 +334,7 @@ def build_services(repos: Repositories) -> Container:
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock
     )
     goal_service = GoalService(decks, repos.goals, repos.clock)
-    progress = ProgressService(decks, repos.study_settings, repos.study_stats, repos.clock)
+    progress = ProgressService(read_access, repos.study_settings, repos.study_stats, repos.clock)
     planner = PlannerService(
         goal_service,
         repos.cards,
@@ -480,6 +488,7 @@ def build_services(repos: Repositories) -> Container:
         decks=decks,
         notes=notes,
         note_types=note_types,
+        read_access=read_access,
         reviews=reviews,
         library=library,
         card_browser=CardBrowserService(

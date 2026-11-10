@@ -103,6 +103,13 @@ class UserRepository(Protocol):
         """
         ...
 
+    async def list_active_admin_ids(self) -> list[str]:
+        """The ids of every active admin, in id order, without locking anything.
+
+        Their decks form the shared library (ADR 0024), read on every request.
+        """
+        ...
+
     async def list_all(self) -> list[User]:
         """Every user, oldest first (admin user management)."""
         ...
@@ -195,6 +202,10 @@ class DeckRepository(Protocol):
 
     async def list_for_owner(self, owner_id: str) -> list[Deck]:
         """Return the owner's decks, oldest first."""
+        ...
+
+    async def list_for_owners(self, owner_ids: Sequence[str]) -> list[Deck]:
+        """The decks of any of these owners, oldest first (created_at, then id)."""
         ...
 
     async def update(self, deck: Deck) -> None:
@@ -295,6 +306,16 @@ class CardRepository(Protocol):
         """The cards with these ids that exist (any owner; callers check ownership)."""
         ...
 
+    async def share_lock(self, card_id: str) -> Card | None:
+        """The card, with its row kept from deletion until the transaction ends
+        (SELECT ... FOR KEY SHARE), or None when it is already gone.
+
+        Taken before a review writes rows that reference the card, so a concurrent
+        deletion either lands first (the review then finds no card) or waits for
+        the review to commit and removes its rows with the card.
+        """
+        ...
+
     async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
         """Every card of these notes, by note then ordinal."""
         ...
@@ -327,16 +348,35 @@ class Scheduler(Protocol):
 
 
 class ScheduleRepository(Protocol):
-    async def get(self, card_id: str) -> CardSchedule | None: ...
+    """Review state per (user, card) (ADR 0024).
 
-    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
-        """The schedules of these cards, keyed by card id; cards never reviewed are absent."""
+    A member studying a library card has a schedule of their own on it, next to
+    the owner's. Each read and write names the user whose progress it is.
+    """
+
+    async def get(self, user_id: str, card_id: str) -> CardSchedule | None: ...
+
+    async def get_many(self, user_id: str, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+        """The user's schedules on these cards, keyed by card id; cards the user
+        never reviewed are absent."""
         ...
 
-    async def upsert(self, schedule: CardSchedule) -> None: ...
+    async def list_for_user(self, user_id: str) -> list[CardSchedule]:
+        """Every schedule of the user, on any owner's card, ordered by card id (export)."""
+        ...
 
-    async def delete(self, card_id: str) -> None:
-        """Delete a card's schedule, if any."""
+    async def upsert(self, user_id: str, schedule: CardSchedule) -> None: ...
+
+    async def delete(self, user_id: str, card_id: str) -> None:
+        """Delete the user's schedule on a card, if any (undo of a first answer)."""
+        ...
+
+    async def delete_for_card(self, card_id: str) -> None:
+        """Delete every user's schedule on a card (the card is deleted or re-derived)."""
+        ...
+
+    async def delete_for_user(self, user_id: str) -> None:
+        """Delete every schedule of the user, on any owner's card (account deletion)."""
         ...
 
 
@@ -1010,8 +1050,13 @@ class StudyStatsRepository(Protocol):
         *,
         floor: datetime,
         until: datetime,
+        card_owner_ids: Sequence[str],
         deck_ids: Sequence[str] | None = None,
     ) -> list[DueBucket]:
-        """Schedules of the owner's unsuspended cards due before until, bucketed,
-        with anything due before floor counted at floor (overdue cards)."""
+        """The user's own schedules due before until, bucketed, with anything due
+        before floor counted at floor (overdue cards).
+
+        Only unsuspended cards owned by one of card_owner_ids count: the user's
+        own and the library's (ADR 0024).
+        """
         ...

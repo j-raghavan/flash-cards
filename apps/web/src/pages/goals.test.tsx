@@ -10,7 +10,13 @@ import { goalChanges, gradeFromRetention, localDate, tomorrow } from "./GoalsPag
 
 const me = { "GET /auth/me": { body: USER } };
 
-const deck = (id: string, name: string): Deck => ({ id, name, parent_id: null, created_at: "2026-01-01T00:00:00Z" });
+const deck = (id: string, name: string, owned = true): Deck => ({
+  id,
+  name,
+  parent_id: null,
+  created_at: "2026-01-01T00:00:00Z",
+  owned,
+});
 
 const GOAL: Goal = {
   id: "g1",
@@ -56,7 +62,7 @@ describe("goals", () => {
     const calls = mockApi({
       ...me,
       "GET /goals": { body: [GOAL] },
-      "GET /decks": { body: [deck("d1", "Biology"), deck("d2", "Chemistry")] },
+      "GET /decks": { body: [deck("d1", "Biology"), deck("d2", "Chemistry"), deck("l1", "Anatomy", false)] },
       "POST /goals": { status: 201, body: { ...GOAL, id: "g2", name: "Chem" } },
       "GET /goals/g2": { body: { ...GOAL, id: "g2", name: "Chem" } },
       "GET /goals/g2/plan": { body: PLAN },
@@ -69,6 +75,8 @@ describe("goals", () => {
     });
     const create = await screen.findByRole("button", { name: "Create goal" });
     expect(create).toBeDisabled();
+    // Goals plan over the user's own cards, so a library deck is not offered.
+    expect(screen.queryByLabelText("Anatomy")).toBeNull();
     await user.type(screen.getByLabelText("Goal name"), " Chem ");
     await user.click(screen.getByLabelText("Chemistry"));
     await user.click(screen.getByLabelText("Biology"));

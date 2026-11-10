@@ -145,8 +145,9 @@ export function GeneratePage() {
   const [level, setLevel] = useState<Thoroughness>("standard");
   const submit = useSubmit();
   // Recent jobs come from the server, so they follow the user across devices.
-  // The list is a convenience: if it cannot load, the page works without it.
-  const recent = useResource(() => ai.jobs(deckId), `jobs:${deckId}`).data ?? [];
+  // The list is a convenience: if it cannot load, the page says so and works without it.
+  const jobs = useResource(() => ai.jobs(deckId), `jobs:${deckId}`);
+  const recent = jobs.data ?? [];
   // The page cap and what is left this month; the form works without them.
   const quota = useResource(account.aiQuota, "ai-quota").data;
 
@@ -221,6 +222,7 @@ export function GeneratePage() {
         </div>
       </form>
       <VideoSource deckId={deckId} level={level} />
+      {jobs.error === null ? null : <p className="muted">Recent generations could not be loaded.</p>}
       {recent.length > 0 ? (
         <>
           <h2>Recent generations</h2>

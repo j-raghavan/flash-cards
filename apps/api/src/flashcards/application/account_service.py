@@ -126,15 +126,11 @@ class AccountService:
         decks = await self._decks.list_for_owner(user.id)
         notes: list[Note] = []
         cards: list[Card] = []
-        schedules: list[CardSchedule] = []
         for deck in decks:
             notes.extend(await self._notes.list_for_deck(deck.id))
-            deck_cards = await self._cards.list_for_deck(deck.id)
-            cards.extend(deck_cards)
-            for card in deck_cards:
-                schedule = await self._schedules.get(card.id)
-                if schedule is not None:
-                    schedules.append(schedule)
+            cards.extend(await self._cards.list_for_deck(deck.id))
+        # The user's progress on any owner's card (library cards included), by card id.
+        schedules = await self._schedules.list_for_user(user.id)
         return AccountExport(
             user=user,
             decks=tuple(decks),
@@ -175,9 +171,11 @@ class AccountService:
         await self._library.delete_owner_library(owner_id)
         # Note types go once no note uses them.
         await self._note_types.delete_for_owner(owner_id)
-        # Any review logs not reached through a deck (export reads them per owner,
-        # so deletion matches), the uploaded media, and the usage counters.
+        # Any review logs and schedules not reached through a deck, such as progress
+        # on library cards (export reads them per user, so deletion matches), the
+        # uploaded media, and the usage counters.
         await self._review_logs.delete_for_owner(owner_id)
+        await self._schedules.delete_for_user(owner_id)
         await self._media.delete_for_owner(owner_id)
         await self._mock_exams.delete_for_owner(owner_id)
         await self._passages.delete_for_owner(owner_id)

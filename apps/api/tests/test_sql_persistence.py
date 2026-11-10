@@ -331,6 +331,39 @@ async def test_deck_sql_crud(engine: AsyncEngine) -> None:
         assert await repo.list_for_owner("bob") == []
 
 
+async def test_sql_library_reads(engine: AsyncEngine) -> None:
+    """Active admin ids and decks of several owners, as the library reads them."""
+    from datetime import timedelta
+
+    sm = create_sessionmaker(engine)
+    async with sm() as s, s.begin():
+        users = SqlUserRepository(s)
+        for uid, role in (("b-admin", Role.ADMIN), ("a-admin", Role.ADMIN), ("m", Role.MEMBER)):
+            await users.add(
+                User(id=uid, email=f"{uid}@e.com", password_hash="h", role=role,
+                     created_at=_now())
+            )
+        await users.add(
+            User(id="c-admin", email="c@e.com", password_hash="h", role=Role.ADMIN,
+                 created_at=_now(), suspended_at=_now())
+        )
+        start = _now()
+        decks = SqlDeckRepository(s)
+        for deck_id, owner, minutes in (
+            ("d3", "m", 2), ("d2", "a-admin", 1), ("d1", "b-admin", 1), ("d0", "c-admin", 0)
+        ):
+            await decks.add(
+                Deck(id=deck_id, owner_id=owner, name=deck_id, parent_id=None,
+                     created_at=start + timedelta(minutes=minutes))
+            )
+    async with sm() as s:
+        assert await SqlUserRepository(s).list_active_admin_ids() == ["a-admin", "b-admin"]
+        decks = SqlDeckRepository(s)
+        found = await decks.list_for_owners(["a-admin", "b-admin", "m"])
+        assert [d.id for d in found] == ["d1", "d2", "d3"]  # oldest first, then by id
+        assert await decks.list_for_owners([]) == []
+
+
 async def test_note_and_card_sql_roundtrip(engine: AsyncEngine) -> None:
     from flashcards.domain.notes import Card, Note, NoteType
 
@@ -398,8 +431,9 @@ async def test_schedule_sql_upsert(engine: AsyncEngine) -> None:
         )
     async with sm() as s, s.begin():
         repo = SqlScheduleRepository(s)
-        assert await repo.get("c1") is None
+        assert await repo.get("alice", "c1") is None
         await repo.upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.LEARNING,
@@ -412,6 +446,7 @@ async def test_schedule_sql_upsert(engine: AsyncEngine) -> None:
         )
     async with sm() as s, s.begin():
         await SqlScheduleRepository(s).upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.REVIEW,
@@ -423,7 +458,7 @@ async def test_schedule_sql_upsert(engine: AsyncEngine) -> None:
             )
         )
     async with sm() as s:
-        got = await SqlScheduleRepository(s).get("c1")
+        got = await SqlScheduleRepository(s).get("alice", "c1")
         assert got is not None and got.state is ScheduleState.REVIEW
 
 
@@ -453,6 +488,49 @@ async def _seed_card(sm: async_sessionmaker[AsyncSession]) -> None:
                     created_at=_now(),
                 )
             )
+
+
+async def test_schedule_sql_rows_are_per_user_and_card(engine: AsyncEngine) -> None:
+    """The (user, card) key and the three deletes, as the in-memory adapter (ADR 0024)."""
+    from flashcards.domain.scheduling import CardSchedule, ScheduleState
+
+    def plain(card_id: str, stability: float) -> CardSchedule:
+        return CardSchedule(
+            card_id=card_id,
+            state=ScheduleState.REVIEW,
+            step=None,
+            stability=stability,
+            difficulty=5.0,
+            due_at=_now(),
+            last_reviewed_at=_now(),
+        )
+
+    sm = create_sessionmaker(engine)
+    await _seed_card(sm)
+    async with sm() as s, s.begin():
+        repo = SqlScheduleRepository(s)
+        for user, stability in (("alice", 1.0), ("bob", 2.0), ("carol", 3.0)):
+            await repo.upsert(user, plain("c1", stability))
+            await repo.upsert(user, plain("c2", stability))
+        await repo.upsert("bob", plain("c1", 2.5))  # an upsert replaces only bob's row
+    async with sm() as s, s.begin():
+        repo = SqlScheduleRepository(s)
+        bob_c1 = await repo.get("bob", "c1")
+        alice_c1 = await repo.get("alice", "c1")
+        assert bob_c1 is not None and bob_c1.stability == 2.5
+        assert alice_c1 is not None and alice_c1.stability == 1.0
+        assert set(await repo.get_many("carol", ["c1", "c2", "missing"])) == {"c1", "c2"}
+        assert [x.card_id for x in await repo.list_for_user("bob")] == ["c1", "c2"]
+        await repo.delete("alice", "c1")
+        await repo.delete_for_card("c2")
+        await repo.delete_for_user("carol")
+    async with sm() as s:
+        repo = SqlScheduleRepository(s)
+        assert await repo.get("alice", "c1") is None
+        assert await repo.get("bob", "c1") is not None
+        assert await repo.get_many("alice", ["c1", "c2"]) == {}
+        assert [x.card_id for x in await repo.list_for_user("bob")] == ["c1"]
+        assert await repo.list_for_user("carol") == []
 
 
 async def test_reviewlog_sql_duplicate_key_is_rejected(engine: AsyncEngine) -> None:
@@ -489,6 +567,7 @@ async def test_deck_delete_cascades_to_notes_cards_schedule_logs(engine: AsyncEn
     await _seed_card(sm)
     async with sm() as s, s.begin():
         await SqlScheduleRepository(s).upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.LEARNING,
@@ -516,7 +595,7 @@ async def test_deck_delete_cascades_to_notes_cards_schedule_logs(engine: AsyncEn
         # The deck's share links go with it.
         assert await SqlShareLinkRepository(s).get("share1") is None
         assert await SqlCardRepository(s).get("c1") is None
-        assert await SqlScheduleRepository(s).get("c1") is None
+        assert await SqlScheduleRepository(s).get("alice", "c1") is None
 
 
 async def test_sql_card_update_note_delete_and_missing_deck_delete(engine: AsyncEngine) -> None:
@@ -550,6 +629,7 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
     await _seed_card(sm)
     async with sm() as s, s.begin():
         await SqlScheduleRepository(s).upsert(
+            "alice",
             CardSchedule(
                 card_id="c1",
                 state=ScheduleState.LEARNING,
@@ -596,7 +676,7 @@ async def test_sql_library_delete_deck_cascades(engine: AsyncEngine) -> None:
         assert await SqlDeckRepository(s).get("d1") is None
         assert await SqlNoteRepository(s).get("n1") is None
         assert await SqlCardRepository(s).get("c1") is None
-        assert await SqlScheduleRepository(s).get("c1") is None
+        assert await SqlScheduleRepository(s).get("alice", "c1") is None
 
 
 # --- Custom note types and image occlusion on Postgres (ADR 0013) ---
@@ -853,8 +933,54 @@ async def test_sql_apkg_round_trip_keeps_history_and_schedule(engine: AsyncEngin
     async with sm() as s:
         bob_cards = await SqlCardRepository(s).list_for_owner("bob")
         assert len(bob_cards) == 1 and bob_cards[0].is_suspended
-        assert await SqlScheduleRepository(s).get(bob_cards[0].id) is not None
+        assert await SqlScheduleRepository(s).get("bob", bob_cards[0].id) is not None
         logs = await SqlReviewLogRepository(s).list_for_owner("bob")
         assert [log.rating for log in logs] == [Rating.GOOD]
         bob_decks = await SqlDeckRepository(s).list_for_owner("bob")
         assert sorted(deck.name for deck in bob_decks) == ["Spanish", "Verbs"]
+
+
+async def test_sql_account_export_and_delete_cover_library_progress(engine: AsyncEngine) -> None:
+    """A member's progress on an admin's card is exported and erased with the member,
+    and the admin's own progress on the card stays (ADR 0024)."""
+    from flashcards.domain.notes import NoteType
+    from flashcards.domain.scheduling import Rating
+
+    sm = create_sessionmaker(engine)
+    hasher = Argon2PasswordHasher()
+    admin = User(
+        id="admin", email="admin@e.com", password_hash="h", role=Role.ADMIN, created_at=_now()
+    )
+    member = User(
+        id="member", email="member@e.com", password_hash="h", role=Role.MEMBER, created_at=_now()
+    )
+    async with sm() as s, s.begin():
+        await SqlUserRepository(s).add(admin)
+        await SqlUserRepository(s).add(member)
+        services = build_services(_sql_repositories(s, hasher))
+        deck = await services.decks.create(owner_id="admin", name="Library")
+        _note, (card,) = await services.notes.create_note(
+            owner_id="admin",
+            deck_id=deck.id,
+            note_type=NoteType.BASIC,
+            fields={"front": "Q", "back": "A"},
+        )
+        await services.reviews.submit(owner_id="admin", card_id=card.id, rating=Rating.GOOD)
+        await services.reviews.submit(owner_id="member", card_id=card.id, rating=Rating.AGAIN)
+    async with sm() as s, s.begin():
+        exported = await build_services(_sql_repositories(s, hasher)).account.export(user=member)
+    assert [x.card_id for x in exported.schedules] == [card.id]
+    assert [log.card_id for log in exported.review_logs] == [card.id]
+    assert exported.cards == ()
+
+    async with sm() as s, s.begin():
+        await build_services(_sql_repositories(s, hasher)).account.delete(user=member)
+    async with sm() as s:
+        schedules = SqlScheduleRepository(s)
+        assert await schedules.list_for_user("member") == []
+        assert await SqlReviewLogRepository(s).list_for_owner("member") == []
+        admins_row = await schedules.get("admin", card.id)
+        assert admins_row is not None and admins_row.last_reviewed_at is not None
+        assert [log.rating for log in await SqlReviewLogRepository(s).list_for_owner("admin")] == [
+            Rating.GOOD
+        ]

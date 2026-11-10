@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect
@@ -116,3 +117,102 @@ def test_migration_upgrade_then_downgrade(pg_url: str) -> None:
 
     command.downgrade(cfg, "base")
     assert APP_TABLES.isdisjoint(_table_names(pg_url))
+
+
+def _execute(url: str, *statements: str) -> None:
+    async def _run() -> None:
+        engine = create_engine(url)
+        async with engine.begin() as conn:
+            for statement in statements:
+                await conn.exec_driver_sql(statement)
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def _schedule_rows(url: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """The (user_id, card_id) of every schedule, and the table's primary key columns."""
+
+    async def _run() -> tuple[list[tuple[str, str]], list[str]]:
+        engine = create_engine(url)
+        async with engine.connect() as conn:
+            result = await conn.exec_driver_sql(
+                "SELECT user_id, card_id FROM card_schedule ORDER BY user_id, card_id"
+            )
+            rows = [(str(row["user_id"]), str(row["card_id"])) for row in result.mappings()]
+            pk: list[str] = await conn.run_sync(
+                lambda c: list(inspect(c).get_pk_constraint("card_schedule")["constrained_columns"])
+            )
+        await engine.dispose()
+        return rows, pk
+
+    return asyncio.run(_run())
+
+
+def test_0019_keeps_every_schedule_as_its_owners(pg_url: str) -> None:
+    _reset(pg_url)
+    cfg = _alembic_config(pg_url)
+    command.upgrade(cfg, "0018")
+    # A schedule as 0018 stores it: keyed by the card alone.
+    _execute(
+        pg_url,
+        "INSERT INTO decks (id, owner_id, name, parent_id, created_at) "
+        "VALUES ('d1', 'admin', 'Deck', NULL, now())",
+        "INSERT INTO notes (id, owner_id, deck_id, note_type, fields, created_at) "
+        "VALUES ('n1', 'admin', 'd1', 'basic', '{\"front\": \"Q\", \"back\": \"A\"}', now())",
+        "INSERT INTO cards (id, owner_id, deck_id, note_id, ordinal, created_at) "
+        "VALUES ('c1', 'admin', 'd1', 'n1', 0, now())",
+        "INSERT INTO card_schedule (card_id, state, step, stability, difficulty, due_at, "
+        "last_reviewed_at) VALUES ('c1', 'review', NULL, 3.0, 5.0, now(), now())",
+    )
+
+    command.upgrade(cfg, "0019")
+    assert _schedule_rows(pg_url) == ([("admin", "c1")], ["user_id", "card_id"])
+    # A member's own progress on the same card now fits next to the owner's.
+    _execute(
+        pg_url,
+        "INSERT INTO card_schedule (user_id, card_id, state, step, stability, difficulty, "
+        "due_at, last_reviewed_at) VALUES ('member', 'c1', 'new', NULL, NULL, NULL, now(), NULL)",
+    )
+
+    # The old key cannot hold the member's row, so the downgrade refuses to drop it.
+    with pytest.raises(RuntimeError, match="Restore the backup"):
+        command.downgrade(cfg, "0018")
+    _execute(pg_url, "DELETE FROM card_schedule WHERE user_id = 'member'")
+    command.downgrade(cfg, "0018")
+
+    async def _remaining() -> list[str]:
+        engine = create_engine(pg_url)
+        async with engine.connect() as conn:
+            result = await conn.exec_driver_sql("SELECT card_id FROM card_schedule")
+            cards = [str(card) for card in result.scalars()]
+        await engine.dispose()
+        return cards
+
+    assert asyncio.run(_remaining()) == ["c1"]
+    command.downgrade(cfg, "base")
+
+
+def test_migrations_match_the_models(pg_url: str) -> None:
+    """After upgrading to head, autogenerate finds nothing to change: no schema drift."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from sqlalchemy.engine import Connection
+
+    _reset(pg_url)
+    command.upgrade(_alembic_config(pg_url), "head")
+
+    def _diff(conn: Connection) -> list[object]:
+        context = MigrationContext.configure(conn, opts={"compare_type": True})
+        return list(compare_metadata(context, Base.metadata))
+
+    async def _run() -> list[object]:
+        engine = create_engine(pg_url)
+        async with engine.connect() as conn:
+            found: list[object] = await conn.run_sync(_diff)
+        await engine.dispose()
+        return found
+
+    differences = asyncio.run(_run())
+    command.downgrade(_alembic_config(pg_url), "base")
+    assert differences == []

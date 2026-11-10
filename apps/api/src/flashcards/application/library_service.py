@@ -154,5 +154,5 @@ class LibraryService:
         await self._note_repo.delete(note_id)
 
     async def _purge_card(self, card_id: str) -> None:
-        await self._schedule_repo.delete(card_id)
+        await self._schedule_repo.delete_for_card(card_id)
         await self._review_log_repo.delete_for_card(card_id)

@@ -5,15 +5,19 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Deck, DeckStats } from "../api/types";
 import { enqueue } from "../offline/reviewQueue";
-import { finishOnboarding } from "../onboarding/state";
+import { finishOnboarding, readOnboarding } from "../onboarding/state";
 import { USER, mockApi, renderApp } from "../test/helpers";
 
-const deck = (id: string, name: string, parent: string | null = null): Deck => ({
+const deck = (id: string, name: string, parent: string | null = null, owned = true): Deck => ({
   id,
   name,
   parent_id: parent,
   created_at: "2026-01-01T00:00:00Z",
+  owned,
 });
+
+/** An admin's deck, as a member sees it (ADR 0024). */
+const libraryDeck = (id: string, name: string, parent: string | null = null): Deck => deck(id, name, parent, false);
 
 const STATS: DeckStats = {
   total: 10,
@@ -97,6 +101,59 @@ describe("deck list", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ name: "x", parent_id: "b" });
   });
 
+  it("lists library decks apart from the user's own, marked, and never as a parent", async () => {
+    mockApi({
+      ...me,
+      "GET /decks": {
+        body: [deck("a", "Biology"), libraryDeck("l1", "Anatomy"), libraryDeck("l2", "Bones", "l1")],
+      },
+    });
+    renderApp("/");
+    const own = await screen.findByRole("heading", { name: "Your decks" });
+    expect(own.tagName).toBe("H2");
+    const library = screen.getByRole("region", { name: "Library" });
+    expect(
+      within(library).getByText("Shared by your admin. Study them; your progress is your own."),
+    ).toBeInTheDocument();
+    const tile = within(library).getByRole("link", { name: "Anatomy" }).closest("li.deck-tile") as HTMLElement;
+    expect(within(tile).getByText("Library")).toHaveClass("badge");
+    expect(within(tile).getByRole("link", { name: "Bones" })).toHaveAttribute("href", "/decks/l2");
+    expect(within(library).queryByRole("link", { name: "Biology" })).toBeNull();
+    const ownTile = screen.getByRole("link", { name: "Biology" }).closest("li.deck-tile") as HTMLElement;
+    expect(within(ownTile).queryByText("Library")).toBeNull();
+    const parents = within(screen.getByLabelText("Inside")).getAllByRole("option");
+    expect(parents.map((option) => option.textContent)).toEqual(["No parent", "Biology"]);
+  });
+
+  it("keeps the plain layout when there is no library", async () => {
+    mockApi({ ...me, "GET /decks": { body: [deck("a", "Biology")] } });
+    renderApp("/");
+    await screen.findByRole("link", { name: "Biology" });
+    expect(screen.queryByRole("heading", { name: "Your decks" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Library" })).toBeNull();
+    expect(screen.queryByText(/your decks are shared/)).toBeNull(); // a member's decks are private
+  });
+
+  it("lets a member with only library decks study them, still offering the guided setup", async () => {
+    mockApi({ ...me, "GET /decks": { body: [libraryDeck("l1", "Anatomy")] } });
+    renderApp("/");
+    expect(await screen.findByText(/No decks of your own yet/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "guided setup" })).toHaveAttribute("href", "/welcome");
+    expect(screen.getByRole("link", { name: "Anatomy" })).toHaveAttribute("href", "/decks/l1");
+    // Nothing of their own to nest under, and no detour into the setup.
+    expect(screen.queryByLabelText("Inside")).toBeNull();
+    // The setup would open by itself within moments (as it does with no decks at all); it never does.
+    await expect(screen.findByRole("heading", { name: "Getting started" }, { timeout: 500 })).rejects.toThrow();
+    expect(screen.getByRole("heading", { name: "Decks", level: 1 })).toBeInTheDocument();
+    expect(readOnboarding(USER.id)).toBeNull();
+  });
+
+  it("opens the guided setup by itself when there is nothing to study at all", async () => {
+    mockApi({ ...me, "GET /decks": { body: [] } });
+    renderApp("/");
+    expect(await screen.findByRole("heading", { name: "Getting started" })).toBeInTheDocument();
+  });
+
   it("shows a load failure", async () => {
     mockApi({ ...me, "GET /decks": { status: 500 } });
     renderApp("/");
@@ -119,6 +176,70 @@ describe("deck detail", () => {
     expect(screen.getByRole("link", { name: "Membranes" })).toHaveAttribute("href", "/decks/c");
     expect(screen.getByRole("link", { name: "Study now" })).toHaveAttribute("href", "/decks/b/study");
     expect(screen.getByRole("link", { name: "Browse cards" })).toHaveAttribute("href", "/cards?deck=b");
+  });
+
+  it("shows a library deck for study only, with its sub-decks", async () => {
+    const calls = mockApi({
+      ...me,
+      "GET /decks": { body: [libraryDeck("l1", "Anatomy"), libraryDeck("l2", "Bones", "l1")] },
+      "GET /decks/l1/stats": { body: STATS },
+    });
+    renderApp("/decks/l1");
+    expect(await screen.findByRole("heading", { name: "Anatomy" })).toBeInTheDocument();
+    expect(screen.getByText("From the library")).toHaveClass("badge");
+    expect(screen.getByText(/only the admin can change it/)).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Proficiency 62%" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Study now" })).toHaveAttribute("href", "/decks/l1/study");
+    expect(screen.getByRole("link", { name: "Bones" })).toHaveAttribute("href", "/decks/l2");
+    for (const name of ["Add card", "Generate from a file", "Browse cards", "Mock exam", "Share"]) {
+      expect(screen.queryByRole("link", { name })).toBeNull();
+    }
+    for (const name of ["Rename", "Delete deck", "Add deck", "Anki package"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.queryByRole("heading", { name: "Manage" })).toBeNull();
+    // The AI panels are the owner's and stay away.
+    await waitFor(() => {
+      expect(calls.some((c) => c.path === "/decks/l1/stats")).toBe(true);
+    });
+    expect(screen.queryByRole("heading", { name: "Deck summary" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Ask your source documents" })).toBeNull();
+  });
+
+  it("keeps the owner's controls for a deck whose payload does not say who owns it", async () => {
+    const unmarked: Deck = { id: "u", name: "Older", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+    mockApi({ ...me, "GET /decks": { body: [unmarked] }, "GET /decks/u/stats": { body: STATS } });
+    renderApp("/decks/u");
+    expect(await screen.findByRole("button", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add card" })).toBeInTheDocument();
+    expect(screen.queryByText("From the library")).toBeNull();
+  });
+
+  it("says an empty library deck has no cards, without offering to add any", async () => {
+    mockApi({
+      ...me,
+      "GET /decks": { body: [libraryDeck("l1", "Anatomy")] },
+      "GET /decks/l1/stats": { body: { ...STATS, total: 0 } },
+    });
+    renderApp("/decks/l1");
+    expect(await screen.findByText("This library deck has no cards yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "import an Anki deck" })).toBeNull();
+  });
+
+  it("warns an admin that deleting a deck erases members' progress on it, and says their decks are shared", async () => {
+    const admin = { "GET /auth/me": { body: { ...USER, role: "admin" } } };
+    mockApi({ ...admin, "GET /decks": { body: decks }, "GET /decks/c/stats": { body: STATS } });
+    const { unmount } = renderApp("/decks/c");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Delete deck" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "Delete “Membranes” and every card in it? It is in every member's library: members who studied it lose their progress on it. This cannot be undone.",
+    );
+    unmount();
+    renderApp("/");
+    expect(
+      await screen.findByText("As an admin, your decks are shared with every member as a read-only library."),
+    ).toBeInTheDocument();
   });
 
   it("renames a deck", async () => {

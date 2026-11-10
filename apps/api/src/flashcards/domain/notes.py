@@ -272,3 +272,13 @@ class Card:
 
     def moved_to(self, deck_id: str) -> Card:
         return replace(self, deck_id=deck_id)
+
+    def seen_by(self, reader_id: str) -> Card:
+        """The card as this reader sees it (ADR 0024).
+
+        Bury and flag are the owner's personal markers, so a reader of a library
+        card sees neither. Suspension is the owner's decision for everyone.
+        """
+        if reader_id == self.owner_id:
+            return self
+        return replace(self, flag=0, buried_until=None)

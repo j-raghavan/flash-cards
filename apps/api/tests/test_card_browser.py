@@ -145,8 +145,8 @@ async def _library(rig: _Rig) -> dict[str, str]:
     await rig.cards.update(suspended.suspended(NOW))
     await rig.cards.update(buried.buried(NOW).with_flag(2))
     await rig.cards.update(review.with_flag(2))
-    await rig.schedules.upsert(_schedule(learning.id, ScheduleState.LEARNING))
-    await rig.schedules.upsert(_schedule(review.id, ScheduleState.REVIEW, days_ago=30))
+    await rig.schedules.upsert(ALICE, _schedule(learning.id, ScheduleState.LEARNING))
+    await rig.schedules.upsert(ALICE, _schedule(review.id, ScheduleState.REVIEW, days_ago=30))
     bob_deck = await rig.decks.create(owner_id=BOB, name="Bob's")
     await rig.add(bob_deck.id, "bob's card", owner=BOB)
     _ = new

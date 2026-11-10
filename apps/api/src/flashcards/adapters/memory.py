@@ -127,6 +127,9 @@ class InMemoryUserRepository:
     async def lock_active_admins(self) -> list[User]:
         return sorted((u for u in self._by_id.values() if u.is_active_admin), key=lambda u: u.id)
 
+    async def list_active_admin_ids(self) -> list[str]:
+        return [user.id for user in await self.lock_active_admins()]  # nothing to lock here
+
     async def list_all(self) -> list[User]:
         return sorted(self._by_id.values(), key=lambda u: (u.created_at, u.id))
 
@@ -202,6 +205,11 @@ class InMemoryDeckRepository:
     async def list_for_owner(self, owner_id: str) -> list[Deck]:
         owned = [d for d in self._by_id.values() if d.owner_id == owner_id]
         return sorted(owned, key=lambda d: d.created_at)
+
+    async def list_for_owners(self, owner_ids: Sequence[str]) -> list[Deck]:
+        wanted = set(owner_ids)
+        found = [d for d in self._by_id.values() if d.owner_id in wanted]
+        return sorted(found, key=lambda d: (d.created_at, d.id))
 
     async def update(self, deck: Deck) -> None:
         self._by_id[deck.id] = deck
@@ -310,6 +318,9 @@ class InMemoryCardRepository:
     async def get_many(self, card_ids: Sequence[str]) -> list[Card]:
         return [self._by_id[cid] for cid in dict.fromkeys(card_ids) if cid in self._by_id]
 
+    async def share_lock(self, card_id: str) -> Card | None:
+        return self._by_id.get(card_id)  # one event loop: nothing runs in between
+
     async def list_for_notes(self, note_ids: Sequence[str]) -> list[Card]:
         wanted = set(note_ids)
         cards = [c for c in self._by_id.values() if c.note_id in wanted]
@@ -329,19 +340,32 @@ class InMemoryCardRepository:
 
 class InMemoryScheduleRepository:
     def __init__(self) -> None:
-        self._by_card: dict[str, CardSchedule] = {}
+        self._by_key: dict[tuple[str, str], CardSchedule] = {}  # (user id, card id)
 
-    async def get(self, card_id: str) -> CardSchedule | None:
-        return self._by_card.get(card_id)
+    async def get(self, user_id: str, card_id: str) -> CardSchedule | None:
+        return self._by_key.get((user_id, card_id))
 
-    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
-        return {cid: self._by_card[cid] for cid in card_ids if cid in self._by_card}
+    async def get_many(self, user_id: str, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+        return {
+            cid: self._by_key[(user_id, cid)] for cid in card_ids if (user_id, cid) in self._by_key
+        }
 
-    async def upsert(self, schedule: CardSchedule) -> None:
-        self._by_card[schedule.card_id] = schedule
+    async def list_for_user(self, user_id: str) -> list[CardSchedule]:
+        return [s for (uid, _), s in sorted(self._by_key.items()) if uid == user_id]
 
-    async def delete(self, card_id: str) -> None:
-        self._by_card.pop(card_id, None)
+    async def upsert(self, user_id: str, schedule: CardSchedule) -> None:
+        self._by_key[(user_id, schedule.card_id)] = schedule
+
+    async def delete(self, user_id: str, card_id: str) -> None:
+        self._by_key.pop((user_id, card_id), None)
+
+    async def delete_for_card(self, card_id: str) -> None:
+        for key in [key for key in self._by_key if key[1] == card_id]:
+            del self._by_key[key]
+
+    async def delete_for_user(self, user_id: str) -> None:
+        for key in [key for key in self._by_key if key[0] == user_id]:
+            del self._by_key[key]
 
 
 class InMemoryReviewLogRepository:
@@ -1041,7 +1065,7 @@ class InMemoryStudyStatsRepository:
         until: datetime,
         deck_ids: Sequence[str] | None = None,
     ) -> list[ActivityBucket]:
-        in_decks = await self._card_ids(owner_id, deck_ids)
+        in_decks = await self._card_ids(deck_ids)
         totals: dict[datetime, tuple[int, int]] = {}
         for log in await self._logs.list_for_owner(owner_id):
             if not since <= log.reviewed_at < until:
@@ -1059,28 +1083,31 @@ class InMemoryStudyStatsRepository:
         *,
         floor: datetime,
         until: datetime,
+        card_owner_ids: Sequence[str],
         deck_ids: Sequence[str] | None = None,
     ) -> list[DueBucket]:
         wanted = None if deck_ids is None else set(deck_ids)
-        cards = [
-            c
-            for c in await self._cards.list_for_owner(owner_id)
-            if not c.is_suspended and (wanted is None or c.deck_id in wanted)
-        ]
-        schedules = await self._schedules.get_many([c.id for c in cards])
+        owners = set(card_owner_ids)
+        schedules = await self._schedules.list_for_user(owner_id)
+        cards = {c.id: c for c in await self._cards.get_many([s.card_id for s in schedules])}
         totals: dict[datetime, int] = {}
-        for schedule in schedules.values():
+        for schedule in schedules:
+            card = cards.get(schedule.card_id)
+            if card is None or card.is_suspended or card.owner_id not in owners:
+                continue
+            if wanted is not None and card.deck_id not in wanted:
+                continue
             if schedule.due_at >= until:
                 continue
             start = bucket_start(max(schedule.due_at, floor))
             totals[start] = totals.get(start, 0) + 1
         return [DueBucket(start, n) for start, n in sorted(totals.items())]
 
-    async def _card_ids(self, owner_id: str, deck_ids: Sequence[str] | None) -> set[str] | None:
+    async def _card_ids(self, deck_ids: Sequence[str] | None) -> set[str] | None:
         if deck_ids is None:
             return None
-        wanted = set(deck_ids)
-        return {c.id for c in await self._cards.list_for_owner(owner_id) if c.deck_id in wanted}
+        # Every card in the decks, whoever owns it: the logs are the reviewer's.
+        return {c.id for deck_id in set(deck_ids) for c in await self._cards.list_for_deck(deck_id)}
 
 
 class NullUnitOfWork:

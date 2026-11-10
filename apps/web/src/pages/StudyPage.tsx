@@ -5,6 +5,8 @@
 // the AI suggests a rating, which the student confirms or changes. Every
 // answer carries its own idempotency key and is queued on the device when the
 // server is unreachable (F-STUDY-5), so the session never waits on the network.
+// A library card (an admin's, ADR 0024) is studied by revealing it only: it
+// cannot be edited, and typed-answer grading stays on the user's own cards.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -14,11 +16,11 @@ import { cards, decks, notes } from "../api/endpoints";
 import { reviews, type DailyGoal } from "../api/studyProgress";
 import type { Card, CardDetail, Rating } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { OcclusionImage } from "../components/OcclusionImage";
-import { CardContent, Dialog, ErrorText, Loading } from "../components/ui";
-import { cardSides } from "../lib/cardSides";
+import { CardFaces } from "../components/CardFaces";
+import { Dialog, ErrorText, Loading } from "../components/ui";
 import { newIdempotencyKey } from "../lib/text";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { isOwned } from "../lib/ownership";
 import { useResource } from "../lib/useResource";
 import { pending, submitReview } from "../offline/reviewQueue";
 import { NoteEditor } from "./NoteEditorPage";
@@ -199,6 +201,11 @@ export function StudyPage() {
   const detail = shown.position === position ? shown.detail : null;
   const cardError = shown.position === position ? shown.error : null;
   const revealed = revealedAt === position;
+  // Editing and AI grading are the owner's. Until the card on screen is known to be
+  // the user's own, the session reveals answers and offers no mode switch; the
+  // saved mode stays for their own cards.
+  const ownCard = detail !== null && isOwned(detail);
+  const studyMode: StudyMode = ownCard ? mode : "self";
   const suggestion = suggested?.position === position ? suggested.rating : null;
 
   useEffect(() => {
@@ -371,7 +378,7 @@ export function StudyPage() {
         undo(undoTarget);
         return;
       }
-      if (event.key.toLowerCase() === "e" && detail !== null) {
+      if (event.key.toLowerCase() === "e" && ownCard) {
         event.preventDefault();
         setEditing(true);
         return;
@@ -401,7 +408,7 @@ export function StudyPage() {
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [revealed, detail, rate, position, editing, undoTarget, undo, suggestion]);
+  }, [revealed, detail, ownCard, rate, position, editing, undoTarget, undo, suggestion]);
 
   // Keep keyboard and screen-reader focus with the session: the card when it
   // appears (the answer box, in the typed-answer mode), the rating buttons once
@@ -410,10 +417,10 @@ export function StudyPage() {
   const ratingsRef = useRef<HTMLDivElement>(null);
   const loaded = detail !== null;
   useEffect(() => {
-    if (loaded && (revealed || mode === "self")) {
+    if (loaded && (revealed || studyMode === "self")) {
       (revealed ? ratingsRef.current : cardRef.current)?.focus();
     }
-  }, [loaded, revealed, position, mode]);
+  }, [loaded, revealed, position, studyMode]);
 
   const header = (
     <nav aria-label="Breadcrumb" className="breadcrumb">
@@ -474,9 +481,6 @@ export function StudyPage() {
     );
   }
 
-  const sides = detail === null ? null : cardSides(detail.note_type, detail.fields, detail.ordinal, detail.template);
-  const occlusion = detail?.occlusion ?? null;
-
   return (
     <section className="study">
       {header}
@@ -486,29 +490,31 @@ export function StudyPage() {
         </p>
         {goal === null ? null : <GoalProgress goal={goal} />}
       </div>
-      <fieldset className="segmented study-mode">
-        <legend>Answer by</legend>
-        {(
-          [
-            ["self", "Revealing it"],
-            ["ai", "Typing it (AI checks)"],
-          ] as const
-        ).map(([value, label]) => (
-          <label key={value}>
-            <input
-              type="radio"
-              name="study-mode"
-              value={value}
-              checked={mode === value}
-              onChange={() => {
-                setMode(value);
-                saveMode(value);
-              }}
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
+      {ownCard ? (
+        <fieldset className="segmented study-mode">
+          <legend>Answer by</legend>
+          {(
+            [
+              ["self", "Revealing it"],
+              ["ai", "Typing it (AI checks)"],
+            ] as const
+          ).map(([value, label]) => (
+            <label key={value}>
+              <input
+                type="radio"
+                name="study-mode"
+                value={value}
+                checked={mode === value}
+                onChange={() => {
+                  setMode(value);
+                  saveMode(value);
+                }}
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
       <ErrorText message={submitError} />
       {cardError !== null ? (
         <div>
@@ -518,7 +524,7 @@ export function StudyPage() {
           </button>
         </div>
       ) : null}
-      {sides === null ? (
+      {detail === null ? (
         cardError === null ? (
           <Loading label="Loading card…" />
         ) : null
@@ -529,19 +535,10 @@ export function StudyPage() {
           tabIndex={-1}
           ref={cardRef}
         >
-          <CardContent markdown={sides.front} className="front" />
-          {occlusion === null ? null : (
-            <OcclusionImage occlusion={occlusion} ordinal={card.ordinal} revealed={revealed} />
-          )}
-          {revealed ? (
-            <>
-              <hr />
-              <CardContent markdown={sides.back} className="back" />
-            </>
-          ) : null}
+          <CardFaces detail={detail} revealed={revealed} />
         </article>
       )}
-      {sides !== null && mode === "ai" ? (
+      {detail !== null && studyMode === "ai" ? (
         <Suspense fallback={<Loading />}>
           <TypedAnswer
             key={position}
@@ -557,7 +554,7 @@ export function StudyPage() {
           />
         </Suspense>
       ) : null}
-      {sides === null ? null : revealed ? (
+      {detail === null ? null : revealed ? (
         <div className="ratings" role="group" aria-label="How well did you know it?" tabIndex={-1} ref={ratingsRef}>
           {RATINGS.map(({ rating, label }) => (
             <button
@@ -575,7 +572,7 @@ export function StudyPage() {
             </button>
           ))}
         </div>
-      ) : mode === "ai" ? null : (
+      ) : studyMode === "ai" ? null : (
         <button
           type="button"
           className="button primary reveal"
@@ -589,7 +586,7 @@ export function StudyPage() {
       )}
       <div className="row actions">
         {undoButton}
-        {detail === null ? null : (
+        {ownCard ? (
           <button
             type="button"
             className="button"
@@ -600,7 +597,7 @@ export function StudyPage() {
           >
             Edit card <kbd>E</kbd>
           </button>
-        )}
+        ) : null}
       </div>
       {editing ? (
         <EditCardDialog

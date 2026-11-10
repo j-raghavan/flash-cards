@@ -98,4 +98,4 @@ async def clone_shared_deck(
     container: Container = Depends(get_container, scope="function"),
 ) -> DeckOut:
     deck = await container.sharing.clone(owner_id=caller.user.id, token=token)
-    return DeckOut.from_deck(deck)
+    return DeckOut.from_deck(deck, owned=True)

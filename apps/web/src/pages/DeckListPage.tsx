@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Home: the deck tree and a form to add a deck (F-DECK-1).
+// Home: the deck tree and a form to add a deck (F-DECK-1). Library decks (an
+// admin's, ADR 0024) are listed apart from the user's own and marked as such.
 
 import { useState, type SubmitEvent } from "react";
 import { Link } from "react-router";
 
 import { decks } from "../api/endpoints";
+import { useAuth } from "../auth/AuthContext";
+import { isOwned } from "../lib/ownership";
 import type { Deck } from "../api/types";
 import { ErrorText, Loading } from "../components/ui";
 import { OnboardingPrompt } from "../onboarding/OnboardingPrompt";
-import { buildDeckTree, deckOptions, type DeckNode } from "../lib/deckTree";
+import { buildDeckTree, deckOptions, ownedDecks, type DeckNode } from "../lib/deckTree";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
@@ -42,7 +45,7 @@ function countDecks(nodes: DeckNode[]): number {
 }
 
 /** Top-level decks as tiles; their subdecks are listed inside. */
-function DeckGrid({ nodes }: { nodes: DeckNode[] }) {
+function DeckGrid({ nodes, library = false }: { nodes: DeckNode[]; library?: boolean }) {
   return (
     <ul className="deck-tree deck-grid">
       {nodes.map((node) => {
@@ -53,6 +56,7 @@ function DeckGrid({ nodes }: { nodes: DeckNode[] }) {
               {Array.from(node.deck.name.trim())[0]?.toUpperCase() ?? "#"}
             </span>
             <Link to={`/decks/${node.deck.id}`}>{node.deck.name}</Link>
+            {library ? <span className="badge">Library</span> : null}
             {subdecks > 0 ? (
               <p className="deck-meta">
                 {subdecks} {subdecks === 1 ? "subdeck" : "subdecks"}
@@ -78,6 +82,8 @@ export function CreateDeckForm({
   const [name, setName] = useState("");
   const [parent, setParent] = useState(initialParent);
   const submit = useSubmit();
+  // A deck can only be placed inside one of the user's own.
+  const own = ownedDecks(all);
 
   const onSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
@@ -102,7 +108,7 @@ export function CreateDeckForm({
           }}
         />
       </label>
-      {all.length > 0 ? (
+      {own.length > 0 ? (
         <label className="field">
           <span>Inside</span>
           <select
@@ -112,7 +118,7 @@ export function CreateDeckForm({
             }}
           >
             <option value="">No parent</option>
-            {deckOptions(all).map((option) => (
+            {deckOptions(own).map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
               </option>
@@ -125,6 +131,49 @@ export function CreateDeckForm({
       </button>
       <ErrorText message={submit.error} />
     </form>
+  );
+}
+
+function DeckSections({ all, onCreated }: { all: Deck[]; onCreated: () => void }) {
+  const own = ownedDecks(all);
+  const library = all.filter((deck) => !isOwned(deck));
+  const admin = useAuth().user?.role === "admin";
+  return (
+    <>
+      {/* The guided setup opens by itself only when there is nothing to study,
+          so a member whose library has decks is not sent into it. */}
+      <OnboardingPrompt deckCount={all.length} />
+      {library.length === 0 ? null : <h2>Your decks</h2>}
+      {own.length > 0 ? (
+        <>
+          <DeckGrid nodes={buildDeckTree(own)} />
+          {admin ? (
+            <p className="muted">As an admin, your decks are shared with every member as a read-only library.</p>
+          ) : null}
+        </>
+      ) : library.length > 0 ? (
+        <p className="empty">
+          No decks of your own yet. Study a library deck, or create one below; the{" "}
+          <Link to="/welcome">guided setup</Link> walks you through it.
+        </p>
+      ) : (
+        <p className="empty">
+          No decks yet. Create one below, then add cards by hand or generate them from a PDF or image. The{" "}
+          <Link to="/welcome">guided setup</Link> walks you through it.
+        </p>
+      )}
+      {library.length === 0 ? null : (
+        <section aria-labelledby="library-heading">
+          <h2 id="library-heading">Library</h2>
+          <p className="muted">Shared by your admin. Study them; your progress is your own.</p>
+          <DeckGrid nodes={buildDeckTree(library)} library />
+        </section>
+      )}
+      <div className="panel new-deck">
+        <h2>New deck</h2>
+        <CreateDeckForm all={all} onCreated={onCreated} />
+      </div>
+    </>
   );
 }
 
@@ -150,23 +199,7 @@ export function DeckListPage() {
       </div>
       {list.loading && list.data === undefined ? <Loading /> : null}
       <ErrorText message={list.error} />
-      {list.data === undefined ? null : (
-        <>
-          <OnboardingPrompt deckCount={list.data.length} />
-          {list.data.length === 0 ? (
-            <p className="empty">
-              No decks yet. Create one below, then add cards by hand or generate them from a PDF or image. The{" "}
-              <Link to="/welcome">guided setup</Link> walks you through it.
-            </p>
-          ) : (
-            <DeckGrid nodes={buildDeckTree(list.data)} />
-          )}
-          <div className="panel new-deck">
-            <h2>New deck</h2>
-            <CreateDeckForm all={list.data} onCreated={list.reload} />
-          </div>
-        </>
-      )}
+      {list.data === undefined ? null : <DeckSections all={list.data} onCreated={list.reload} />}
     </section>
   );
 }

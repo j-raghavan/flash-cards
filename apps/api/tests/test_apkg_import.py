@@ -324,7 +324,7 @@ async def test_history_is_replayed_and_state_restored() -> None:
 
     replayed = card_of("Q1")
     assert replayed.is_suspended and replayed.flag == 3
-    schedule = await fx.schedules.get(replayed.id)
+    schedule = await fx.schedules.get(ALICE, replayed.id)
     # Only the answers after the Forget shape the schedule; all of them are history.
     expected = fx.scheduler.new_schedule(replayed.id, NOW - timedelta(days=9))
     for rating, days_ago in ((Rating.AGAIN, 9), (Rating.GOOD, 5)):
@@ -335,15 +335,15 @@ async def test_history_is_replayed_and_state_restored() -> None:
 
     sm2_card = card_of("Q2")
     assert sm2_card.flag == 0 and not sm2_card.is_suspended  # an out-of-range flag is dropped
-    sm2 = await fx.schedules.get(sm2_card.id)
+    sm2 = await fx.schedules.get(ALICE, sm2_card.id)
     assert sm2 is not None and sm2.state is ScheduleState.REVIEW and sm2.stability == 10.0
 
-    assert await fx.schedules.get(card_of("Q3").id) is None  # learning, no history: new
+    assert await fx.schedules.get(ALICE, card_of("Q3").id) is None  # learning, no history: new
     reset = card_of("Q4")
-    assert await fx.schedules.get(reset.id) is None  # new in Anki: starts over
+    assert await fx.schedules.get(ALICE, reset.id) is None  # new in Anki: starts over
     assert [log.card_id for log in await fx.logs.list_for_owner(ALICE)].count(reset.id) == 1
-    assert await fx.schedules.get(card_of("{{c1::a}} {{c2::b}}", 2).id) is not None
-    assert await fx.schedules.get(card_of("{{c1::a}} {{c2::b}}", 1).id) is None
+    assert await fx.schedules.get(ALICE, card_of("{{c1::a}} {{c2::b}}", 2).id) is not None
+    assert await fx.schedules.get(ALICE, card_of("{{c1::a}} {{c2::b}}", 1).id) is None
 
 
 async def test_dry_run_reports_the_same_plan_and_writes_nothing() -> None:
@@ -397,7 +397,7 @@ async def test_a_card_reset_with_no_answers_since_uses_its_sm2_columns() -> None
     report = await fx.run()
 
     (card,) = await fx.cards_in("Deck")
-    schedule = await fx.schedules.get(card.id)
+    schedule = await fx.schedules.get(ALICE, card.id)
     assert schedule is not None and schedule.stability == 6.0  # SM-2, not the old answer
     assert report.reviews_imported == 1 and report.cards_scheduled == 1
 

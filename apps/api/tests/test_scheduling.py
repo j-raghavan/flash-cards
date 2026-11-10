@@ -9,12 +9,16 @@ from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.notes import CardNotFound, NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ScheduleState
@@ -115,9 +119,44 @@ def clock() -> FakeClock:
 
 
 @pytest.fixture
-def notes(clock: FakeClock) -> NoteService:
-    decks = DeckService(InMemoryDeckRepository(), clock)
-    return NoteService(decks, InMemoryNoteRepository(), InMemoryCardRepository(), clock)
+def deck_repo() -> InMemoryDeckRepository:
+    return InMemoryDeckRepository()
+
+
+@pytest.fixture
+def note_repo() -> InMemoryNoteRepository:
+    return InMemoryNoteRepository()
+
+
+@pytest.fixture
+def card_repo() -> InMemoryCardRepository:
+    return InMemoryCardRepository()
+
+
+@pytest.fixture
+def notes(
+    clock: FakeClock,
+    deck_repo: InMemoryDeckRepository,
+    note_repo: InMemoryNoteRepository,
+    card_repo: InMemoryCardRepository,
+) -> NoteService:
+    return NoteService(DeckService(deck_repo, clock), note_repo, card_repo, clock)
+
+
+@pytest.fixture
+def access(
+    deck_repo: InMemoryDeckRepository,
+    note_repo: InMemoryNoteRepository,
+    card_repo: InMemoryCardRepository,
+) -> ReadAccess:
+    return ReadAccess(
+        InMemoryUserRepository(),
+        deck_repo,
+        note_repo,
+        card_repo,
+        InMemoryNoteTypeRepository(),
+        InMemoryMediaRepository(),
+    )
 
 
 @pytest.fixture
@@ -132,12 +171,12 @@ def logs() -> InMemoryReviewLogRepository:
 
 @pytest.fixture
 def reviews(
-    notes: NoteService,
+    access: ReadAccess,
     schedules: InMemoryScheduleRepository,
     logs: InMemoryReviewLogRepository,
     clock: FakeClock,
 ) -> ReviewService:
-    return ReviewService(notes, schedules, logs, FakeScheduler(), clock)
+    return ReviewService(access, schedules, logs, FakeScheduler(), clock)
 
 
 async def _card(notes: NoteService, owner: str = ALICE) -> tuple[str, str]:
@@ -159,7 +198,7 @@ async def test_submit_advances_schedule_and_logs(
     updated = outcome.schedule
     assert updated.state is ScheduleState.REVIEW
     assert updated.due_at == START + timedelta(days=1)
-    assert (await schedules.get(card_id)) is not None
+    assert (await schedules.get(ALICE, card_id)) is not None
 
 
 async def test_submit_on_foreign_card_is_not_found(
@@ -260,6 +299,7 @@ async def test_deck_stats_counts_each_card_state(
     c_suspended = await make_card("suspended")
 
     await schedules.upsert(
+        ALICE,
         CardSchedule(
             card_id=c_learning,
             state=ScheduleState.LEARNING,
@@ -271,6 +311,7 @@ async def test_deck_stats_counts_each_card_state(
         )
     )
     await schedules.upsert(
+        ALICE,
         CardSchedule(
             card_id=c_review,
             state=ScheduleState.REVIEW,
@@ -282,6 +323,7 @@ async def test_deck_stats_counts_each_card_state(
         )
     )
     await schedules.upsert(
+        ALICE,
         CardSchedule(
             card_id=c_mature,
             state=ScheduleState.REVIEW,
@@ -333,3 +375,53 @@ def test_scheduler_never_waits_for_a_unique_fsrs_card_id(monkeypatch: pytest.Mon
     now = datetime(2026, 11, 8, tzinfo=UTC)
     schedule = scheduler.review(scheduler.new_schedule("c1", now), Rating.GOOD, now)
     assert schedule.card_id == "c1"
+
+
+# --- Per-user schedules (ADR 0024) ---
+
+
+def _plain(card_id: str, due_at: datetime = START) -> CardSchedule:
+    return CardSchedule(
+        card_id=card_id,
+        state=ScheduleState.REVIEW,
+        step=None,
+        stability=3.0,
+        difficulty=5.0,
+        due_at=due_at,
+        last_reviewed_at=due_at - timedelta(days=3),
+    )
+
+
+async def test_schedules_are_kept_per_user_and_card(schedules: InMemoryScheduleRepository) -> None:
+    mine, theirs = _plain("c1"), _plain("c1", START + timedelta(days=2))
+    await schedules.upsert(ALICE, mine)
+    await schedules.upsert(BOB, theirs)
+    await schedules.upsert(BOB, _plain("c0"))
+
+    assert await schedules.get(ALICE, "c1") == mine
+    assert await schedules.get(BOB, "c1") == theirs
+    assert await schedules.get(ALICE, "c0") is None
+    assert await schedules.get_many(ALICE, ["c0", "c1"]) == {"c1": mine}
+    assert [s.card_id for s in await schedules.list_for_user(BOB)] == ["c0", "c1"]
+    assert await schedules.list_for_user("nobody") == []
+
+
+async def test_the_three_deletes_reach_only_their_rows(
+    schedules: InMemoryScheduleRepository,
+) -> None:
+    for user in (ALICE, BOB):
+        for card_id in ("c1", "c2"):
+            await schedules.upsert(user, _plain(card_id))
+
+    await schedules.delete(ALICE, "c1")  # one user's row on one card
+    assert await schedules.get(ALICE, "c1") is None
+    assert await schedules.get(BOB, "c1") is not None
+    await schedules.delete(ALICE, "missing")  # nothing to delete is fine
+
+    await schedules.delete_for_card("c1")  # every user's row on the card
+    assert await schedules.get(BOB, "c1") is None
+    assert await schedules.get(ALICE, "c2") is not None
+
+    await schedules.delete_for_user(BOB)  # every row of the user
+    assert await schedules.list_for_user(BOB) == []
+    assert [s.card_id for s in await schedules.list_for_user(ALICE)] == ["c2"]

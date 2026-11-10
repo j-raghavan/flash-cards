@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The card browser (F-DECK-2, F-DECK-3): filter, search, sort, page, select and
-// apply bulk actions. Filters live in the URL so a view can be bookmarked.
+// apply bulk actions. Filters live in the URL so a view can be bookmarked. A
+// card's text opens a read-only view of it, as it is studied.
 
 import { useState, type SubmitEvent } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 
 import { cards, decks } from "../api/endpoints";
+import { useAuth } from "../auth/AuthContext";
 import {
   CARD_STATES,
   SORT_KEYS,
+  type BrowserPage as BrowserPageData,
   type BrowserQuery,
   type BulkAction,
   type BulkRequest,
@@ -16,11 +19,12 @@ import {
   type SortKey,
 } from "../api/types";
 import { ErrorText, Loading } from "../components/ui";
-import { deckOptions } from "../lib/deckTree";
+import { deckOptions, ownedDecks } from "../lib/deckTree";
 import { parseTags } from "../lib/text";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { BrowserCardView } from "./BrowserCardView";
 
 const PAGE_SIZE = 50;
 
@@ -82,6 +86,15 @@ export function queryFromParams(params: URLSearchParams): ParsedQuery {
   return query;
 }
 
+function withoutDeck(query: ParsedQuery): ParsedQuery {
+  const rest = { ...query };
+  delete rest.deck_id;
+  return rest;
+}
+
+/** An answer that never comes, while a deck filter waits to be checked. */
+const WAITING = new Promise<BrowserPageData>(() => undefined);
+
 function BulkBar({
   selected,
   deckChoices,
@@ -91,6 +104,7 @@ function BulkBar({
   deckChoices: { id: string; label: string }[];
   onDone: (message: string) => void;
 }) {
+  const admin = useAuth().user?.role === "admin";
   const [action, setAction] = useState<BulkAction>("move");
   const [deckId, setDeckId] = useState("");
   const [tags, setTags] = useState("");
@@ -197,6 +211,8 @@ function BulkBar({
         <span role="alert">
           Delete the notes behind {selected.length} card{selected.length === 1 ? "" : "s"}? Every card of those notes
           goes too.
+          {/* An admin's cards are in every member's library (ADR 0024). */}
+          {admin ? " They are in every member's library: members who studied them lose their progress on them." : ""}
         </span>
       ) : null}
       <button
@@ -214,16 +230,27 @@ function BulkBar({
 export function BrowserPage() {
   useDocumentTitle("Browse cards");
   const [params, setParams] = useSearchParams();
-  const query = queryFromParams(params);
-  const queryKey = JSON.stringify(query);
-  const page = useResource(() => cards.browse(query), queryKey);
   const deckList = useResource(() => decks.list(), "decks");
+  const asked = queryFromParams(params);
+  // A deck filter must name one of the user's own decks: a library deck's cards
+  // are not in the browser, so its filter is dropped and the user's own cards are
+  // listed. Until the decks are known the filter cannot be checked, so nothing is
+  // asked for yet; if they cannot load, the server decides.
+  const ownIds = new Set(ownedDecks(deckList.data ?? []).map((deck) => deck.id));
+  const checking = asked.deck_id !== undefined && deckList.data === undefined && deckList.error === null;
+  const ignoredDeck = asked.deck_id !== undefined && deckList.data !== undefined && !ownIds.has(asked.deck_id);
+  const query: ParsedQuery = ignoredDeck ? withoutDeck(asked) : asked;
+  const queryKey = checking ? "checking" : JSON.stringify(query);
+  const page = useResource(() => (checking ? WAITING : cards.browse(query)), queryKey);
   const [selected, setSelected] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState(params.get("q") ?? "");
   const [tag, setTag] = useState(params.get("tag") ?? "");
+  // The position, in this result page, of the card being viewed.
+  const [viewing, setViewing] = useState<number | null>(null);
 
-  const deckChoices = deckOptions(deckList.data ?? []);
+  // The browser covers the user's own cards only, so it offers only their decks.
+  const deckChoices = deckOptions(ownedDecks(deckList.data ?? []));
   const rows = page.data?.cards ?? [];
   const total = page.data?.total ?? 0;
   const offset = query.offset;
@@ -366,6 +393,9 @@ export function BrowserPage() {
         </button>
       </form>
 
+      {ignoredDeck ? (
+        <p className="muted">That deck is in the library, so its cards are not listed here; showing your own cards.</p>
+      ) : null}
       <p role="status" className="muted">
         {message}
       </p>
@@ -409,7 +439,7 @@ export function BrowserPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {rows.map((row, position) => {
                 const title = row.preview === "" ? "(empty)" : row.preview;
                 return (
                   <tr key={row.card_id}>
@@ -428,7 +458,16 @@ export function BrowserPage() {
                       />
                     </td>
                     <td>
-                      <Link to={`/notes/${row.note_id}/edit`}>{title}</Link>
+                      <button
+                        type="button"
+                        className="link-button card-open"
+                        aria-haspopup="dialog"
+                        onClick={() => {
+                          setViewing(position);
+                        }}
+                      >
+                        {title}
+                      </button>
                       {row.flag > 0 ? <span className="flag"> flag {row.flag}</span> : null}
                     </td>
                     <td>{row.deck_name}</td>
@@ -442,6 +481,16 @@ export function BrowserPage() {
           </table>
         </div>
       ) : null}
+      {viewing === null ? null : (
+        <BrowserCardView
+          rows={rows}
+          index={viewing}
+          onMove={setViewing}
+          onClose={() => {
+            setViewing(null);
+          }}
+        />
+      )}
       {total > PAGE_SIZE ? (
         <nav className="row pager" aria-label="Pages">
           <button

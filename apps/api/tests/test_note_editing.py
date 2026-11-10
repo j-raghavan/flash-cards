@@ -14,16 +14,20 @@ from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryPassageRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemoryShareLinkRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.notes import InvalidNote, NoteNotFound, NoteType
 from flashcards.domain.scheduling import Rating
@@ -48,7 +52,15 @@ class _Rig:
         deck_repo, note_repo = InMemoryDeckRepository(), InMemoryNoteRepository()
         self.decks = DeckService(deck_repo, clock)
         self.notes = NoteService(self.decks, note_repo, self.cards, clock)
-        self.reviews = ReviewService(self.notes, self.schedules, self.logs, FsrsScheduler(), clock)
+        access = ReadAccess(
+            InMemoryUserRepository(),
+            deck_repo,
+            note_repo,
+            self.cards,
+            InMemoryNoteTypeRepository(),
+            InMemoryMediaRepository(),
+        )
+        self.reviews = ReviewService(access, self.schedules, self.logs, FsrsScheduler(), clock)
         self.library = LibraryService(
             self.decks, self.notes, deck_repo, note_repo, self.cards, self.schedules, self.logs,
             InMemoryPassageRepository(), InMemoryMockExamRepository(),
@@ -77,10 +89,27 @@ async def test_editing_a_cloze_keeps_surviving_cards_and_their_history() -> None
     after = {card.ordinal: card.id for card in cards}
     assert set(after) == {1, 3} and after[1] == before[1]  # c1 kept, c2 gone, c3 new
     assert note.field("text") == "The {{c1::nucleus}} and {{c3::RNA}}"
-    assert await rig.schedules.get(before[1]) is not None  # c1's schedule survives
-    assert await rig.schedules.get(before[2]) is None  # c2's schedule and log are gone
+    assert await rig.schedules.get(ALICE, before[1]) is not None  # c1's schedule survives
+    assert await rig.schedules.get(ALICE, before[2]) is None  # c2's schedule and log are gone
     assert [log.card_id for log in await rig.logs.list_for_owner(ALICE)] == [before[1]]
     assert await rig.cards.get(before[2]) is None
+
+
+async def test_rederiving_a_cloze_purges_every_users_progress_on_removed_cards() -> None:
+    rig = _Rig()
+    note_id, before = await rig.cloze("The {{c1::nucleus}} holds {{c2::DNA}}")
+    for card_id in before.values():
+        await rig.reviews.submit(owner_id=ALICE, card_id=card_id, rating=Rating.GOOD)
+        schedule = await rig.schedules.get(ALICE, card_id)
+        assert schedule is not None
+        await rig.schedules.upsert("reader", schedule)  # another user's own progress
+
+    await rig.library.update_note(
+        owner_id=ALICE, note_id=note_id, fields={"text": "The {{c1::nucleus}}"}
+    )
+
+    assert await rig.schedules.get("reader", before[2]) is None  # gone with c2
+    assert await rig.schedules.get("reader", before[1]) is not None  # c1 survives
 
 
 async def test_editing_only_tags_leaves_the_cards_alone() -> None:

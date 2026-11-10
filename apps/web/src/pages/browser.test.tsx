@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
-import type { BrowserRow } from "../api/types";
+import type { BrowserRow, CardDetail } from "../api/types";
 import { USER, mockApi, renderApp, type Call } from "../test/helpers";
 import { queryFromParams } from "./BrowserPage";
 
@@ -28,8 +28,10 @@ const base = {
   "GET /auth/me": { body: USER },
   "GET /decks": {
     body: [
-      { id: "d1", name: "Biology", parent_id: null, created_at: "" },
-      { id: "d2", name: "Chemistry", parent_id: null, created_at: "" },
+      { id: "d1", name: "Biology", parent_id: null, created_at: "", owned: true },
+      { id: "d2", name: "Chemistry", parent_id: null, created_at: "", owned: true },
+      // A library deck: its cards are not in the browser, so it is never offered.
+      { id: "l1", name: "Anatomy", parent_id: null, created_at: "", owned: false },
     ],
   },
 };
@@ -64,7 +66,7 @@ describe("card browser", () => {
   it("filters through the URL", async () => {
     const calls = mockApi({ ...base, "GET /cards": { body: { total: 1, cards: [row(1, { flag: 2 })] } } });
     renderApp("/cards?deck=d1");
-    expect(await screen.findByRole("link", { name: "Card 1" })).toHaveAttribute("href", "/notes/n1/edit");
+    expect(await screen.findByRole("button", { name: "Card 1" })).toHaveAttribute("aria-haspopup", "dialog");
     expect(screen.getByText("flag 2")).toBeInTheDocument();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Search"), "cell");
@@ -115,12 +117,17 @@ describe("card browser", () => {
     });
     renderApp("/cards");
     const user = userEvent.setup();
-    await screen.findByRole("link", { name: "(empty)" });
+    await screen.findByRole("button", { name: "(empty)" });
 
     await user.click(screen.getByLabelText("Select Card 1"));
     expect(screen.getByText("1 selected")).toBeInTheDocument();
     const apply = screen.getByRole("button", { name: "Apply" });
     expect(apply).toBeDisabled(); // move needs a deck
+    // Neither the deck filter nor a move offers a library deck.
+    for (const picker of screen.getAllByLabelText("Deck")) {
+      expect(within(picker).queryByRole("option", { name: "Anatomy" })).toBeNull();
+      expect(within(picker).getByRole("option", { name: "Chemistry" })).toBeInTheDocument();
+    }
     await user.selectOptions(screen.getByLabelText("Deck", { selector: ".bulk-bar select" }), "d2");
     await user.click(apply);
     expect(await screen.findByText("Updated 1 card.")).toBeInTheDocument();
@@ -172,6 +179,7 @@ describe("card browser", () => {
     await user.selectOptions(screen.getByLabelText("Action"), "delete");
     await user.click(screen.getByRole("button", { name: "Apply" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete the notes behind 1 card?");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("library"); // a member's cards are their own
     await user.click(screen.getByLabelText("Select Card 2"));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete the notes behind 2 cards?");
     expect(calls.some((c) => c.path === "/cards/bulk")).toBe(false);
@@ -179,6 +187,22 @@ describe("card browser", () => {
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await user.click(screen.getByRole("button", { name: "Delete for good" }));
     expect(await screen.findByText("too many")).toBeInTheDocument();
+  });
+
+  it("warns an admin that a bulk delete erases members' progress on those cards", async () => {
+    mockApi({
+      ...base,
+      "GET /auth/me": { body: { ...USER, role: "admin" } },
+      "GET /cards": { body: { total: 1, cards: [row(1)] } },
+    });
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByLabelText("Select Card 1"));
+    await user.selectOptions(screen.getByLabelText("Action"), "delete");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Delete the notes behind 1 card? Every card of those notes goes too. They are in every member's library: members who studied them lose their progress on them.",
+    );
   });
 
   it("explains an empty result and a failed search", async () => {
@@ -191,5 +215,175 @@ describe("card browser", () => {
     mockApi({ ...base, "GET /cards": { status: 422, body: { detail: "bad filter" } } });
     renderApp("/cards");
     expect(await screen.findByRole("alert")).toHaveTextContent("bad filter");
+  });
+});
+
+const detail = (n: number, over: Partial<CardDetail> = {}): CardDetail => ({
+  id: `c${String(n)}`,
+  deck_id: "d1",
+  note_id: `n${String(n)}`,
+  ordinal: 0,
+  suspended: false,
+  flag: 0,
+  buried_until: null,
+  note_type: "basic",
+  fields: { front: `Front **${String(n)}**`, back: `Back ${String(n)}` },
+  tags: [],
+  owned: true,
+  ...over,
+});
+
+describe("card view", () => {
+  const three = {
+    ...base,
+    "GET /cards": {
+      body: {
+        total: 3,
+        cards: [
+          row(1, { tags: ["bio", "cells"], state: "review" }),
+          row(2, { note_type: "cloze", tags: [] }),
+          row(3, { deck_name: "Chemistry" }),
+        ],
+      },
+    },
+    "GET /cards/c1": { body: detail(1) },
+    "GET /cards/c2": {
+      body: detail(2, { note_type: "cloze", ordinal: 1, fields: { text: "{{c1::Paris}} is in {{c2::France}}" } }),
+    },
+    "GET /cards/c3": { body: detail(3) },
+  };
+
+  it("opens a card from its row, as it is studied, and steps through the page", async () => {
+    const calls = mockApi(three);
+    renderApp("/cards?tag=bio");
+    const user = userEvent.setup();
+    const opener = await screen.findByRole("button", { name: "Card 1" });
+    await user.click(opener);
+    const dialog = await screen.findByRole("dialog", { name: "Card 1 of 3" });
+    expect(within(dialog).getByText("Biology")).toBeInTheDocument();
+    expect(within(dialog).getByText("review")).toBeInTheDocument();
+    expect(within(dialog).getByText("bio cells")).toBeInTheDocument();
+    const content = await within(dialog).findByRole("article", { name: "Card content" });
+    expect(within(content).getByText("1").tagName).toBe("STRONG"); // Markdown is rendered
+    expect(content.querySelector("hr")).not.toBeNull();
+    expect(within(content).getByText("Back 1")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/notes/n1/edit");
+    expect(within(dialog).getByRole("button", { name: "Previous card" })).toBeDisabled();
+
+    // The answer can be hidden, and stays hidden from card to card until shown again.
+    const hide = within(dialog).getByRole("button", { name: "Hide answer" });
+    await user.click(hide);
+    expect(hide).toHaveAttribute("aria-pressed", "true");
+    expect(within(dialog).queryByText("Back 1")).toBeNull();
+    await user.click(hide);
+    expect(within(dialog).getByText("Back 1")).toBeInTheDocument();
+
+    // Next, then the arrow keys; a cloze card shows its deletion, revealed.
+    await user.click(within(dialog).getByRole("button", { name: "Next card" }));
+    expect(await screen.findByRole("dialog", { name: "Card 2 of 3" })).toBeInTheDocument();
+    expect(await within(dialog).findByText("[…]")).toBeInTheDocument();
+    expect(within(dialog).getByText("Paris")).toHaveClass("cloze");
+    expect(within(dialog).getByText("None")).toBeInTheDocument(); // no tags
+    await user.keyboard("{ArrowRight}");
+    expect(await screen.findByRole("dialog", { name: "Card 3 of 3" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Chemistry")).toBeInTheDocument();
+    expect(await within(dialog).findByText("Back 3")).toBeInTheDocument();
+    await user.keyboard("{ArrowRight}"); // the end of the page: nothing further
+    expect(screen.getByRole("dialog", { name: "Card 3 of 3" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Next card" })).toBeDisabled();
+    await user.keyboard("{ArrowLeft}{ArrowLeft}");
+    expect(await screen.findByRole("dialog", { name: "Card 1 of 3" })).toBeInTheDocument();
+    await user.keyboard("{ArrowLeft}"); // and the start
+    expect(screen.getByRole("dialog", { name: "Card 1 of 3" })).toBeInTheDocument();
+
+    // Escape closes it and returns focus to the row that opened it, keeping the filters.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+    expect(screen.getByLabelText("Tag")).toHaveValue("bio");
+    expect(calls.filter((c) => c.path.startsWith("/cards?"))).toHaveLength(1);
+  });
+
+  it("keeps focus in the dialog when the arrow keys reach an end, and Escape always closes it", async () => {
+    mockApi(three);
+    renderApp("/cards");
+    const user = userEvent.setup();
+    const opener = await screen.findByRole("button", { name: "Card 2" });
+    await user.click(opener);
+    const dialog = await screen.findByRole("dialog", { name: "Card 2 of 3" });
+    within(dialog).getByRole("button", { name: "Next card" }).focus();
+    await user.keyboard("{ArrowRight}"); // Next is now disabled: focus moves to Previous
+    expect(await screen.findByRole("dialog", { name: "Card 3 of 3" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Previous card" })).toHaveFocus();
+    await user.keyboard("{ArrowLeft}{ArrowLeft}"); // Previous is now disabled: focus moves to Next
+    expect(await screen.findByRole("dialog", { name: "Card 1 of 3" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Next card" })).toHaveFocus();
+    // Even with focus outside the dialog, Escape closes it.
+    (document.activeElement as HTMLElement).blur();
+    expect(dialog).not.toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(opener).toHaveFocus();
+  });
+
+  it("keeps focus in the dialog when a button reaches an end of the page", async () => {
+    mockApi(three);
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Card 2" }));
+    const dialog = await screen.findByRole("dialog", { name: "Card 2 of 3" });
+    await user.click(within(dialog).getByRole("button", { name: "Next card" }));
+    expect(within(dialog).getByRole("button", { name: "Previous card" })).toHaveFocus();
+    await user.click(within(dialog).getByRole("button", { name: "Previous card" }));
+    await user.click(within(dialog).getByRole("button", { name: "Previous card" }));
+    expect(await screen.findByRole("dialog", { name: "Card 1 of 3" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Next card" })).toHaveFocus();
+    // Arrows with a modifier are left to the browser.
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    expect(screen.getByRole("dialog", { name: "Card 1 of 3" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers Edit for a card whose payload does not say who owns it", async () => {
+    const unmarked = detail(1);
+    delete unmarked.owned;
+    mockApi({ ...three, "GET /cards/c1": { body: unmarked } });
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Card 1" }));
+    const dialog = await screen.findByRole("dialog", { name: "Card 1 of 3" });
+    expect(await within(dialog).findByRole("link", { name: "Edit" })).toHaveAttribute("href", "/notes/n1/edit");
+  });
+
+  it("offers no Edit for a card that is not the caller's, and shows a card loading or failing", async () => {
+    let release = (): void => undefined;
+    const loaded = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockApi({
+      ...three,
+      "GET /cards/c1": { body: detail(1, { owned: false }) },
+      "GET /cards/c2": { status: 404, body: { detail: "Card not found." } },
+      "GET /cards/c3": async () => {
+        await loaded;
+        return { body: detail(3) };
+      },
+    });
+    renderApp("/cards");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Card 1" }));
+    const dialog = await screen.findByRole("dialog", { name: "Card 1 of 3" });
+    expect(await within(dialog).findByText("Back 1")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("link", { name: "Edit" })).toBeNull();
+    await user.keyboard("{ArrowRight}");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Card not found.");
+    expect(within(dialog).queryByRole("article")).toBeNull();
+    await user.keyboard("{ArrowRight}");
+    expect(await within(dialog).findByText("Loading card…")).toBeInTheDocument();
+    release();
+    expect(await within(dialog).findByText("Back 3")).toBeInTheDocument();
   });
 });

@@ -12,15 +12,19 @@ from flashcards.adapters.db import study_settings_from_row, study_settings_to_ro
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemoryStudySettingsRepository,
     InMemoryStudyStatsRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
 from flashcards.application.progress_service import ProgressService
+from flashcards.application.read_access import ReadAccess
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.notes import NoteType
 from flashcards.domain.progress import InvalidRange, InvalidStudySettings, StudySettings
@@ -43,14 +47,24 @@ class FakeClock:
 class _Fixture:
     def __init__(self) -> None:
         self.clock = FakeClock()
-        self.decks = DeckService(InMemoryDeckRepository(), self.clock)
+        deck_repo, note_repo = InMemoryDeckRepository(), InMemoryNoteRepository()
+        self.users = InMemoryUserRepository()
+        self.decks = DeckService(deck_repo, self.clock)
         self.cards = InMemoryCardRepository()
         self.schedules = InMemoryScheduleRepository()
         self.logs = InMemoryReviewLogRepository()
-        self.notes = NoteService(self.decks, InMemoryNoteRepository(), self.cards, self.clock)
+        self.notes = NoteService(self.decks, note_repo, self.cards, self.clock)
         self.settings = InMemoryStudySettingsRepository()
         self.stats = InMemoryStudyStatsRepository(self.cards, self.schedules, self.logs)
-        self.progress = ProgressService(self.decks, self.settings, self.stats, self.clock)
+        access = ReadAccess(
+            self.users,
+            deck_repo,
+            note_repo,
+            self.cards,
+            InMemoryNoteTypeRepository(),
+            InMemoryMediaRepository(),
+        )
+        self.progress = ProgressService(access, self.settings, self.stats, self.clock)
 
     async def deck_with_cards(self, owner: str, count: int, name: str = "Deck") -> list[str]:
         deck = await self.decks.create(owner_id=owner, name=name)
@@ -81,6 +95,7 @@ class _Fixture:
 
     async def due(self, card_id: str, at: datetime) -> None:
         await self.schedules.upsert(
+            ALICE,
             CardSchedule(
                 card_id=card_id,
                 state=ScheduleState.REVIEW,

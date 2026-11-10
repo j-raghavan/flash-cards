@@ -4,7 +4,7 @@ Postgres and against the in-memory adapters (needs Docker)."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -91,6 +91,9 @@ CARDS = [
     _card("b1", "dB", "nb1").suspended(NOW),
     _card("z1", "dZ", "nz1", owner="bob"),
 ]
+OWNER_OF = {card.id: card.owner_id for card in CARDS}  # each card's schedule is its owner's
+# Bob's own progress on Alice's card (ADR 0024): never part of Alice's forecast.
+OTHER_USERS_SCHEDULES = [("bob", _schedule("a1", NOW + timedelta(days=3)))]
 LOGS = [
     _log("l1", "a1", NOW - timedelta(days=2, minutes=3), Rating.AGAIN),
     _log("l2", "a1", NOW - timedelta(days=2, minutes=1), Rating.GOOD),
@@ -117,12 +120,14 @@ async def _seed(sm: async_sessionmaker[AsyncSession]) -> None:
             await SqlNoteRepository(s).add(_note(card.note_id, card.deck_id, card.owner_id))
             await SqlCardRepository(s).add(card)
         for schedule in SCHEDULES:
-            await SqlScheduleRepository(s).upsert(schedule)
+            await SqlScheduleRepository(s).upsert(OWNER_OF[schedule.card_id], schedule)
+        for user, schedule in OTHER_USERS_SCHEDULES:
+            await SqlScheduleRepository(s).upsert(user, schedule)
         for log in LOGS:
             await SqlReviewLogRepository(s).append(log)
 
 
-async def _memory_stats() -> InMemoryStudyStatsRepository:
+async def _memory_stats(extra_logs: Sequence[ReviewLog] = ()) -> InMemoryStudyStatsRepository:
     cards, schedules, logs = (
         InMemoryCardRepository(),
         InMemoryScheduleRepository(),
@@ -131,8 +136,10 @@ async def _memory_stats() -> InMemoryStudyStatsRepository:
     for card in CARDS:
         await cards.add(card)
     for schedule in SCHEDULES:
-        await schedules.upsert(schedule)
-    for log in LOGS:
+        await schedules.upsert(OWNER_OF[schedule.card_id], schedule)
+    for user, schedule in OTHER_USERS_SCHEDULES:
+        await schedules.upsert(user, schedule)
+    for log in [*LOGS, *extra_logs]:
         await logs.append(log)
     return InMemoryStudyStatsRepository(cards, schedules, logs)
 
@@ -153,12 +160,16 @@ async def test_activity_and_forecast_match_the_memory_adapter(engine: AsyncEngin
             assert sql_activity == await memory.review_activity(
                 "alice", since=since, until=until, deck_ids=deck_ids
             )
-            sql_due = await sql.due_forecast("alice", floor=floor, until=horizon, deck_ids=deck_ids)
+            sql_due = await sql.due_forecast(
+                "alice", floor=floor, until=horizon, card_owner_ids=["alice"], deck_ids=deck_ids
+            )
             assert sql_due == await memory.due_forecast(
-                "alice", floor=floor, until=horizon, deck_ids=deck_ids
+                "alice", floor=floor, until=horizon, card_owner_ids=["alice"], deck_ids=deck_ids
             )
         overall = await sql.review_activity("alice", since=since, until=until)
-        due = await sql.due_forecast("alice", floor=floor, until=horizon)
+        due = await sql.due_forecast(
+            "alice", floor=floor, until=horizon, card_owner_ids=["alice"]
+        )
 
     day_two = (NOW - timedelta(days=2, minutes=3)).replace(minute=45, second=0)
     assert overall == [
@@ -166,11 +177,58 @@ async def test_activity_and_forecast_match_the_memory_adapter(engine: AsyncEngin
         ActivityBucket(datetime(2026, 11, 8, 6, 45, tzinfo=UTC), 1, 1),
         ActivityBucket(datetime(2026, 11, 8, 11, 0, tzinfo=UTC), 1, 1),
     ]
-    # The overdue card is clamped to the floor; the suspended and foreign ones are absent.
+    # The overdue card is clamped to the floor; the suspended and foreign ones are absent,
+    # and so is Bob's own schedule on Alice's card.
     assert due == [
         DueBucket(floor, 1),
         DueBucket(datetime(2026, 11, 10, 12, 15, tzinfo=UTC), 1),
     ]
+
+
+async def test_library_progress_matches_the_memory_adapter(engine: AsyncEngine) -> None:
+    """Bob studying Alice's cards (ADR 0024): his reviews and schedules, her cards."""
+    sm = create_sessionmaker(engine)
+    await _seed(sm)
+    bob_on_alice = _log("l7", "a2", NOW - timedelta(hours=2), Rating.GOOD, owner="bob")
+    async with sm() as s, s.begin():
+        await SqlReviewLogRepository(s).append(bob_on_alice)
+    memory = await _memory_stats([bob_on_alice])
+    since, until = NOW - timedelta(days=7), NOW + timedelta(minutes=1)
+    floor, horizon = NOW - timedelta(hours=12), NOW + timedelta(days=5)
+
+    async with sm() as s:
+        sql = SqlStudyStatsRepository(s)
+        for owners, deck_ids in (
+            (["alice", "bob"], None),
+            (["alice", "bob"], ["dA"]),
+            (["bob"], None),  # Alice is no longer readable: her cards drop out
+        ):
+            sql_due = await sql.due_forecast(
+                "bob", floor=floor, until=horizon, card_owner_ids=owners, deck_ids=deck_ids
+            )
+            assert sql_due == await memory.due_forecast(
+                "bob", floor=floor, until=horizon, card_owner_ids=owners, deck_ids=deck_ids
+            )
+        library_due = await sql.due_forecast(
+            "bob", floor=floor, until=horizon, card_owner_ids=["alice", "bob"]
+        )
+        own_due = await sql.due_forecast("bob", floor=floor, until=horizon, card_owner_ids=["bob"])
+        for deck_ids in (None, ["dA"]):
+            sql_activity = await sql.review_activity(
+                "bob", since=since, until=until, deck_ids=deck_ids
+            )
+            assert sql_activity == await memory.review_activity(
+                "bob", since=since, until=until, deck_ids=deck_ids
+            )
+        on_alice = await sql.review_activity("bob", since=since, until=until, deck_ids=["dA"])
+
+    # Bob's schedules: his own card z1, and a1 of Alice's.
+    assert library_due == [
+        DueBucket(datetime(2026, 11, 9, 12, 0, tzinfo=UTC), 1),
+        DueBucket(datetime(2026, 11, 11, 12, 0, tzinfo=UTC), 1),
+    ]
+    assert own_due == [DueBucket(datetime(2026, 11, 9, 12, 0, tzinfo=UTC), 1)]
+    assert [b.reviews for b in on_alice] == [1]  # his review of Alice's card counts
 
 
 async def test_settings_upsert_and_delete(engine: AsyncEngine) -> None:

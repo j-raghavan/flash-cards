@@ -43,5 +43,6 @@ async def get_media(
     caller: CurrentUser = Depends(current_user),
     container: Container = Depends(get_container, scope="function"),
 ) -> Response:
-    asset = await container.media.get(owner_id=caller.user.id, media_id=media_id)
+    # Readable for library notes too, so their images render (ADR 0024).
+    asset = await container.read_access.media(caller.user.id, media_id)
     return Response(content=asset.data, media_type=asset.content_type, headers=_SERVE_HEADERS)

@@ -10,18 +10,22 @@ from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
     InMemoryGoalRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryPlanBaselineRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemoryStudySettingsRepository,
     InMemoryStudyStatsRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.goal_service import GoalService
 from flashcards.application.note_service import NoteService
 from flashcards.application.planner_service import PlannerService
 from flashcards.application.progress_service import ProgressService
+from flashcards.application.read_access import ReadAccess
 from flashcards.domain.goals import GoalNotFound
 from flashcards.domain.notes import Card, NoteType
 from flashcards.domain.planner import ChangeReason, PlanBaseline, StudyPlan
@@ -44,16 +48,24 @@ class FakeClock:
 class _Fixture:
     def __init__(self) -> None:
         self.clock = clock = FakeClock()
-        self.decks = DeckService(InMemoryDeckRepository(), clock)
+        deck_repo, note_repo = InMemoryDeckRepository(), InMemoryNoteRepository()
+        self.decks = DeckService(deck_repo, clock)
         self.cards = InMemoryCardRepository()
         self.schedules = InMemoryScheduleRepository()
         self.logs = InMemoryReviewLogRepository()
-        self.notes = NoteService(self.decks, InMemoryNoteRepository(), self.cards, clock)
+        self.notes = NoteService(self.decks, note_repo, self.cards, clock)
         goal_repo = InMemoryGoalRepository()
         self.baselines = InMemoryPlanBaselineRepository(goal_repo)
         self.goals = GoalService(self.decks, goal_repo, clock)
         self.progress = ProgressService(
-            self.decks,
+            ReadAccess(
+                InMemoryUserRepository(),
+                deck_repo,
+                note_repo,
+                self.cards,
+                InMemoryNoteTypeRepository(),
+                InMemoryMediaRepository(),
+            ),
             InMemoryStudySettingsRepository(),
             InMemoryStudyStatsRepository(self.cards, self.schedules, self.logs),
             clock,
@@ -78,6 +90,7 @@ class _Fixture:
 
     async def schedule(self, card_id: str, stability: float) -> None:
         await self.schedules.upsert(
+            ALICE,
             CardSchedule(
                 card_id=card_id,
                 state=ScheduleState.REVIEW,

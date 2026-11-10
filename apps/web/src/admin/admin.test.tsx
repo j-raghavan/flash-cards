@@ -183,18 +183,103 @@ describe("admin console", () => {
     expect(screen.getByText("Active, email not confirmed")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Role of bob@example.com"), "admin");
+    await user.click(screen.getByRole("button", { name: "Make admin and share their decks" }));
     expect(await screen.findByText("Role set to admin.")).toBeInTheDocument();
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ role: "admin" });
+    // Bob is an admin now, so suspending him takes his decks out of the library: it asks.
     await user.click(screen.getByRole("button", { name: "Suspend bob@example.com" }));
+    const suspend = screen.getByRole("alertdialog", { name: "Suspend bob@example.com" });
+    expect(suspend).toHaveAccessibleDescription(
+      "Suspend bob@example.com? Their sessions end. Their decks leave the library for every member; members keep their progress.",
+    );
+    await user.click(within(suspend).getByRole("button", { name: "Suspend" }));
     expect(await screen.findByText(/Suspended; their sessions have ended/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Unsuspend bob@example.com" }));
+    await user.click(screen.getByRole("button", { name: "Unsuspend and share their decks" }));
     expect(await screen.findByText("Unsuspended.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Unlock sign-in for bob@example.com" }));
     expect(await screen.findByText("Sign-in unlocked.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete bob@example.com" }));
+    // Deleting an admin erases what members did on their decks too, and the dialog says so.
+    expect(screen.getByRole("alertdialog", { name: "Delete bob@example.com" })).toHaveAccessibleDescription(
+      "Delete bob@example.com and all their decks, cards and history, and every member's progress on their decks? This cannot be undone.",
+    );
     await user.click(screen.getByRole("button", { name: "Delete account" }));
     await waitFor(() => {
       expect(screen.queryByText("bob@example.com")).not.toBeInTheDocument();
+    });
+  });
+
+  it("asks before publishing an account's decks to every member, and says admins' decks are shared", async () => {
+    const calls = mockApi({
+      ...asAdmin,
+      "GET /admin/users": {
+        body: [
+          ...USERS,
+          account("u3", "eve@example.com", { role: "admin", suspended: true }),
+          account("u4", "kim@example.com", { suspended: true }),
+        ],
+      },
+      "PATCH /admin/users/u2": { body: account("u2", "bob@example.com", { role: "admin" }) },
+      "POST /admin/users/u3/unsuspend": { body: account("u3", "eve@example.com", { role: "admin" }) },
+      "POST /admin/users/u4/unsuspend": { body: account("u4", "kim@example.com") },
+      "PATCH /admin/users/u3": { body: account("u3", "eve@example.com") },
+    });
+    renderApp("/admin");
+    const user = userEvent.setup();
+    expect(
+      await screen.findByText(/Decks owned by an admin are shared with every member as a read-only library/),
+    ).toBeInTheDocument();
+
+    // Promoting asks first; Cancel and Escape change nothing and return focus.
+    const role = screen.getByLabelText("Role of bob@example.com");
+    await user.selectOptions(role, "admin");
+    const ask = screen.getByRole("alertdialog", { name: "Make bob@example.com an admin" });
+    expect(ask).toHaveTextContent(
+      "Every deck they own, including decks made as a member, becomes visible to every member at once, read-only.",
+    );
+    expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(role).toHaveValue("member");
+    await user.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(role).toHaveFocus();
+    await user.selectOptions(role, "admin");
+    await user.keyboard("{Shift>}{Tab}{/Shift}"); // other keys leave the question open
+    expect(screen.getByRole("button", { name: "Make admin and share their decks" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(role).toHaveFocus();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+
+    // Unsuspending an admin asks too; focus comes back to the row once it is done.
+    await user.click(screen.getByRole("button", { name: "Unsuspend eve@example.com" }));
+    const again = screen.getByRole("alertdialog", { name: "Unsuspend eve@example.com" });
+    expect(again).toHaveTextContent("They are an admin, so every deck they own becomes visible to every member again");
+    await user.click(within(again).getByRole("button", { name: "Unsuspend and share their decks" }));
+    expect(await screen.findByText("Unsuspended.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Suspend eve@example.com" })).toHaveFocus();
+    });
+
+    // Making an admin a member takes their decks out of the library: that asks too.
+    await user.selectOptions(screen.getByLabelText("Role of eve@example.com"), "member");
+    const demote = screen.getByRole("alertdialog", { name: "Make eve@example.com a member" });
+    expect(demote).toHaveAccessibleDescription(
+      "Make eve@example.com a member? Their decks leave the library for every member; members keep their progress.",
+    );
+    await user.click(within(demote).getByRole("button", { name: "Make member" }));
+    expect(await screen.findByText("Role set to member.")).toBeInTheDocument();
+    expect(calls.find((c) => c.path === "/admin/users/u3")?.body).toEqual({ role: "member" });
+
+    // A member's decks are their own, so unsuspending or deleting one says nothing of the library.
+    await user.click(screen.getByRole("button", { name: "Unsuspend kim@example.com" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Delete kim@example.com" }));
+    expect(screen.getByRole("alertdialog", { name: "Delete kim@example.com" })).toHaveAccessibleDescription(
+      "Delete kim@example.com and all their decks, cards and history? This cannot be undone.",
+    );
+    await waitFor(() => {
+      expect(calls.some((c) => c.path === "/admin/users/u4/unsuspend")).toBe(true);
     });
   });
 

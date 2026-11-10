@@ -22,6 +22,7 @@ const basic = (id: string, front: string, back: string): CardDetail => ({
   note_type: "basic",
   fields: { front, back },
   tags: [],
+  owned: true,
 });
 
 const me = { "GET /auth/me": { body: USER } };
@@ -131,6 +132,7 @@ describe("study session", () => {
           note_type: "cloze",
           fields: { text: "{{c1::Paris}} in {{c2::France::country}}" },
           tags: [],
+          owned: true,
         },
       },
     });
@@ -151,6 +153,7 @@ describe("study session", () => {
           note_type: "image_occlusion",
           fields: { header: "Label the heart", back_extra: "" },
           tags: [],
+          owned: true,
           occlusion: {
             image_id: "img 1",
             masks: [
@@ -182,6 +185,7 @@ describe("study session", () => {
           note_type: "custom",
           fields: { Word: "chat", Meaning: "cat" },
           tags: [],
+          owned: true,
           template: { ordinal: 0, name: "Recognize", front: "**{{Word}}**", back: "{{FrontSide}} means {{Meaning}}" },
         },
       },
@@ -319,6 +323,99 @@ const goal = (reviews: number, justCompleted = false) => ({
   just_completed: justCompleted,
 });
 
+describe("library cards", () => {
+  const library = (id: string, front: string, back: string): CardDetail => ({
+    ...basic(id, front, back),
+    owned: false,
+  });
+
+  it("studies a library card by revealing it, with no editing and no typed-answer mode", async () => {
+    // The typed-answer mode was this user's choice on their own decks; it stays saved.
+    localStorage.setItem("flashcards.studyMode", "ai");
+    const calls = mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1"), card("c2")] },
+      "GET /cards/c1": { body: library("c1", "Library question", "Library answer") },
+      "GET /cards/c2": { body: library("c2", "Second question", "Second answer") },
+      "POST /cards/c1/review": { body: { review_id: "r1" } },
+      "POST /cards/c2/review": { body: {} },
+      "POST /reviews/r1/undo": { body: { review_id: "r1", card_id: "c1", schedule: null, daily_goal: null } },
+    });
+    renderApp("/decks/d1/study");
+    const user = userEvent.setup();
+    expect(await screen.findByText("Library question")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Answer by" })).toBeNull();
+    expect(screen.queryByLabelText("Typing it (AI checks)")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Edit card/ })).toBeNull();
+    await user.keyboard("e");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByRole("article", { name: "Card 1 of 2" })).toHaveFocus();
+    });
+    await user.click(screen.getByRole("button", { name: /Show answer/ }));
+    expect(screen.getByText("Library answer")).toBeInTheDocument();
+    await user.keyboard("3");
+    expect(await screen.findByText("Second question")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Answer by" })).toBeNull();
+    await user.click(await screen.findByRole("button", { name: /Undo last answer/ }));
+    expect(await screen.findByText("Library question")).toBeInTheDocument();
+    expect(reviews(calls).map((c) => c.path)).toEqual(["/cards/c1/review"]);
+    expect(calls.filter((c) => c.path === "/reviews/r1/undo")).toHaveLength(1);
+    expect(calls.some((c) => c.path.includes("/evaluate"))).toBe(false);
+    expect(localStorage.getItem("flashcards.studyMode")).toBe("ai");
+  });
+
+  it("offers no mode switch while a card loads, so a saved typed-answer mode never reaches a library card", async () => {
+    localStorage.setItem("flashcards.studyMode", "ai");
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1")] },
+      "GET /cards/c1": async () => {
+        await gate;
+        return { body: library("c1", "Library question", "Library answer") };
+      },
+    });
+    renderApp("/decks/d1/study");
+    expect(await screen.findByText("Loading card…")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Answer by" })).toBeNull();
+    expect(screen.queryByLabelText("Typing it (AI checks)")).toBeNull();
+    release();
+    expect(await screen.findByText("Library question")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Answer by" })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("button", { name: /Show answer/ })).toBeInTheDocument();
+  });
+
+  it("treats a card whose payload does not say who owns it as the user's own", async () => {
+    const unmarked = basic("c1", "Older question", "Older answer");
+    delete unmarked.owned;
+    mockApi({ ...me, "GET /decks/d1/review": { body: [card("c1")] }, "GET /cards/c1": { body: unmarked } });
+    renderApp("/decks/d1/study");
+    expect(await screen.findByText("Older question")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Edit card/ })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Answer by" })).toBeInTheDocument();
+  });
+
+  it("queues an answer on a library card when offline, like any other", async () => {
+    mockApi({
+      ...me,
+      "GET /decks/d1/review": { body: [card("c1")] },
+      "GET /cards/c1": { body: library("c1", "Library question", "Library answer") },
+      "POST /cards/c1/review": new TypeError("offline"),
+    });
+    renderApp("/decks/d1/study");
+    await screen.findByText("Library question");
+    await userEvent.setup().keyboard(" 4");
+    expect(await screen.findByText(/1 will sync when you are back online/)).toBeInTheDocument();
+    expect((await pending(USER.id)).map((r) => [r.card_id, r.deck_id, r.rating])).toEqual([["c1", "d1", 4]]);
+  });
+});
+
 describe("undo, daily goal and editing in a session", () => {
   it("counts toward the daily goal, celebrates it, and undoes the last answer", async () => {
     const calls = mockApi({
@@ -432,6 +529,7 @@ describe("undo, daily goal and editing in a session", () => {
           tags: [],
           created_at: "2026-01-01T00:00:00Z",
           cards: [card("c1")],
+          owned: true,
         },
       },
       "PATCH /notes/n-c1": () => {
@@ -472,7 +570,15 @@ describe("undo, daily goal and editing in a session", () => {
       "GET /cards/c1": () =>
         gone
           ? { status: 404, body: { detail: "Card not found." } }
-          : { body: { ...card("c1", 2), note_type: "cloze", fields: { text: "{{c1::a}} {{c2::b}}" }, tags: [] } },
+          : {
+              body: {
+                ...card("c1", 2),
+                note_type: "cloze",
+                fields: { text: "{{c1::a}} {{c2::b}}" },
+                tags: [],
+                owned: true,
+              },
+            },
       "GET /notes/n-c1": {
         body: {
           id: "n-c1",
@@ -482,6 +588,7 @@ describe("undo, daily goal and editing in a session", () => {
           tags: [],
           created_at: "2026-01-01T00:00:00Z",
           cards: [card("c1", 2)],
+          owned: true,
         },
       },
       "PATCH /notes/n-c1": () => {

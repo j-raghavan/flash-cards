@@ -58,7 +58,7 @@ class CardBrowserService:
         deck_names = {deck.id: deck.name for deck in await self._decks.list_decks(owner_id)}
         notes = {note.id: note for note in await self._notes.list_for_owner(owner_id)}
         cards = await self._cards.list_for_owner(owner_id)
-        schedules = await self._schedules.get_many([card.id for card in cards])
+        schedules = await self._schedules.get_many(owner_id, [card.id for card in cards])
 
         found: list[BrowserRow] = []
         for card in cards:

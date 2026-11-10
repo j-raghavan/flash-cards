@@ -577,6 +577,7 @@ async def test_card_browser_reads_and_writes(
             )
         for nid in ("n1", "n2"):
             await SqlScheduleRepository(s).upsert(
+                "alice",
                 CardSchedule(
                     card_id=f"c-{nid}", state=ScheduleState.REVIEW, step=None, stability=3.0,
                     difficulty=5.0, due_at=NOW, last_reviewed_at=NOW,
@@ -608,7 +609,7 @@ async def test_card_browser_reads_and_writes(
         assert marked is not None and marked.flag == 3 and marked.is_buried(NOW)
         # Batched schedule reads span several IN (...) chunks.
         monkeypatch.setattr(sql, "_IN_CHUNK", 1)
-        found = await SqlScheduleRepository(s).get_many(["c-n1", "c-n2", "missing"])
+        found = await SqlScheduleRepository(s).get_many("alice", ["c-n1", "c-n2", "missing"])
         assert set(found) == {"c-n1"}  # c-n2's schedule went with its card
 
 

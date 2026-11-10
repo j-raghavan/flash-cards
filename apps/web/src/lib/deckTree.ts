@@ -2,6 +2,7 @@
 // The API returns decks as a flat list with parent_id; the UI shows a tree.
 
 import type { Deck } from "../api/types";
+import { isOwned } from "./ownership";
 
 export interface DeckNode {
   deck: Deck;
@@ -80,4 +81,9 @@ export function deckOptions(decks: Deck[]): { id: string; label: string }[] {
     id: node.deck.id,
     label: `${"  ".repeat(node.depth)}${node.deck.name}`,
   }));
+}
+
+/** The caller's own decks: the only ones a deck picker offers, since library decks are read-only. */
+export function ownedDecks(decks: Deck[]): Deck[] {
+  return decks.filter(isOwned);
 }

@@ -262,16 +262,21 @@ class CardRow(Base):
 
 
 class CardScheduleRow(Base):
-    __tablename__ = "card_schedule"
+    """One user's schedule for one card (ADR 0024): members study library cards too."""
 
+    __tablename__ = "card_schedule"
+    # The due forecast reads one user's rows by due date.
+    __table_args__ = (Index("ix_card_schedule_user_due", "user_id", "due_at"),)
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
     card_id: Mapped[str] = mapped_column(
-        String, ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
+        String, ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     state: Mapped[str] = mapped_column(String)
     step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stability: Mapped[float | None] = mapped_column(Float, nullable=True)
     difficulty: Mapped[float | None] = mapped_column(Float, nullable=True)
-    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -472,8 +477,9 @@ def card_from_row(row: CardRow) -> Card:
     )
 
 
-def schedule_to_row(schedule: CardSchedule) -> CardScheduleRow:
+def schedule_to_row(user_id: str, schedule: CardSchedule) -> CardScheduleRow:
     return CardScheduleRow(
+        user_id=user_id,
         card_id=schedule.card_id,
         state=schedule.state.value,
         step=schedule.step,

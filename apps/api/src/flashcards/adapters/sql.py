@@ -228,6 +228,10 @@ class SqlInviteRepository:
         return sorted(revoked)
 
 
+# An active admin: the admin role and not suspended (User.is_active_admin).
+_ACTIVE_ADMIN = (UserRow.role == Role.ADMIN.value, UserRow.suspended_at.is_(None))
+
+
 class SqlUserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -258,12 +262,15 @@ class SqlUserRepository:
 
     async def lock_active_admins(self) -> list[User]:
         rows = await self._session.scalars(
-            select(UserRow)
-            .where(UserRow.role == Role.ADMIN.value, UserRow.suspended_at.is_(None))
-            .order_by(UserRow.id)
-            .with_for_update()
+            select(UserRow).where(*_ACTIVE_ADMIN).order_by(UserRow.id).with_for_update()
         )
         return [user_from_row(row) for row in rows]
+
+    async def list_active_admin_ids(self) -> list[str]:
+        ids = await self._session.scalars(
+            select(UserRow.id).where(*_ACTIVE_ADMIN).order_by(UserRow.id)
+        )
+        return list(ids)
 
     async def list_all(self) -> list[User]:
         rows = await self._session.scalars(
@@ -382,6 +389,14 @@ class SqlDeckRepository:
     async def list_for_owner(self, owner_id: str) -> list[Deck]:
         rows = await self._session.scalars(
             select(DeckRow).where(DeckRow.owner_id == owner_id).order_by(DeckRow.created_at)
+        )
+        return [deck_from_row(row) for row in rows]
+
+    async def list_for_owners(self, owner_ids: Sequence[str]) -> list[Deck]:
+        rows = await self._session.scalars(
+            select(DeckRow)
+            .where(DeckRow.owner_id.in_(list(owner_ids)))
+            .order_by(DeckRow.created_at, DeckRow.id)
         )
         return [deck_from_row(row) for row in rows]
 
@@ -533,6 +548,12 @@ class SqlCardRepository:
         row = await self._session.get(CardRow, card_id)
         return card_from_row(row) if row is not None else None
 
+    async def share_lock(self, card_id: str) -> Card | None:
+        row = await self._session.scalar(
+            select(CardRow).where(CardRow.id == card_id).with_for_update(key_share=True)
+        )
+        return card_from_row(row) if row is not None else None
+
     async def list_for_deck(self, deck_id: str) -> list[Card]:
         rows = await self._session.scalars(
             select(CardRow)
@@ -587,28 +608,50 @@ class SqlScheduleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get(self, card_id: str) -> CardSchedule | None:
-        row = await self._session.get(CardScheduleRow, card_id)
+    async def get(self, user_id: str, card_id: str) -> CardSchedule | None:
+        row = await self._session.get(CardScheduleRow, (user_id, card_id))
         return schedule_from_row(row) if row is not None else None
 
-    async def get_many(self, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
+    async def get_many(self, user_id: str, card_ids: Sequence[str]) -> dict[str, CardSchedule]:
         found: dict[str, CardSchedule] = {}
         # Chunked: Postgres caps the number of bind parameters in one statement.
         for start in range(0, len(card_ids), _IN_CHUNK):
             chunk = card_ids[start : start + _IN_CHUNK]
             rows = await self._session.scalars(
-                select(CardScheduleRow).where(CardScheduleRow.card_id.in_(chunk))
+                select(CardScheduleRow).where(
+                    CardScheduleRow.user_id == user_id, CardScheduleRow.card_id.in_(chunk)
+                )
             )
             found.update({row.card_id: schedule_from_row(row) for row in rows})
         return found
 
-    async def upsert(self, schedule: CardSchedule) -> None:
-        await self._session.merge(schedule_to_row(schedule))
+    async def list_for_user(self, user_id: str) -> list[CardSchedule]:
+        rows = await self._session.scalars(
+            select(CardScheduleRow)
+            .where(CardScheduleRow.user_id == user_id)
+            .order_by(CardScheduleRow.card_id)
+        )
+        return [schedule_from_row(row) for row in rows]
+
+    async def upsert(self, user_id: str, schedule: CardSchedule) -> None:
+        await self._session.merge(schedule_to_row(user_id, schedule))
         await self._session.flush()
 
-    async def delete(self, card_id: str) -> None:
+    async def delete(self, user_id: str, card_id: str) -> None:
+        await self._session.execute(
+            delete(CardScheduleRow).where(
+                CardScheduleRow.user_id == user_id, CardScheduleRow.card_id == card_id
+            )
+        )
+
+    async def delete_for_card(self, card_id: str) -> None:
         await self._session.execute(
             delete(CardScheduleRow).where(CardScheduleRow.card_id == card_id)
+        )
+
+    async def delete_for_user(self, user_id: str) -> None:
+        await self._session.execute(
+            delete(CardScheduleRow).where(CardScheduleRow.user_id == user_id)
         )
 
 
@@ -1523,6 +1566,7 @@ class SqlStudyStatsRepository:
         *,
         floor: datetime,
         until: datetime,
+        card_owner_ids: Sequence[str],
         deck_ids: Sequence[str] | None = None,
     ) -> list[DueBucket]:
         clamped = func.greatest(CardScheduleRow.due_at, literal(floor, DateTime(timezone=True)))
@@ -1531,7 +1575,8 @@ class SqlStudyStatsRepository:
             .select_from(CardScheduleRow)
             .join(CardRow, CardRow.id == CardScheduleRow.card_id)
             .where(
-                CardRow.owner_id == owner_id,
+                CardScheduleRow.user_id == owner_id,
+                CardRow.owner_id.in_(list(card_owner_ids)),
                 CardRow.suspended_at.is_(None),
                 CardScheduleRow.due_at < until,
             )

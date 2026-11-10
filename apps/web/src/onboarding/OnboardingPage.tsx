@@ -12,7 +12,7 @@ import { decks, goals } from "../api/endpoints";
 import type { Deck } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorText, Loading } from "../components/ui";
-import { deckOptions } from "../lib/deckTree";
+import { deckOptions, ownedDecks } from "../lib/deckTree";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
@@ -343,7 +343,7 @@ function Onboarding({ userId }: { userId: string }) {
     case "deck":
       body = (
         <DeckStep
-          all={all.data}
+          all={ownedDecks(all.data)}
           onChosen={(id) => {
             all.reload();
             advance({ deckId: id });

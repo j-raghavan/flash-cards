@@ -19,11 +19,13 @@ from flashcards.adapters.memory import (
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemoryShareLinkRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
 from flashcards.application.note_type_service import NoteTypeService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.media import MediaAsset, MediaNotFound
 from flashcards.domain.note_types import (
@@ -66,7 +68,15 @@ class _Rig:
         deck_repo, self.note_repo = InMemoryDeckRepository(), InMemoryNoteRepository()
         self.decks = DeckService(deck_repo, clock)
         self.notes = NoteService(self.decks, self.note_repo, self.cards, clock)
-        self.reviews = ReviewService(self.notes, self.schedules, self.logs, FsrsScheduler(), clock)
+        access = ReadAccess(
+            InMemoryUserRepository(),
+            deck_repo,
+            self.note_repo,
+            self.cards,
+            self.type_repo,
+            self.media,
+        )
+        self.reviews = ReviewService(access, self.schedules, self.logs, FsrsScheduler(), clock)
         self.library = LibraryService(
             self.decks, self.notes, deck_repo, self.note_repo, self.cards, self.schedules,
             self.logs, InMemoryPassageRepository(), InMemoryMockExamRepository(),
@@ -183,8 +193,8 @@ async def test_editing_a_type_rederives_cards_and_keeps_surviving_schedules() ->
     assert edited.fields == ("Term", "Meaning")
     after = {c.ordinal: c.id for c in await rig.cards.list_for_notes([note.id])}
     assert set(after) == {0, 2} and after[0] == before[0]  # Forward kept, Reverse gone
-    assert await rig.schedules.get(before[0]) is not None
-    assert await rig.schedules.get(before[1]) is None  # purged with its card
+    assert await rig.schedules.get(ALICE, before[0]) is not None
+    assert await rig.schedules.get(ALICE, before[1]) is None  # purged with its card
     assert {log.card_id for log in await rig.logs.list_for_owner(ALICE)} == {before[0]}
     stored = await rig.note_repo.get(note.id)
     assert stored is not None and stored.fields == (("Term", "chat"), ("Meaning", "cat"))
@@ -294,7 +304,7 @@ async def test_editing_masks_keeps_cards_whose_mask_id_survives() -> None:
     after = {c.ordinal: c.id for c in after_cards}
     assert updated.occlusion == moved
     assert set(after) == {1, 3} and after[1] == before[1]  # mask 1 moved, kept its card
-    assert await rig.schedules.get(before[1]) is not None
+    assert await rig.schedules.get(ALICE, before[1]) is not None
 
 
 async def test_changing_the_image_checks_the_new_one() -> None:

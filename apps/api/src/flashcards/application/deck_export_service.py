@@ -74,7 +74,7 @@ class DeckExportService:
                 raise ExportTooLarge(deck_id)
 
         card_ids = {card.id for card in cards}
-        schedules = await self._schedules.get_many(sorted(card_ids))
+        schedules = await self._schedules.get_many(owner_id, sorted(card_ids))
         reviews: dict[str, list[ReviewLog]] = {}
         for log in await self._logs.list_for_owner(owner_id):  # oldest first
             if log.card_id in card_ids:

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Deck } from "../api/types";
 import { cardSides } from "./cardSides";
 import { clozeNumbers, clozeRevealAll, clozeSide, nextClozeNumber } from "./cloze";
-import { buildDeckTree, deckOptions, deckPath, descendantCount, flattenTree } from "./deckTree";
+import { buildDeckTree, deckOptions, deckPath, descendantCount, flattenTree, ownedDecks } from "./deckTree";
 import { forgetAllJobs } from "./recentJobs";
 import { newIdempotencyKey, parseTags, safeNextPath, tokenFromLocation } from "./text";
 
@@ -13,6 +13,7 @@ const deck = (id: string, name: string, parent: string | null = null): Deck => (
   name,
   parent_id: parent,
   created_at: "2026-01-01T00:00:00Z",
+  owned: true,
 });
 
 describe("cloze", () => {
@@ -116,6 +117,14 @@ describe("deckTree", () => {
       { id: "a", label: "A" },
       { id: "b", label: "  B" },
     ]);
+  });
+
+  it("keeps only the caller's own decks for a picker", () => {
+    const library = { ...deck("l", "L"), owned: false };
+    expect(ownedDecks([deck("a", "A"), library]).map((d) => d.id)).toEqual(["a"]);
+    // A deck from an API that does not say is the caller's own.
+    const unmarked: Deck = { id: "u", name: "U", parent_id: null, created_at: "2026-01-01T00:00:00Z" };
+    expect(ownedDecks([unmarked, library]).map((d) => d.id)).toEqual(["u"]);
   });
 });
 
