@@ -14,7 +14,10 @@ RUN pip install .
 COPY apps/api/alembic.ini ./alembic.ini
 COPY apps/api/migrations ./migrations
 COPY apps/api/entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh && useradd --system --no-create-home appuser
+# Readable by the unprivileged user whatever the build host's permissions were:
+# a checkout on a Synology share, for example, can be owner-only (mode 700).
+RUN chmod -R a+rX /app && chmod a+x ./entrypoint.sh \
+    && useradd --system --no-create-home appuser
 USER appuser
 
 ENV FLASHCARDS_ENVIRONMENT=production

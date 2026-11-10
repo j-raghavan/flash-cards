@@ -63,11 +63,14 @@ FLASHCARDS_BACKUP_DIR=/volume1/docker/flash-cards/backups
 FLASHCARDS_PUBLIC_BASE_URL=https://<nas-name>.<tailnet>.ts.net
 ```
 
-Then build and start. The first build takes a while on a Celeron:
+Create the data and backup directories (DSM's Docker does not create a missing bind-mount directory), then build and start. The first build takes a while on a Celeron:
 
 ```sh
+mkdir -p /volume1/docker/flash-cards/pgdata /volume1/docker/flash-cards/backups
 COMPOSE="sudo docker-compose" DOCKER="sudo docker" ./upgrade.sh
 ```
+
+Files on a DSM share can be owner-only underneath their ACLs (mode 700). The images set their own permissions, so this does not matter for the build.
 
 The site is now on `127.0.0.1:8000` on the NAS. Publish it on the tailnet with HTTPS:
 
@@ -106,5 +109,6 @@ ssh <user>@<nas> 'cd /volume1/docker/flash-cards/src/deploy/compose && COMPOSE="
 
 - **`permission denied` on `/var/run/docker.sock`:** the command ran without `sudo`. Set `COMPOSE` and `DOCKER` as shown.
 - **`sudo` asks for a password again after a DSM update:** the update removed `/etc/sudoers.d/flashcards`; recreate it.
-- **Postgres does not start with a bind-mounted `pgdata`** (`data directory ... has invalid permissions`, or `initdb: directory ... exists but is not empty`): let Docker create the directory on first start rather than creating it in File Station, and keep DSM's indexing and recycle bin out of it.
+- **`Bind mount failed: ... does not exist`:** create the directory first (`mkdir -p`); DSM's Docker does not create it.
+- **Postgres does not start with a bind-mounted `pgdata`** (`initdb: directory ... exists but is not empty`): the directory must be empty on first start. Create it from the command line rather than File Station, and keep DSM's indexing and recycle bin out of it.
 - **The site is not reachable over Tailscale:** check `tailscale serve status` on the NAS, and that the device is signed in to the same tailnet. HTTPS needs MagicDNS and HTTPS Certificates turned on in the admin console.
