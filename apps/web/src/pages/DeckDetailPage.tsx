@@ -251,9 +251,11 @@ export function DeckDetailPage() {
             <Link className="button" to={`/decks/${deckId}/generate`}>
               Generate from a file
             </Link>
-            <Link className="button" to={`/cards?deck=${deckId}`}>
-              Browse cards
-            </Link>
+            {user?.role === "admin" ? (
+              <Link className="button" to={`/cards?deck=${deckId}`}>
+                Browse cards
+              </Link>
+            ) : null}
             <Link className="button" to={`/decks/${deckId}/exam`}>
               Mock exam
             </Link>

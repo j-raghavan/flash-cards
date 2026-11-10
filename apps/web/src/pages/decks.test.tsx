@@ -175,7 +175,19 @@ describe("deck detail", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Membranes" })).toHaveAttribute("href", "/decks/c");
     expect(screen.getByRole("link", { name: "Study now" })).toHaveAttribute("href", "/decks/b/study");
-    expect(screen.getByRole("link", { name: "Browse cards" })).toHaveAttribute("href", "/cards?deck=b");
+    // Browsing cards in bulk is the admin's; a member reads them instead.
+    expect(screen.queryByRole("link", { name: "Browse cards" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Read cards" })).toHaveAttribute("href", "/decks/b/read");
+  });
+
+  it("offers an admin Browse cards for their deck", async () => {
+    mockApi({
+      "GET /auth/me": { body: { ...USER, role: "admin" } },
+      "GET /decks": { body: decks },
+      "GET /decks/b/stats": { body: STATS },
+    });
+    renderApp("/decks/b");
+    expect(await screen.findByRole("link", { name: "Browse cards" })).toHaveAttribute("href", "/cards?deck=b");
   });
 
   it("shows a library deck for study only, with its sub-decks", async () => {

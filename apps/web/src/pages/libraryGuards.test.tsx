@@ -82,6 +82,7 @@ describe("library guards", () => {
 });
 
 describe("browser deck filter", () => {
+  const admin = { "GET /auth/me": { body: { ...USER, role: "admin" } } };
   const row: BrowserRow = {
     card_id: "c1",
     note_id: "n1",
@@ -100,7 +101,7 @@ describe("browser deck filter", () => {
 
   it("ignores a library deck in the URL and lists the user's own cards", async () => {
     const calls = mockApi({
-      ...me,
+      ...admin,
       "GET /decks": { body: [ownDeck, libraryDeck] },
       "GET /cards": { body: { total: 1, cards: [row] } },
     });
@@ -116,7 +117,7 @@ describe("browser deck filter", () => {
 
   it("leaves the filter to the server when the decks cannot load", async () => {
     const calls = mockApi({
-      ...me,
+      ...admin,
       "GET /decks": { status: 500 },
       "GET /cards": { body: { total: 1, cards: [row] } },
     });
@@ -124,5 +125,28 @@ describe("browser deck filter", () => {
     expect(await screen.findByRole("button", { name: "Own card" })).toBeInTheDocument();
     expect(calls.find((c) => c.path.startsWith("/cards?"))?.path).toContain("deck_id=l1");
     expect(screen.queryByText(/That deck is in the library/)).toBeNull();
+  });
+});
+
+describe("card browser for members", () => {
+  it("is hidden from members, in the navigation and on the page", async () => {
+    mockApi({ ...me, "GET /decks": { body: [] } });
+    const { unmount } = renderApp("/");
+    expect(await screen.findByRole("link", { name: "Decks" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Browse" })).toBeNull();
+    unmount();
+
+    const calls = mockApi({ ...me, "GET /decks": { body: [] } });
+    renderApp("/cards?deck=l1");
+    expect(await screen.findByRole("heading", { name: "Browse cards" })).toBeInTheDocument();
+    expect(screen.getByText(/This page is for administrators/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to your decks" })).toHaveAttribute("href", "/");
+    expect(calls.some((c) => c.path.startsWith("/cards"))).toBe(false);
+  });
+
+  it("is in the navigation for an admin", async () => {
+    mockApi({ "GET /auth/me": { body: { ...USER, role: "admin" } }, "GET /decks": { body: [] } });
+    renderApp("/");
+    expect(await screen.findByRole("link", { name: "Browse" })).toHaveAttribute("href", "/cards");
   });
 });

@@ -72,7 +72,7 @@ export function Layout() {
           <NavLink to="/" end>
             Decks
           </NavLink>
-          <NavLink to="/cards">Browse</NavLink>
+          {user.role === "admin" ? <NavLink to="/cards">Browse</NavLink> : null}
           <NavLink to="/goals">Goals</NavLink>
           <NavLink to="/progress">Progress</NavLink>
           <NavLink to="/account">Account</NavLink>

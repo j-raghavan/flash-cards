@@ -24,8 +24,9 @@ const row = (n: number, over: Partial<BrowserRow> = {}): BrowserRow => ({
   ...over,
 });
 
+// Browsing is the admin's (members read cards from the deck page).
 const base = {
-  "GET /auth/me": { body: USER },
+  "GET /auth/me": { body: { ...USER, role: "admin" } },
   "GET /decks": {
     body: [
       { id: "d1", name: "Biology", parent_id: null, created_at: "", owned: true },
@@ -179,7 +180,6 @@ describe("card browser", () => {
     await user.selectOptions(screen.getByLabelText("Action"), "delete");
     await user.click(screen.getByRole("button", { name: "Apply" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete the notes behind 1 card?");
-    expect(screen.getByRole("alert")).not.toHaveTextContent("library"); // a member's cards are their own
     await user.click(screen.getByLabelText("Select Card 2"));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete the notes behind 2 cards?");
     expect(calls.some((c) => c.path === "/cards/bulk")).toBe(false);
@@ -192,7 +192,6 @@ describe("card browser", () => {
   it("warns an admin that a bulk delete erases members' progress on those cards", async () => {
     mockApi({
       ...base,
-      "GET /auth/me": { body: { ...USER, role: "admin" } },
       "GET /cards": { body: { total: 1, cards: [row(1)] } },
     });
     renderApp("/cards");
