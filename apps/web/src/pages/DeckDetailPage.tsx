@@ -238,6 +238,11 @@ export function DeckDetailPage() {
         <Link className="button primary" to={`/decks/${deckId}/study`}>
           Study now
         </Link>
+        {stats.data?.total === 0 ? null : (
+          <Link className="button" to={`/decks/${deckId}/read`}>
+            Read cards
+          </Link>
+        )}
         {owned ? (
           <>
             <Link className="button" to={`/decks/${deckId}/notes/new`}>
