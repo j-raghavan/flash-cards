@@ -45,8 +45,11 @@ export const test = base.extend<{ member: Member; admin: LibraryAdmin; libraryAd
         },
       });
     } finally {
+      // A failed clean-up must not hide the test's own failure.
       for (const deckId of created) {
-        await api.deleteDeck(deckId);
+        await api.deleteDeck(deckId).catch((failure: unknown) => {
+          console.warn(`could not delete deck ${deckId}:`, failure);
+        });
       }
     }
   },
