@@ -21,12 +21,12 @@ def _deck_with_cards(client: TestClient, count: int, name: str = "Bio") -> tuple
     return deck_id, card_ids
 
 
-def _second_user(app: FastAPI, admin_client: TestClient) -> TestClient:
+def _second_user(
+    app: FastAPI, admin_client: TestClient, email: str = "bob@example.com"
+) -> TestClient:
     token = admin_client.post("/admin/invites", json={"role": "member"}).json()["token"]
     bob = TestClient(app)
-    bob.post(
-        "/auth/signup", json={"token": token, "email": "bob@example.com", "password": PASSWORD}
-    )
+    bob.post("/auth/signup", json={"token": token, "email": email, "password": PASSWORD})
     return bob
 
 
@@ -89,5 +89,13 @@ def test_stats_overall_and_per_deck(app: FastAPI, admin_client: TestClient) -> N
     assert per_deck["deck_id"] == deck and len(per_deck["heatmap"]) == 90
     assert per_deck["heatmap"][-1]["reviews"] == 1
     assert admin_client.get("/progress/stats", params={"days": 367}).status_code == 422
+    # The admin's deck is a library deck (ADR 0024): a member reads their own
+    # progress on it, none so far, but another member's deck stays private.
     bob = _second_user(app, admin_client)
-    assert bob.get("/progress/stats", params={"deck_id": deck}).status_code == 404
+    library = bob.get("/progress/stats", params={"deck_id": deck})
+    assert library.status_code == 200
+    assert sum(day["reviews"] for day in library.json()["heatmap"]) == 0
+    assert sum(day["due"] for day in library.json()["forecast"]) == 0
+    bobs_deck, _cards = _deck_with_cards(bob, 1, "Bob's")
+    carol = _second_user(app, admin_client, "carol@example.com")
+    assert carol.get("/progress/stats", params={"deck_id": bobs_deck}).status_code == 404

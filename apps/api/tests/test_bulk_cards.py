@@ -14,17 +14,21 @@ from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryPassageRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemoryShareLinkRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.bulk_card_service import BulkAction, BulkCardService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.decks import DeckNotFound
 from flashcards.domain.notes import CardNotFound, InvalidBury, InvalidFlag, NoteType
@@ -53,7 +57,15 @@ class _Rig:
         deck_repo = InMemoryDeckRepository()
         self.decks = DeckService(deck_repo, self.clock)
         self.notes = NoteService(self.decks, self.note_repo, self.cards, self.clock)
-        self.reviews = ReviewService(self.notes, schedules, logs, FsrsScheduler(), self.clock)
+        access = ReadAccess(
+            InMemoryUserRepository(),
+            deck_repo,
+            self.note_repo,
+            self.cards,
+            InMemoryNoteTypeRepository(),
+            InMemoryMediaRepository(),
+        )
+        self.reviews = ReviewService(access, schedules, logs, FsrsScheduler(), self.clock)
         library = LibraryService(
             self.decks, self.notes, deck_repo, self.note_repo, self.cards, schedules, logs,
             InMemoryPassageRepository(), InMemoryMockExamRepository(),

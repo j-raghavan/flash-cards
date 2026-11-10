@@ -243,3 +243,43 @@ def test_a_second_admin_reads_the_first_admins_decks_read_only(
     assert second.get(f"/cards/{library.custom_card}").status_code == 200
     assert second.patch(f"/decks/{library.deck_id}", json={"name": "x"}).status_code == 404
     assert second.delete(f"/notes/{library.basic_note}").status_code == 404
+
+
+def test_a_member_studies_the_library_end_to_end(
+    admin_client: TestClient, app: FastAPI, seed_invite: Callable[..., str]
+) -> None:
+    admin = admin_client
+    deck_id = admin.post("/decks", json={"name": "Spanish"}).json()["id"]
+    [card] = admin.post(
+        f"/decks/{deck_id}/notes",
+        json={"note_type": "basic", "fields": {"front": "hola", "back": "hello"}},
+    ).json()
+    member = _signup(app, seed_invite, "learner@example.com", Role.MEMBER)
+
+    assert deck_id in {d["id"] for d in member.get("/decks").json() if not d["owned"]}
+    assert [c["id"] for c in member.get(f"/decks/{deck_id}/review").json()] == [card["id"]]
+    assert member.get(f"/cards/{card['id']}").json()["fields"]["front"] == "hola"
+    answered = member.post(f"/cards/{card['id']}/review", json={"rating": 3})
+    assert answered.status_code == 200
+
+    mine = member.get(f"/decks/{deck_id}/stats").json()
+    assert mine["new"] == 0 and mine["learning"] + mine["review"] == 1
+    progress = member.get("/progress/stats", params={"deck_id": deck_id, "days": 1}).json()
+    assert progress["heatmap"][-1]["reviews"] == 1
+    assert admin.get(f"/decks/{deck_id}/stats").json()["new"] == 1  # the admin's own
+    assert [c["id"] for c in admin.get(f"/decks/{deck_id}/review").json()] == [card["id"]]
+
+    # A second admin demotes the first: the deck leaves the library at once.
+    second = _signup(app, seed_invite, "second@example.com", Role.ADMIN)
+    first_id = admin.get("/auth/me").json()["id"]
+    assert second.patch(f"/admin/users/{first_id}", json={"role": "member"}).status_code == 200
+
+    assert deck_id not in {d["id"] for d in member.get("/decks").json()}
+    assert member.get(f"/decks/{deck_id}").status_code == 404
+    assert member.get(f"/decks/{deck_id}/review").status_code == 404
+    assert member.get(f"/decks/{deck_id}/stats").status_code == 404
+    assert member.get(f"/cards/{card['id']}").status_code == 404
+    late = member.post(f"/cards/{card['id']}/review", json={"rating": 3, "idempotency_key": "k"})
+    assert late.status_code == 404  # an offline answer replayed after access is gone
+    # The former admin keeps studying their own deck.
+    assert admin.get(f"/decks/{deck_id}").json()["owned"] is True

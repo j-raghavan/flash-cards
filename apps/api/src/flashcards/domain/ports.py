@@ -1040,8 +1040,13 @@ class StudyStatsRepository(Protocol):
         *,
         floor: datetime,
         until: datetime,
+        card_owner_ids: Sequence[str],
         deck_ids: Sequence[str] | None = None,
     ) -> list[DueBucket]:
-        """The owner's own schedules on their unsuspended cards due before until,
-        bucketed, with anything due before floor counted at floor (overdue cards)."""
+        """The user's own schedules due before until, bucketed, with anything due
+        before floor counted at floor (overdue cards).
+
+        Only unsuspended cards owned by one of card_owner_ids count: the user's
+        own and the library's (ADR 0024).
+        """
         ...

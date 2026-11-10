@@ -14,12 +14,16 @@ from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.sql import (
     SqlCardRepository,
     SqlDeckRepository,
+    SqlMediaRepository,
     SqlNoteRepository,
+    SqlNoteTypeRepository,
     SqlReviewLogRepository,
     SqlScheduleRepository,
+    SqlUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.decks import Deck
 from flashcards.domain.notes import Card, Note, NoteType
@@ -139,10 +143,16 @@ async def test_answer_and_undo_through_sql(engine: AsyncEngine) -> None:
     card_id = cards[0].id
 
     def reviews(s: AsyncSession) -> ReviewService:
-        decks = DeckService(SqlDeckRepository(s), clock)
-        notes = NoteService(decks, SqlNoteRepository(s), SqlCardRepository(s), clock)
+        access = ReadAccess(
+            SqlUserRepository(s),
+            SqlDeckRepository(s),
+            SqlNoteRepository(s),
+            SqlCardRepository(s),
+            SqlNoteTypeRepository(s),
+            SqlMediaRepository(s),
+        )
         return ReviewService(
-            notes, SqlScheduleRepository(s), SqlReviewLogRepository(s), FsrsScheduler(), clock
+            access, SqlScheduleRepository(s), SqlReviewLogRepository(s), FsrsScheduler(), clock
         )
 
     async with sm() as s, s.begin():

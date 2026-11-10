@@ -20,15 +20,19 @@ from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
+    InMemoryUserRepository,
 )
 from flashcards.adapters.offload import BlockingPackageReader
 from flashcards.application.apkg_import_service import ApkgImportService
 from flashcards.application.deck_export_service import DeckExportService
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain import deck_export
 from flashcards.domain.deck_export import (
@@ -65,11 +69,18 @@ class _World:
         self.schedules = InMemoryScheduleRepository()
         self.logs = InMemoryReviewLogRepository()
         self.scheduler = FsrsScheduler()
-        self.decks = DeckService(InMemoryDeckRepository(), self.clock)
+        deck_repo = InMemoryDeckRepository()
+        self.decks = DeckService(deck_repo, self.clock)
         self.notes = NoteService(self.decks, self.note_repo, self.card_repo, self.clock)
-        self.reviews = ReviewService(
-            self.notes, self.schedules, self.logs, self.scheduler, self.clock
+        access = ReadAccess(
+            InMemoryUserRepository(),
+            deck_repo,
+            self.note_repo,
+            self.card_repo,
+            InMemoryNoteTypeRepository(),
+            InMemoryMediaRepository(),
         )
+        self.reviews = ReviewService(access, self.schedules, self.logs, self.scheduler, self.clock)
         self.exporter = DeckExportService(
             self.decks,
             self.note_repo,

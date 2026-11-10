@@ -9,12 +9,16 @@ from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.note_service import NoteService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.notes import CardNotFound, NoteType
 from flashcards.domain.scheduling import CardSchedule, Rating, ScheduleState
@@ -115,9 +119,44 @@ def clock() -> FakeClock:
 
 
 @pytest.fixture
-def notes(clock: FakeClock) -> NoteService:
-    decks = DeckService(InMemoryDeckRepository(), clock)
-    return NoteService(decks, InMemoryNoteRepository(), InMemoryCardRepository(), clock)
+def deck_repo() -> InMemoryDeckRepository:
+    return InMemoryDeckRepository()
+
+
+@pytest.fixture
+def note_repo() -> InMemoryNoteRepository:
+    return InMemoryNoteRepository()
+
+
+@pytest.fixture
+def card_repo() -> InMemoryCardRepository:
+    return InMemoryCardRepository()
+
+
+@pytest.fixture
+def notes(
+    clock: FakeClock,
+    deck_repo: InMemoryDeckRepository,
+    note_repo: InMemoryNoteRepository,
+    card_repo: InMemoryCardRepository,
+) -> NoteService:
+    return NoteService(DeckService(deck_repo, clock), note_repo, card_repo, clock)
+
+
+@pytest.fixture
+def access(
+    deck_repo: InMemoryDeckRepository,
+    note_repo: InMemoryNoteRepository,
+    card_repo: InMemoryCardRepository,
+) -> ReadAccess:
+    return ReadAccess(
+        InMemoryUserRepository(),
+        deck_repo,
+        note_repo,
+        card_repo,
+        InMemoryNoteTypeRepository(),
+        InMemoryMediaRepository(),
+    )
 
 
 @pytest.fixture
@@ -132,12 +171,12 @@ def logs() -> InMemoryReviewLogRepository:
 
 @pytest.fixture
 def reviews(
-    notes: NoteService,
+    access: ReadAccess,
     schedules: InMemoryScheduleRepository,
     logs: InMemoryReviewLogRepository,
     clock: FakeClock,
 ) -> ReviewService:
-    return ReviewService(notes, schedules, logs, FakeScheduler(), clock)
+    return ReviewService(access, schedules, logs, FakeScheduler(), clock)
 
 
 async def _card(notes: NoteService, owner: str = ALICE) -> tuple[str, str]:

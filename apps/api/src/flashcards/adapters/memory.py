@@ -1062,7 +1062,7 @@ class InMemoryStudyStatsRepository:
         until: datetime,
         deck_ids: Sequence[str] | None = None,
     ) -> list[ActivityBucket]:
-        in_decks = await self._card_ids(owner_id, deck_ids)
+        in_decks = await self._card_ids(deck_ids)
         totals: dict[datetime, tuple[int, int]] = {}
         for log in await self._logs.list_for_owner(owner_id):
             if not since <= log.reviewed_at < until:
@@ -1080,28 +1080,31 @@ class InMemoryStudyStatsRepository:
         *,
         floor: datetime,
         until: datetime,
+        card_owner_ids: Sequence[str],
         deck_ids: Sequence[str] | None = None,
     ) -> list[DueBucket]:
         wanted = None if deck_ids is None else set(deck_ids)
-        cards = [
-            c
-            for c in await self._cards.list_for_owner(owner_id)
-            if not c.is_suspended and (wanted is None or c.deck_id in wanted)
-        ]
-        schedules = await self._schedules.get_many(owner_id, [c.id for c in cards])
+        owners = set(card_owner_ids)
+        schedules = await self._schedules.list_for_user(owner_id)
+        cards = {c.id: c for c in await self._cards.get_many([s.card_id for s in schedules])}
         totals: dict[datetime, int] = {}
-        for schedule in schedules.values():
+        for schedule in schedules:
+            card = cards.get(schedule.card_id)
+            if card is None or card.is_suspended or card.owner_id not in owners:
+                continue
+            if wanted is not None and card.deck_id not in wanted:
+                continue
             if schedule.due_at >= until:
                 continue
             start = bucket_start(max(schedule.due_at, floor))
             totals[start] = totals.get(start, 0) + 1
         return [DueBucket(start, n) for start, n in sorted(totals.items())]
 
-    async def _card_ids(self, owner_id: str, deck_ids: Sequence[str] | None) -> set[str] | None:
+    async def _card_ids(self, deck_ids: Sequence[str] | None) -> set[str] | None:
         if deck_ids is None:
             return None
-        wanted = set(deck_ids)
-        return {c.id for c in await self._cards.list_for_owner(owner_id) if c.deck_id in wanted}
+        # Every card in the decks, whoever owns it: the logs are the reviewer's.
+        return {c.id for deck_id in set(deck_ids) for c in await self._cards.list_for_deck(deck_id)}
 
 
 class NullUnitOfWork:

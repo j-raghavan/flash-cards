@@ -1560,6 +1560,7 @@ class SqlStudyStatsRepository:
         *,
         floor: datetime,
         until: datetime,
+        card_owner_ids: Sequence[str],
         deck_ids: Sequence[str] | None = None,
     ) -> list[DueBucket]:
         clamped = func.greatest(CardScheduleRow.due_at, literal(floor, DateTime(timezone=True)))
@@ -1569,7 +1570,7 @@ class SqlStudyStatsRepository:
             .join(CardRow, CardRow.id == CardScheduleRow.card_id)
             .where(
                 CardScheduleRow.user_id == owner_id,
-                CardRow.owner_id == owner_id,
+                CardRow.owner_id.in_(list(card_owner_ids)),
                 CardRow.suspended_at.is_(None),
                 CardScheduleRow.due_at < until,
             )

@@ -15,16 +15,20 @@ from flashcards.adapters.fsrs_scheduler import FsrsScheduler
 from flashcards.adapters.memory import (
     InMemoryCardRepository,
     InMemoryDeckRepository,
+    InMemoryMediaRepository,
     InMemoryMockExamRepository,
     InMemoryNoteRepository,
+    InMemoryNoteTypeRepository,
     InMemoryPassageRepository,
     InMemoryReviewLogRepository,
     InMemoryScheduleRepository,
     InMemoryShareLinkRepository,
+    InMemoryUserRepository,
 )
 from flashcards.application.deck_service import DeckService
 from flashcards.application.library_service import LibraryService
 from flashcards.application.note_service import NoteService
+from flashcards.application.read_access import ReadAccess
 from flashcards.application.review_service import ReviewService
 from flashcards.domain.notes import NoteType
 from flashcards.domain.scheduling import (
@@ -76,9 +80,15 @@ class _Rig:
             InMemoryMockExamRepository(),
             InMemoryShareLinkRepository(),
         )
-        self.reviews = ReviewService(
-            self.notes, self.schedules, self.logs, FsrsScheduler(), self.clock
+        access = ReadAccess(
+            InMemoryUserRepository(),
+            deck_repo,
+            note_repo,
+            cards,
+            InMemoryNoteTypeRepository(),
+            InMemoryMediaRepository(),
         )
+        self.reviews = ReviewService(access, self.schedules, self.logs, FsrsScheduler(), self.clock)
 
     async def card(self, owner: str = ALICE) -> tuple[str, str]:
         deck = await self.decks.create(owner_id=owner, name="Deck")

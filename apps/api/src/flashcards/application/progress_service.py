@@ -4,6 +4,9 @@
 Everything is derived from review logs and schedules at read time, in the user's
 own time zone, so changing the goal or the zone re-reads history consistently
 and there is no counter to drift out of step with the logs.
+
+Progress is always the caller's own: their reviews and their schedules, over
+the cards they may read, library cards included (ADR 0024).
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
-from flashcards.application.deck_service import DeckService
+from flashcards.application.read_access import ReadAccess
 from flashcards.domain.ports import Clock, StudySettingsRepository, StudyStatsRepository
 from flashcards.domain.progress import (
     DEFAULT_FORECAST_DAYS,
@@ -38,12 +41,12 @@ from flashcards.domain.progress import (
 class ProgressService:
     def __init__(
         self,
-        decks: DeckService,
+        access: ReadAccess,
         settings: StudySettingsRepository,
         stats: StudyStatsRepository,
         clock: Clock,
     ) -> None:
-        self._decks = decks
+        self._access = access
         self._settings = settings
         self._stats = stats
         self._clock = clock
@@ -99,8 +102,10 @@ class ProgressService:
         check_range(forecast_days, MAX_FORECAST_DAYS, "forecast_days")
         deck_ids: tuple[str, ...] | None = None
         if deck_id is not None:
-            await self._decks.get(owner_id=owner_id, deck_id=deck_id)  # raises DeckNotFound
+            await self._access.deck(owner_id, deck_id)  # raises DeckNotFound
             deck_ids = (deck_id,)
+        # Cards of an admin who is no longer active drop out of the forecast.
+        scope = await self._access.scope(owner_id)
         settings = await self.get_settings(owner_id=owner_id)
         zone = settings.zone
         today = local_date(self._clock.now(), zone)
@@ -120,6 +125,7 @@ class ProgressService:
             owner_id,
             floor=today_start,
             until=day_start(today + timedelta(days=forecast_days), zone),
+            card_owner_ids=scope.owner_ids,
             deck_ids=deck_ids,
         )
         return ProgressStats(

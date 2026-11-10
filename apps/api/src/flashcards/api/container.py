@@ -271,7 +271,9 @@ def build_services(repos: Repositories) -> Container:
     read_access = ReadAccess(
         repos.users, repos.decks, repos.notes, repos.cards, repos.note_types, repos.media
     )
-    reviews = ReviewService(notes, repos.schedules, repos.review_logs, repos.scheduler, repos.clock)
+    reviews = ReviewService(
+        read_access, repos.schedules, repos.review_logs, repos.scheduler, repos.clock
+    )
     library = LibraryService(
         decks,
         notes,
@@ -332,7 +334,7 @@ def build_services(repos: Repositories) -> Container:
         repos.note_types, repos.notes, notes, library, repos.media, repos.clock
     )
     goal_service = GoalService(decks, repos.goals, repos.clock)
-    progress = ProgressService(decks, repos.study_settings, repos.study_stats, repos.clock)
+    progress = ProgressService(read_access, repos.study_settings, repos.study_stats, repos.clock)
     planner = PlannerService(
         goal_service,
         repos.cards,
