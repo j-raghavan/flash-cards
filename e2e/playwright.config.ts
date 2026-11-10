@@ -23,7 +23,9 @@ mkdirSync(RUN_DIR, { recursive: true });
 const localVenv = resolve(repo, "apps/api/.venv/bin/python");
 const python = process.env.E2E_PYTHON ?? (existsSync(localVenv) ? localVenv : "python");
 
-const LIBRARY_SPEC = /library\.spec\.ts$/;
+// Specs whose admin decks reach every member (ADR 0024): the library itself, and
+// the admin-only card browser.
+const LIBRARY_SPEC = /(library|card-browser)\.spec\.ts$/;
 
 // Firefox and WebKit run only when asked for: E2E_BROWSERS=chromium,firefox,webkit.
 const browsers = (process.env.E2E_BROWSERS ?? "chromium").split(",").map((name) => name.trim());

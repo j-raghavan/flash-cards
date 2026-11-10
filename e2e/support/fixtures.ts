@@ -22,11 +22,33 @@ export interface LibraryAdmin {
   createDeck: (name: string) => Promise<{ id: string; name: string }>;
 }
 
-export const test = base.extend<{ member: Member; libraryAdmin: LibraryAdmin }>({
+export const test = base.extend<{ member: Member; admin: LibraryAdmin; libraryAdmin: LibraryAdmin }>({
   member: async ({ context }, use, testInfo) => {
     const email = uniqueEmail(testInfo.title);
     const api = await signUpWithApi(context.request, email);
     await use({ email, api });
+  },
+  // A new admin signed in in the page's own browser context, for admin-only
+  // screens. Its decks reach every member's library, so a spec that uses it runs
+  // after the rest of the suite (see playwright.config.ts), and each deck it
+  // creates is deleted when the test ends, pass or fail.
+  admin: async ({ context }, use, testInfo) => {
+    const api = await signUpWithApi(context.request, uniqueEmail(`admin ${testInfo.title}`), "admin");
+    const created: string[] = [];
+    try {
+      await use({
+        api,
+        createDeck: async (name) => {
+          const deck = await api.createDeck(name);
+          created.push(deck.id);
+          return deck;
+        },
+      });
+    } finally {
+      for (const deckId of created) {
+        await api.deleteDeck(deckId);
+      }
+    }
   },
   libraryAdmin: async ({}, use, testInfo) => {
     const ctx = await request.newContext({ baseURL: WEB_URL });

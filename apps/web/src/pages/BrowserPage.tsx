@@ -7,7 +7,6 @@ import { useState, type SubmitEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { cards, decks } from "../api/endpoints";
-import { useAuth } from "../auth/AuthContext";
 import {
   CARD_STATES,
   SORT_KEYS,
@@ -104,7 +103,6 @@ function BulkBar({
   deckChoices: { id: string; label: string }[];
   onDone: (message: string) => void;
 }) {
-  const admin = useAuth().user?.role === "admin";
   const [action, setAction] = useState<BulkAction>("move");
   const [deckId, setDeckId] = useState("");
   const [tags, setTags] = useState("");
@@ -211,8 +209,8 @@ function BulkBar({
         <span role="alert">
           Delete the notes behind {selected.length} card{selected.length === 1 ? "" : "s"}? Every card of those notes
           goes too.
-          {/* An admin's cards are in every member's library (ADR 0024). */}
-          {admin ? " They are in every member's library: members who studied them lose their progress on them." : ""}
+          {/* Only an admin browses, and an admin's cards are in every member's library (ADR 0024). */}
+          {" They are in every member's library: members who studied them lose their progress on them."}
         </span>
       ) : null}
       <button

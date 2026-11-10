@@ -3,6 +3,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { Link, Route, Routes } from "react-router";
 
 import { AuthProvider } from "./auth/AuthContext";
+import { AdminOnly } from "./components/AdminOnly";
 import { Layout } from "./components/Layout";
 import { OwnerOnly } from "./components/LibraryGuard";
 import { Loading } from "./components/ui";
@@ -107,7 +108,14 @@ export function AppRoutes() {
           }
         />
         <Route path="/notes/:noteId/edit" element={<EditNotePage />} />
-        <Route path="/cards" element={<BrowserPage />} />
+        <Route
+          path="/cards"
+          element={
+            <AdminOnly title="Browse cards">
+              <BrowserPage />
+            </AdminOnly>
+          }
+        />
         <Route path="/jobs/:jobId" element={<JobPage />} />
         <Route
           path="/decks/:deckId/share"

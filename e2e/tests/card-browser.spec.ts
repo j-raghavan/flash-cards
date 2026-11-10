@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The card browser (F-CARD-5, ADR 0011): filter by tag, then suspend the matches
-// with one bulk action.
+// with one bulk action. Browsing is the admin's, so the page signs in as one.
+import { uniqueName } from "../support/api";
 import { expect, test } from "../support/fixtures";
 
-test("filters the card browser by tag and suspends the matches in bulk", async ({ page, member }) => {
-  const deck = await member.api.createDeck("Chemistry");
-  await member.api.addBasicCard(deck.id, "Symbol for sodium?", "Na", ["elements"]);
-  await member.api.addBasicCard(deck.id, "Symbol for potassium?", "K", ["elements"]);
-  await member.api.addBasicCard(deck.id, "pH of pure water?", "7", ["acids"]);
+test("filters the card browser by tag and suspends the matches in bulk", async ({ page, admin }) => {
+  const deck = await admin.createDeck(uniqueName("Chemistry"));
+  await admin.api.addBasicCard(deck.id, "Symbol for sodium?", "Na", ["elements"]);
+  await admin.api.addBasicCard(deck.id, "Symbol for potassium?", "K", ["elements"]);
+  await admin.api.addBasicCard(deck.id, "pH of pure water?", "7", ["acids"]);
 
   await page.goto("/cards");
   await expect(page.getByRole("heading", { name: "Browse cards" })).toBeVisible();
