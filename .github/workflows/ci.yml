@@ -121,8 +121,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Some hosts check files out owner-only (a Synology share reports mode 700).
+      # The images must not depend on that: build from such a checkout and read
+      # the files as each image's unprivileged user.
+      - name: Make the checkout owner-only
+        run: chmod -R go-rwx apps
       - name: Build API image
         run: docker build -f apps/api/Dockerfile -t flash-cards-api:ci .
+      - name: Build web image
+        run: docker build -f apps/web/Dockerfile -t flash-cards-web:ci .
+      - name: The unprivileged users can read their files
+        run: |
+          docker run --rm --entrypoint sh flash-cards-api:ci -c \
+            'test "$(id -u)" != 0 && cat pyproject.toml alembic.ini >/dev/null && python -c "import flashcards.api.app"'
+          docker run --rm --entrypoint sh flash-cards-web:ci -c \
+            'test "$(id -u)" != 0 && cat /etc/caddy/Caddyfile /srv/index.html /srv/favicon.svg >/dev/null'
 
   docs:
     runs-on: ubuntu-latest
