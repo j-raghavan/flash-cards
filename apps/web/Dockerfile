@@ -18,6 +18,9 @@ COPY --from=build /app/dist /srv
 # and the admin API off; /tmp keeps the image usable with a read-only root.
 ENV XDG_DATA_HOME=/tmp/caddy/data \
     XDG_CONFIG_HOME=/tmp/caddy/config
+# Readable by the unprivileged user whatever the build host's permissions were:
+# a checkout on a Synology share, for example, can be owner-only (mode 700).
+RUN chmod -R a+rX /srv /etc/caddy
 # Unprivileged: the site listens on 8080, so no root and no extra capabilities.
 USER 65534:65534
 EXPOSE 8080
