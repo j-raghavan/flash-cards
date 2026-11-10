@@ -32,7 +32,12 @@ from flashcards.api.schemas import (
     RoleUpdateRequest,
 )
 from flashcards.application.invite_service import CreatedInvite, InviteHasNoEmail
-from flashcards.domain.users import EmailAlreadyRegistered, InvalidEmail, WeakPassword
+from flashcards.domain.users import (
+    AdminPasswordProtected,
+    EmailAlreadyRegistered,
+    InvalidEmail,
+    WeakPassword,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -158,16 +163,24 @@ async def create_user(
 async def set_user_password(
     user_id: str,
     body: AdminSetPasswordRequest,
+    tasks: BackgroundTasks,
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container, scope="function"),
 ) -> AdminUserOut:
-    """Set a user's password; they are signed out everywhere."""
+    """Set a member's password; they are signed out everywhere and, when mail is
+    configured, told by email. Refused (409) for admins: demote them first."""
     try:
         user = await container.admin.set_password(
             admin_id=admin.user.id, user_id=user_id, password=body.password
         )
     except WeakPassword as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except AdminPasswordProtected as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "An admin's password cannot be set by another admin. Demote them first.",
+        ) from exc
+    send_later(tasks, container.mailer, container.admin.password_set_email(user))
     return AdminUserOut.from_user(user)
 
 

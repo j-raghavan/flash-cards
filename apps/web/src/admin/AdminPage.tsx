@@ -5,7 +5,7 @@
 // hides itself from members and keeps admins from acting on their own account.
 // Loaded on first visit, so members never download it.
 
-import { useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
 import { adminUsage } from "../api/adminUsage";
 import { describeError } from "../api/client";
@@ -54,6 +54,21 @@ function UserRow({
   const quotaButton = useRef<HTMLButtonElement>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [password, setPassword] = useState("");
+  const passwordButton = useRef<HTMLButtonElement>(null);
+  const closePassword = (): void => {
+    setPasswordOpen(false);
+    setPassword("");
+    passwordButton.current?.focus();
+  };
+  // After a save the toggle is still disabled until the action settles, so focus
+  // returns to it once it is enabled again.
+  const refocusPassword = useRef(false);
+  useEffect(() => {
+    if (refocusPassword.current && !action.busy) {
+      refocusPassword.current = false;
+      passwordButton.current?.focus();
+    }
+  }, [action.busy]);
   const closeQuota = (): void => {
     setQuotaOpen(false);
     quotaButton.current?.focus();
@@ -140,19 +155,28 @@ function UserRow({
                     Suspend
                   </button>
                 )}
-                <button
-                  type="button"
-                  className="button"
-                  aria-expanded={passwordOpen}
-                  aria-controls={passwordOpen ? `password-row-${account.id}` : undefined}
-                  aria-label={`Set password for ${account.email}`}
-                  onClick={() => {
-                    setPasswordOpen(!passwordOpen);
-                    setPassword("");
-                  }}
-                >
-                  Set password
-                </button>
+                {account.role === "admin" ? null : (
+                  // An admin's password cannot be set by another admin (the server
+                  // refuses it): demote them first.
+                  <button
+                    type="button"
+                    className="button"
+                    ref={passwordButton}
+                    disabled={action.busy}
+                    aria-expanded={passwordOpen}
+                    aria-controls={passwordOpen ? `password-row-${account.id}` : undefined}
+                    aria-label={`Set password for ${account.email}`}
+                    onClick={() => {
+                      if (passwordOpen) {
+                        closePassword();
+                      } else {
+                        setPasswordOpen(true);
+                      }
+                    }}
+                  >
+                    Set password
+                  </button>
+                )}
                 <button
                   type="button"
                   className="button"
@@ -201,7 +225,8 @@ function UserRow({
           <span role="status" className="muted">
             {note}
           </span>
-          <ErrorText message={action.error} />
+          {/* While the password row is open, its errors show next to its field. */}
+          <ErrorText message={passwordOpen ? null : action.error} />
           <ErrorText message={removeError} />
         </td>
       </tr>
@@ -216,17 +241,25 @@ function UserRow({
                 setNote(null);
                 void action.run(async () => {
                   onChanged(await admin.setPassword(account.id, password));
-                  setPassword("");
                   setPasswordOpen(false);
+                  setPassword("");
+                  refocusPassword.current = true;
                   setNote("Password set; they have been signed out everywhere.");
                 });
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  closePassword();
+                }
               }}
             >
               <label className="field grow">
                 <span>New password for {account.email}</span>
                 <input
                   type="password"
-                  autoComplete="new-password"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
                   required
                   minLength={MIN_PASSWORD}
                   maxLength={1000}
@@ -239,6 +272,10 @@ function UserRow({
               <button type="submit" className="button primary" disabled={action.busy || password.length < MIN_PASSWORD}>
                 Save password
               </button>
+              <button type="button" className="button" onClick={closePassword}>
+                Cancel
+              </button>
+              <ErrorText message={action.error} />
             </form>
           </td>
         </tr>
@@ -302,7 +339,9 @@ function CreateUserForm({ onCreated }: { onCreated: (user: AdminUser) => void })
           <span>Password</span>
           <input
             type="password"
-            autoComplete="new-password"
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
             required
             minLength={MIN_PASSWORD}
             maxLength={1000}

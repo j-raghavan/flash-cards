@@ -92,6 +92,10 @@ curl -si https://flashcards.example.org/api/auth/signup \
 
 The response is `201` with a session cookie. From then on the admin endpoints (`/api/admin/invites`, `/api/admin/users`, `/api/admin/audit`) mint invites and manage accounts. The token is printed to the terminal, so treat the terminal scrollback and any captured output as sensitive until the invite has been redeemed.
 
+### Instances without email
+
+Without `FLASHCARDS_SMTP_HOST` no email is sent, so invites and password resets cannot reach anyone. An admin can instead add accounts directly under Admin → Users → Add an account (`POST /api/admin/users`), and set a member's password there when they forget it. The account is ready at once; share the password in person. See ADR 0023 for the limits.
+
 ### Privacy policy, terms and imprint
 
 The web app shows `/privacy`, `/terms` and `/imprint` to everyone and links them from every page and from sign-up. Their text is the operator's to write: until it is provided, each page shows a template headed by a notice that the operator has not filled it in, with every part to complete marked *Operator: ...*. The templates are not legal advice.

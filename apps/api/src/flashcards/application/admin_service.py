@@ -11,10 +11,11 @@ so there is always at least one active admin. An admin who is suspended,
 demoted or deleted loses the unredeemed invites they sent. There is no
 impersonation.
 
-Admins can also create accounts directly and set a user's password, for
-instances without outgoing mail (a home server). A created account's email
-counts as verified, since the admin vouches for it; setting a password signs
-the user out everywhere, as a password reset does.
+Admins can also create accounts directly and set a member's password, for
+instances without outgoing mail (a home server; ADR 0023). A created account's
+email counts as verified, since the admin vouches for it. Setting a password
+signs the member out everywhere and is audited; it is refused for admins, who
+must be demoted first, so no admin can take over another admin's account.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from flashcards.domain.ports import (
 )
 from flashcards.domain.user_tokens import TokenPurpose
 from flashcards.domain.users import (
+    AdminPasswordProtected,
     AdminRequired,
     AdminSelfAction,
     EmailAlreadyRegistered,
@@ -136,6 +138,9 @@ class AdminService:
         WeakPassword or EmailAlreadyRegistered). Its email counts as verified."""
         normalized = validate_email(email)
         validate_password(password)
+        # Hashed before any lock: Argon2 is slow and shares a small pool with
+        # sign-ins, and the admin rows stay locked until the request commits.
+        password_hash = await self._hasher.hash(password)
         await self._lock_admins(admin_id)
         if await self._users.get_by_email(normalized) is not None:
             raise EmailAlreadyRegistered(normalized)
@@ -143,7 +148,7 @@ class AdminService:
         user = User(
             id=str(uuid.uuid4()),
             email=normalized,
-            password_hash=await self._hasher.hash(password),
+            password_hash=password_hash,
             role=role,
             created_at=now,
             email_verified_at=now,
@@ -158,25 +163,47 @@ class AdminService:
         return user
 
     async def set_password(self, *, admin_id: str, user_id: str, password: str) -> User:
-        """Set another user's password (raises WeakPassword).
+        """Set a member's password (raises WeakPassword, or AdminPasswordProtected
+        for an admin, who must be demoted first).
 
-        The user is signed out everywhere, emailed reset and verification links
-        stop working, and any sign-in lockout is cleared, as after a reset.
+        The member is signed out everywhere, emailed links stop working, and the
+        sign-in lockouts are cleared, as an unlock would. Two-factor sign-in, if
+        on, stays on: the new password alone does not sign them in.
         """
         validate_password(password)
+        password_hash = await self._hasher.hash(password)  # before any lock, as above
         await self._lock_admins(admin_id)
         user = await self._target(admin_id, user_id)
-        changed = user.with_password_hash(await self._hasher.hash(password))
+        if user.role is Role.ADMIN:
+            raise AdminPasswordProtected(user_id)
+        changed = user.with_password_hash(password_hash)
         await self._users.update(changed)
         now = self._clock.now()
         await self._sessions.revoke_all_for_user(user_id, now)
-        await self._tokens.invalidate_for_user(user_id, TokenPurpose.PASSWORD_RESET, now)
+        for purpose in TokenPurpose:
+            await self._tokens.invalidate_for_user(user_id, purpose, now)
         await self._throttle.delete(throttle_key(user.email))
         await self._throttle.delete(second_factor_key(user.id))
         await self._audit.record(
-            AuditAction.USER_PASSWORD_SET, actor_id=admin_id, target_id=user_id
+            AuditAction.USER_PASSWORD_SET,
+            actor_id=admin_id,
+            target_id=user_id,
+            detail={"lockouts_cleared": "true"},
         )
         return changed
+
+    def password_set_email(self, user: User) -> OutgoingEmail:
+        """Tells the member an admin set their password (sent when mail is on)."""
+        return OutgoingEmail(
+            to=user.email,
+            subject="An administrator set your Flash-Cards password",
+            body=(
+                "An administrator of your Flash-Cards site set a new password for your "
+                "account, and you have been signed out on every device. Ask them for "
+                "the new password, then change it on your Account page. If you did "
+                "not expect this, contact the site's administrator."
+            ),
+        )
 
     async def list_users(self) -> list[User]:
         return await self._users.list_all()

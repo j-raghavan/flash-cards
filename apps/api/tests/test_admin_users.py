@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from flashcards.adapters.memory import InMemoryUserRepository
 from flashcards.api.container import Container
 from flashcards.domain.invites import Role
+from flashcards.domain.mail import OutgoingEmail
 from flashcards.domain.users import AdminRequired
 
 PASSWORD = "correct-horse-battery"
@@ -373,3 +374,79 @@ def test_setting_a_password_refuses_weak_ones_unknown_users_and_oneself(
     assert own.status_code == 409  # use the account page for your own password
     # The admin's own password is unchanged.
     assert admin_client.get("/auth/me").status_code == 200
+
+
+def test_setting_a_password_voids_links_already_emailed(
+    app: FastAPI, admin_client: TestClient, seed_invite: Callable[..., str]
+) -> None:
+    container: Container = app.state.container
+    _member_client, member_id = _member(app, seed_invite)
+    email = asyncio.run(container.account_email.password_reset_email(MEMBER))
+    assert email is not None
+    token = email.body.split("#token=")[1].split()[0]
+
+    admin_client.post(f"/admin/users/{member_id}/password", json={"password": NEW_PASSWORD})
+
+    confirm = {"token": token, "password": "yet-another-password"}
+    assert TestClient(app).post("/auth/password-reset/confirm", json=confirm).status_code == 422
+    event = next(
+        e for e in admin_client.get("/admin/audit").json() if e["action"] == "user.password_set"
+    )
+    assert event["detail"] == {"lockouts_cleared": "true"}
+
+
+def test_an_admins_password_cannot_be_set_by_another_admin(
+    app: FastAPI, admin_client: TestClient
+) -> None:
+    other = admin_client.post(
+        "/admin/users",
+        json={"email": "second@example.com", "password": PASSWORD, "role": "admin"},
+    ).json()
+
+    refused = admin_client.post(
+        f"/admin/users/{other['id']}/password", json={"password": NEW_PASSWORD}
+    )
+
+    assert refused.status_code == 409 and "Demote them first" in refused.json()["detail"]
+    login = TestClient(app).post(
+        "/auth/login", json={"email": "second@example.com", "password": PASSWORD}
+    )
+    assert login.status_code == 200  # unchanged
+    # Once demoted, it works.
+    admin_client.patch(f"/admin/users/{other['id']}", json={"role": "member"})
+    allowed = admin_client.post(
+        f"/admin/users/{other['id']}/password", json={"password": NEW_PASSWORD}
+    )
+    assert allowed.status_code == 200
+
+
+def test_the_member_is_told_by_email_when_mail_is_configured(
+    app: FastAPI,
+    admin_client: TestClient,
+    seed_invite: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container: Container = app.state.container
+    _member_client, member_id = _member(app, seed_invite)
+    sent: list[OutgoingEmail] = []
+
+    async def capture(email: OutgoingEmail) -> None:
+        sent.append(email)
+
+    monkeypatch.setattr(container.mailer, "send", capture)
+    admin_client.post(f"/admin/users/{member_id}/password", json={"password": NEW_PASSWORD})
+
+    assert [(e.to, e.subject) for e in sent] == [
+        (MEMBER, "An administrator set your Flash-Cards password")
+    ]
+    assert NEW_PASSWORD not in sent[0].body
+
+
+def test_an_over_long_password_is_refused_without_echoing_it(
+    app: FastAPI, admin_client: TestClient
+) -> None:
+    secret = "x" * 1_001
+    refused = admin_client.post(
+        "/admin/users", json={"email": "long@example.com", "password": secret}
+    )
+    assert refused.status_code == 422 and secret not in refused.text

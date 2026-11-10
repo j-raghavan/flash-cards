@@ -97,31 +97,63 @@ describe("admin console", () => {
     expect(await screen.findByText("That email already has an account.")).toBeInTheDocument();
   });
 
-  it("sets another user's password, but not the admin's own", async () => {
+  it("sets a member's password, but never an admin's", async () => {
+    let fail = true;
     const calls = mockApi({
       ...asAdmin,
-      "GET /admin/users": { body: USERS },
-      "POST /admin/users/u2/password": { body: account("u2", "bob@example.com", { email_verified: false }) },
+      "GET /admin/users": { body: [...USERS, account("a2", "other-admin@example.com", { role: "admin" })] },
+      "POST /admin/users/u2/password": () =>
+        fail
+          ? { status: 422, body: { detail: "password must be at least 12 characters" } }
+          : { body: account("u2", "bob@example.com", { email_verified: false }) },
     });
     renderApp("/admin");
     const user = userEvent.setup();
     const own = (await screen.findByText("root@example.com")).closest("tr") as HTMLElement;
     expect(within(own).queryByRole("button", { name: /Set password/ })).toBeNull();
+    const otherAdmin = screen.getByText("other-admin@example.com").closest("tr") as HTMLElement;
+    expect(within(otherAdmin).queryByRole("button", { name: /Set password/ })).toBeNull();
+
     const toggle = screen.getByRole("button", { name: "Set password for bob@example.com" });
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    const form = screen.getByRole("form", { name: "New password for bob@example.com" });
+    let form = screen.getByRole("form", { name: "New password for bob@example.com" });
+    const field = within(form).getByLabelText("New password for bob@example.com");
+    expect(field).toHaveAttribute("autocomplete", "off");
+    await user.type(field, "typed-then-cancelled");
+    await user.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("form", { name: "New password for bob@example.com" })).toBeNull();
+    expect(toggle).toHaveFocus();
+
+    await user.click(toggle);
+    form = screen.getByRole("form", { name: "New password for bob@example.com" });
+    expect(within(form).getByLabelText("New password for bob@example.com")).toHaveValue("");
+    await user.click(within(form).getByLabelText("New password for bob@example.com"));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("form", { name: "New password for bob@example.com" })).toBeNull();
+    // The toggle closes it too.
+    await user.click(toggle);
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle);
+    form = screen.getByRole("form", { name: "New password for bob@example.com" });
     const save = within(form).getByRole("button", { name: "Save password" });
     expect(save).toBeDisabled();
     await user.type(within(form).getByLabelText("New password for bob@example.com"), "a-new-long-password");
     await user.click(save);
+    // An error shows inside the open row, once.
+    expect(await within(form).findByText("password must be at least 12 characters")).toBeInTheDocument();
+    expect(screen.getAllByText("password must be at least 12 characters")).toHaveLength(1);
+
+    fail = false;
+    await user.click(save);
     expect(await screen.findByText("Password set; they have been signed out everywhere.")).toBeInTheDocument();
-    expect(calls.find((c) => c.path === "/admin/users/u2/password")?.body).toEqual({ password: "a-new-long-password" });
+    expect(calls.filter((c) => c.path === "/admin/users/u2/password").at(-1)?.body).toEqual({
+      password: "a-new-long-password",
+    });
     expect(screen.queryByRole("form", { name: "New password for bob@example.com" })).toBeNull();
-    // Opening and closing again clears the field.
-    await user.click(toggle);
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
   });
 
   it("manages users: role, suspend, unlock and delete, never the admin's own account", async () => {
