@@ -71,7 +71,7 @@ These are enhancements. Library decks simply do not offer them until they land, 
 
 ### Deletion and privacy
 
-- **Deleting a library deck, note or card, re-deriving a note so a card disappears, or deleting the admin's account** erases every member's schedules and review logs on those cards. The alternative, keeping history for cards that no longer exist, would leave rows nobody can study or see and complicate the export. The cost is that one admin action can wipe members' progress, so the web delete confirmation says how many members have progress on what is being deleted. A later enhancement may keep member history.
+- **Deleting a library deck, note or card, re-deriving a note so a card disappears, or deleting the admin's account** erases every member's schedules and review logs on those cards. The alternative, keeping history for cards that no longer exist, would leave rows nobody can study or see and complicate the export. The cost is that one admin action can wipe members' progress, so when an admin deletes a deck, a note, cards in bulk or an admin's account, the web confirmation says that members who studied it lose their progress on it. It gives no count of those members: no route reports one yet. A later enhancement may keep member history.
 - **Deleting a member's account** deletes their schedules and logs on library cards as well as on their own.
 - **Account export** includes the member's schedules and logs on library cards, by card id. The cards themselves stay the admin's.
 - **Admins see member progress only in aggregate.** No admin screen shows another user's schedule or reviews.
@@ -86,9 +86,9 @@ These are enhancements. Library decks simply do not offer them until they land, 
    - rendering reads (note types, media)
    - account delete and export
 2. **Web:**
-   - library decks on the home page
+   - library decks on the home page. A member whose library has decks is not sent to the guided setup automatically; it is still offered.
    - a read-only deck page for library decks (study and stats only; no edit controls). Browsing library cards stays an enhancement.
-   - warnings on the admin console before promoting a user or unsuspending an admin, and on deletion of library material
+   - warnings on the admin console before promoting a user or unsuspending an admin, and before demoting or suspending one, and on deletion of library material
    - the study screen without the edit shortcut on library cards
    - the offline queue unchanged, since reviews keep the same endpoint
 3. **Enhancements,** each its own change, in this order: per-member hide or subscribe; per-member suspend, bury and flag; the browser, goals and the goal planner over library cards; AI features on library decks.

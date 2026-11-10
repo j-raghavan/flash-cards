@@ -101,7 +101,7 @@ The response is `201` with a session cookie. From then on the admin endpoints (`
 Every deck owned by an active admin is a library deck: every member sees it on their home page under Library and can study it with their own progress, but cannot change, export or share it. There is no per-deck opt-in. Keep private material in a separate non-admin account.
 
 - Making a user an admin, or unsuspending an admin, publishes every deck they own at once, including decks made while they were a member. The admin console asks before either change.
-- Demoting, suspending or deleting an admin takes their decks out of the library at once. Members' progress on those cards stays until the cards are deleted.
+- Demoting, suspending or deleting an admin takes their decks out of the library at once. Members' progress on those cards stays until the cards are deleted. The console asks before demoting or suspending an admin too.
 - Deleting a library deck, note or card, or the admin's account, erases every member's progress on those cards.
 
 See ADR 0024 for the design.
