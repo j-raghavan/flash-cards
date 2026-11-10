@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One deck: its statistics and proficiency (F-PROG-2, F-PROG-4), sub-decks, and
-// the ways in to study, add, browse and generate cards.
+// the ways in to study, add, browse and generate cards. A library deck (an
+// admin's, ADR 0024) is study-only: its owner alone changes it.
 
 import { lazy, Suspense, useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
@@ -208,36 +209,50 @@ export function DeckDetailPage() {
         ))}
       </nav>
       <h1>{deck.name}</h1>
+      {deck.owned ? null : (
+        <p className="muted">
+          <span className="badge">From the library</span> Shared by your admin. You can study it and see your progress;
+          only the admin can change it.
+        </p>
+      )}
 
       <ErrorText message={stats.error} />
       {stats.loading ? <Loading label="Loading statistics…" /> : null}
       {stats.data === undefined ? null : <StatsPanel stats={stats.data} />}
       {stats.data?.total === 0 ? (
-        <p className="empty">
-          This deck has no cards yet. Add one by hand, generate drafts from a file, or{" "}
-          <Link to="/import">import an Anki deck</Link>.
-        </p>
+        deck.owned ? (
+          <p className="empty">
+            This deck has no cards yet. Add one by hand, generate drafts from a file, or{" "}
+            <Link to="/import">import an Anki deck</Link>.
+          </p>
+        ) : (
+          <p className="empty">This library deck has no cards yet.</p>
+        )
       ) : null}
 
       <div className="row actions">
         <Link className="button primary" to={`/decks/${deckId}/study`}>
           Study now
         </Link>
-        <Link className="button" to={`/decks/${deckId}/notes/new`}>
-          Add card
-        </Link>
-        <Link className="button" to={`/decks/${deckId}/generate`}>
-          Generate from a file
-        </Link>
-        <Link className="button" to={`/cards?deck=${deckId}`}>
-          Browse cards
-        </Link>
-        <Link className="button" to={`/decks/${deckId}/exam`}>
-          Mock exam
-        </Link>
-        <Link className="button" to={`/decks/${deckId}/share`}>
-          Share
-        </Link>
+        {deck.owned ? (
+          <>
+            <Link className="button" to={`/decks/${deckId}/notes/new`}>
+              Add card
+            </Link>
+            <Link className="button" to={`/decks/${deckId}/generate`}>
+              Generate from a file
+            </Link>
+            <Link className="button" to={`/cards?deck=${deckId}`}>
+              Browse cards
+            </Link>
+            <Link className="button" to={`/decks/${deckId}/exam`}>
+              Mock exam
+            </Link>
+            <Link className="button" to={`/decks/${deckId}/share`}>
+              Share
+            </Link>
+          </>
+        ) : null}
       </div>
 
       {children.length > 0 ? (
@@ -253,28 +268,32 @@ export function DeckDetailPage() {
         </>
       ) : null}
 
-      <Suspense fallback={null}>
-        <DeckSummaryPanel key={deckId} deckId={deckId} />
-        <DeckChatPanel key={`chat:${deckId}`} deckId={deckId} />
-      </Suspense>
+      {deck.owned ? (
+        <>
+          <Suspense fallback={null}>
+            <DeckSummaryPanel key={deckId} deckId={deckId} />
+            <DeckChatPanel key={`chat:${deckId}`} deckId={deckId} />
+          </Suspense>
 
-      <h2>Manage</h2>
-      <CreateDeckForm all={all.data} initialParent={deckId} onCreated={all.reload} />
-      <div className="row actions">
-        <RenameForm deck={deck} onRenamed={replaceDeck} />
-        <ConfirmButton
-          label="Delete deck"
-          confirmLabel="Delete for good"
-          prompt={
-            subdecks > 0
-              ? `Delete “${deck.name}”, its ${subdecks} sub-deck${subdecks === 1 ? "" : "s"} and every card in them? This cannot be undone.`
-              : `Delete “${deck.name}” and every card in it? This cannot be undone.`
-          }
-          onConfirm={remove}
-        />
-      </div>
-      <ErrorText message={deleteError} />
-      <ExportDeck deckId={deckId} />
+          <h2>Manage</h2>
+          <CreateDeckForm all={all.data} initialParent={deckId} onCreated={all.reload} />
+          <div className="row actions">
+            <RenameForm deck={deck} onRenamed={replaceDeck} />
+            <ConfirmButton
+              label="Delete deck"
+              confirmLabel="Delete for good"
+              prompt={
+                subdecks > 0
+                  ? `Delete “${deck.name}”, its ${subdecks} sub-deck${subdecks === 1 ? "" : "s"} and every card in them? This cannot be undone.`
+                  : `Delete “${deck.name}” and every card in it? This cannot be undone.`
+              }
+              onConfirm={remove}
+            />
+          </div>
+          <ErrorText message={deleteError} />
+          <ExportDeck deckId={deckId} />
+        </>
+      ) : null}
     </section>
   );
 }

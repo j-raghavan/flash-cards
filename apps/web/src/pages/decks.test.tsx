@@ -168,6 +168,45 @@ describe("deck detail", () => {
     expect(screen.getByRole("link", { name: "Browse cards" })).toHaveAttribute("href", "/cards?deck=b");
   });
 
+  it("shows a library deck for study only, with its sub-decks", async () => {
+    const calls = mockApi({
+      ...me,
+      "GET /decks": { body: [libraryDeck("l1", "Anatomy"), libraryDeck("l2", "Bones", "l1")] },
+      "GET /decks/l1/stats": { body: STATS },
+    });
+    renderApp("/decks/l1");
+    expect(await screen.findByRole("heading", { name: "Anatomy" })).toBeInTheDocument();
+    expect(screen.getByText("From the library")).toHaveClass("badge");
+    expect(screen.getByText(/only the admin can change it/)).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Proficiency 62%" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Study now" })).toHaveAttribute("href", "/decks/l1/study");
+    expect(screen.getByRole("link", { name: "Bones" })).toHaveAttribute("href", "/decks/l2");
+    for (const name of ["Add card", "Generate from a file", "Browse cards", "Mock exam", "Share"]) {
+      expect(screen.queryByRole("link", { name })).toBeNull();
+    }
+    for (const name of ["Rename", "Delete deck", "Add deck", "Anki package"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.queryByRole("heading", { name: "Manage" })).toBeNull();
+    // The AI panels are the owner's and stay away.
+    await waitFor(() => {
+      expect(calls.some((c) => c.path === "/decks/l1/stats")).toBe(true);
+    });
+    expect(screen.queryByRole("heading", { name: "Deck summary" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Ask your source documents" })).toBeNull();
+  });
+
+  it("says an empty library deck has no cards, without offering to add any", async () => {
+    mockApi({
+      ...me,
+      "GET /decks": { body: [libraryDeck("l1", "Anatomy")] },
+      "GET /decks/l1/stats": { body: { ...STATS, total: 0 } },
+    });
+    renderApp("/decks/l1");
+    expect(await screen.findByText("This library deck has no cards yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "import an Anki deck" })).toBeNull();
+  });
+
   it("renames a deck", async () => {
     const calls = mockApi({
       ...me,
