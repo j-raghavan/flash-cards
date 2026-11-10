@@ -22,7 +22,8 @@ describe("document chat", () => {
   it("asks with Enter, keeps Shift+Enter for new lines, and cites file and page", async () => {
     const answers: ChatAnswer[] = [
       {
-        answer: "ATP is made in the **mitochondria**. <img src=x onerror=alert(1)> [Sign in](https://evil.example/login)",
+        answer:
+          "ATP is made in the **mitochondria**. <img src=x onerror=alert(1)> [Sign in](https://evil.example/login)",
         citations: [
           { file_id: "f-a", page: 3 },
           { file_id: "f-b", page: 1, file_name: null },
@@ -64,17 +65,22 @@ describe("document chat", () => {
     expect(within(log).getByText(/Where is ATP made\?/)).toBeInTheDocument();
     expect(within(log).getByText(/AI-generated answer/)).toBeInTheDocument();
     const first = within(log).getAllByRole("list", { name: "Sources" })[0] as HTMLElement;
-    expect(within(first).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
-      "Document 1, page 3",
-      "Document 2, page 1",
-    ]);
+    expect(
+      within(first)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["Document 1, page 3", "Document 2, page 1"]);
 
     await user.type(box, "And osmosis?");
     await user.click(within(region).getByRole("button", { name: "Ask" }));
     expect(await within(log).findByText("Osmosis moves water.")).toBeInTheDocument();
     const second = within(log).getAllByRole("list", { name: "Sources" })[1] as HTMLElement;
     // A file's name is shown as text when the API knows it, cut to a bounded length.
-    expect(within(second).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+    expect(
+      within(second)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual([
       "Document 2, page 7",
       "Cell biology <b>notes</b>.pdf, page 2",
       `${"x".repeat(119)}\u2026, page 4`,

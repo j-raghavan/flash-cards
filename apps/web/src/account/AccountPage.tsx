@@ -7,7 +7,15 @@
 import { startTransition, useEffect, useId, useRef, useState, type SubmitEvent } from "react";
 import { useLocation, useNavigate } from "react-router";
 
-import { account, forgetAiNotice, legal, safeTermsUrl, sessions, type AiQuota, type DeviceSession } from "../api/account";
+import {
+  account,
+  forgetAiNotice,
+  legal,
+  safeTermsUrl,
+  sessions,
+  type AiQuota,
+  type DeviceSession,
+} from "../api/account";
 import { ApiError, NetworkError, describeError } from "../api/client";
 import { auth } from "../api/endpoints";
 import type { User } from "../api/types";
@@ -59,8 +67,7 @@ function EmailPanel({ user }: { user: User }) {
     <section className="panel" aria-labelledby="email-heading">
       <h2 id="email-heading">Email address</h2>
       <p>
-        {user.email}{" "}
-        <span className="muted">{user.email_verified ? "(confirmed)" : "(not confirmed yet)"}</span>
+        {user.email} <span className="muted">{user.email_verified ? "(confirmed)" : "(not confirmed yet)"}</span>
       </p>
       {user.email_verified ? null : (
         <>
@@ -326,8 +333,8 @@ function ExportPanel() {
     <section className="panel" aria-labelledby="export-heading">
       <h2 id="export-heading">Download your data</h2>
       <p className="muted">
-        One JSON file with your decks, notes, cards, review history, goals, mock exams, share links and settings.
-        Media is listed by id and type.
+        One JSON file with your decks, notes, cards, review history, goals, mock exams, share links and settings. Media
+        is listed by id and type.
       </p>
       <button
         type="button"
@@ -429,8 +436,8 @@ function DeleteDialog({ user, onClose }: { user: User; onClose: () => void }) {
     <Dialog title="Delete your account" onClose={close}>
       <form onSubmit={onSubmit} className="stack">
         <p>
-          This permanently deletes your account with all its decks, cards, review history, goals, media and share
-          links, and signs out every device. It cannot be undone.
+          This permanently deletes your account with all its decks, cards, review history, goals, media and share links,
+          and signs out every device. It cannot be undone.
         </p>
         <p className="muted">Download your data first if you want a copy.</p>
         <div className="field">

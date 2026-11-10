@@ -71,7 +71,11 @@ export function toInput(
     name: name.trim(),
     fields: fields.map((f) => f.name.trim()),
     templates: templates.map(({ ordinal, name: templateName, front, back }) => {
-      const sides = { name: templateName, front: renamePlaceholders(front, renamed), back: renamePlaceholders(back, renamed) };
+      const sides = {
+        name: templateName,
+        front: renamePlaceholders(front, renamed),
+        back: renamePlaceholders(back, renamed),
+      };
       return ordinal === undefined ? sides : { ordinal, ...sides };
     }),
     renamed,
@@ -225,7 +229,10 @@ function NoteTypeForm({ initial, onSaved }: { initial?: NoteTypeDef; onSaved: (s
             Add a field
           </button>
           {initial === undefined ? null : (
-            <p className="muted">Renaming a field keeps its contents and updates the card templates. Removing one deletes its contents from every note.</p>
+            <p className="muted">
+              Renaming a field keeps its contents and updates the card templates. Removing one deletes its contents from
+              every note.
+            </p>
           )}
         </fieldset>
         <fieldset>

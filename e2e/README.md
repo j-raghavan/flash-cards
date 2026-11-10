@@ -6,10 +6,10 @@ Playwright tests that drive the real web build against the real API, covering th
 
 `npx playwright test` starts two servers and stops them at the end:
 
-| Server | Command | Address |
-| --- | --- | --- |
-| API | `python -m uvicorn flashcards.api.app:app`, in-memory mode | `http://127.0.0.1:18765` |
-| Web | `npm run build && npm run preview` in `apps/web` | `http://127.0.0.1:14173` |
+| Server | Command                                                    | Address                  |
+| ------ | ---------------------------------------------------------- | ------------------------ |
+| API    | `python -m uvicorn flashcards.api.app:app`, in-memory mode | `http://127.0.0.1:18765` |
+| Web    | `npm run build && npm run preview` in `apps/web`           | `http://127.0.0.1:14173` |
 
 The preview server's `/api` proxy forwards to the API, so the browser sees one origin, as in production. The API runs with:
 
@@ -22,13 +22,13 @@ The API's log is written to `e2e/.run/api.log`. Tests read emails (password rese
 
 ## Journeys
 
-| Spec | Covers |
-| --- | --- |
-| `core-journey.spec.ts` | An admin invites a member; the member signs up in the browser, skips the guided first run, creates a deck and a card, uploads a five-page PDF, watches live progress (Server-Sent Events) to the end, approves the drafts, studies with the keyboard (Space, 1 to 4) and undoes an answer, then shares the deck; a second user previews and copies it |
-| `password-reset.spec.ts` | Forgot password, the emailed link, the new password works, the old one and a reused link do not |
-| `card-browser.spec.ts` | Tag filter in the card browser, then a bulk suspend of the matches |
-| `offline-review.spec.ts` | Answer with the browser offline, reconnect, and the review is recorded exactly once |
-| `account-export.spec.ts` | Download my data from the account page, and the file's contents |
+| Spec                     | Covers                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core-journey.spec.ts`   | An admin invites a member; the member signs up in the browser, skips the guided first run, creates a deck and a card, uploads a five-page PDF, watches live progress (Server-Sent Events) to the end, approves the drafts, studies with the keyboard (Space, 1 to 4) and undoes an answer, then shares the deck; a second user previews and copies it |
+| `password-reset.spec.ts` | Forgot password, the emailed link, the new password works, the old one and a reused link do not                                                                                                                                                                                                                                                       |
+| `card-browser.spec.ts`   | Tag filter in the card browser, then a bulk suspend of the matches                                                                                                                                                                                                                                                                                    |
+| `offline-review.spec.ts` | Answer with the browser offline, reconnect, and the review is recorded exactly once                                                                                                                                                                                                                                                                   |
+| `account-export.spec.ts` | Download my data from the account page, and the file's contents                                                                                                                                                                                                                                                                                       |
 
 Every test signs up its own users, so tests are independent and run in parallel.
 

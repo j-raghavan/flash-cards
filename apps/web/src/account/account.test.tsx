@@ -25,7 +25,13 @@ const PHONE: DeviceSession = {
   device: "Safari on iPhone",
   current: false,
 };
-const QUOTA: AiQuota = { period: "2026-11", monthly_pages: 200, used_pages: 37, max_document_pages: 300, quota_applies: true };
+const QUOTA: AiQuota = {
+  period: "2026-11",
+  monthly_pages: 200,
+  used_pages: 37,
+  max_document_pages: 300,
+  quota_applies: true,
+};
 const DISCLOSURE: AiDisclosure = {
   ai_enabled: true,
   trains_on_user_content: false,
@@ -168,7 +174,11 @@ describe("signed-in devices", () => {
 
 describe("AI quota", () => {
   it("says calmly when the month's pages are used up", async () => {
-    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 1, used_pages: 3, max_document_pages: 300, quota_applies: true } } });
+    accountApi({
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 1, used_pages: 3, max_document_pages: 300, quota_applies: true },
+      },
+    });
     await openAccount();
     expect(await screen.findByText(/You have used all 1 page for/)).toHaveTextContent(
       "The allowance renews at the start of next month.",
@@ -177,14 +187,22 @@ describe("AI quota", () => {
   });
 
   it("says when AI generation is not included, with one page left otherwise", async () => {
-    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 0, used_pages: 0, max_document_pages: 300, quota_applies: true } } });
+    accountApi({
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 0, used_pages: 0, max_document_pages: 300, quota_applies: true },
+      },
+    });
     await openAccount();
     expect(await screen.findByText(/AI generation is not included in your account/)).toBeInTheDocument();
     expect(screen.queryByRole("meter")).toBeNull();
   });
 
   it("uses the singular for one page left", async () => {
-    accountApi({ "GET /account/ai-quota": { body: { period: "2026-11", monthly_pages: 2, used_pages: 1, max_document_pages: 300, quota_applies: true } } });
+    accountApi({
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: 2, used_pages: 1, max_document_pages: 300, quota_applies: true },
+      },
+    });
     await openAccount();
     expect(await screen.findByText(/You have used 1 of 2 pages/)).toHaveTextContent("so 1 page are left");
   });
@@ -228,7 +246,12 @@ describe("AI data-use disclosure", () => {
   it("shows no provider when AI is off", async () => {
     accountApi({
       "GET /legal/ai-disclosure": {
-        body: { ai_enabled: false, trains_on_user_content: false, statements: ["AI features are off."], provider: null },
+        body: {
+          ai_enabled: false,
+          trains_on_user_content: false,
+          statements: ["AI features are off."],
+          provider: null,
+        },
       },
     });
     await openAccount();
@@ -266,7 +289,10 @@ describe("email confirmation", () => {
 
   it("sends the link again, then waits out the cooldown", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const calls = accountApi({ "GET /auth/me": { body: unverified }, "POST /auth/verify-email/resend": { status: 202 } });
+    const calls = accountApi({
+      "GET /auth/me": { body: unverified },
+      "POST /auth/verify-email/resend": { status: 202 },
+    });
     await openAccount();
     const email = panel("Email address");
     expect(email).toHaveTextContent("(not confirmed yet)");
@@ -297,13 +323,16 @@ describe("data export", () => {
   function stubDownloads(): { click: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn>; blobs: Blob[] } {
     const blobs: Blob[] = [];
     const revoke = vi.fn();
-    vi.stubGlobal("URL", Object.assign(URL, {
-      createObjectURL: vi.fn((blob: Blob) => {
-        blobs.push(blob);
-        return "blob:export";
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, {
+        createObjectURL: vi.fn((blob: Blob) => {
+          blobs.push(blob);
+          return "blob:export";
+        }),
+        revokeObjectURL: revoke,
       }),
-      revokeObjectURL: revoke,
-    }));
+    );
     const click = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(click);
     return { click, revoke, blobs };
@@ -417,7 +446,9 @@ describe("account deletion", () => {
     const user = await openDialog();
     await user.type(screen.getByLabelText("Type your email address to confirm"), USER.email);
     await user.click(screen.getByRole("button", { name: "Delete my account permanently" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server, so the account may not be deleted.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not reach the server, so the account may not be deleted.",
+    );
     expect(screen.getByRole("heading", { name: "Account", level: 1 })).toBeInTheDocument();
   });
 
@@ -527,9 +558,7 @@ describe("AI notice on the generate page", () => {
     Element.prototype.scrollIntoView = scroll;
     accountApi();
     renderApp("/decks/d1/generate");
-    await userEvent
-      .setup()
-      .click(await screen.findByRole("link", { name: "Read the full AI data-use notice" }));
+    await userEvent.setup().click(await screen.findByRole("link", { name: "Read the full AI data-use notice" }));
     expect(await screen.findByRole("heading", { name: "Account", level: 1 })).toBeInTheDocument();
     await waitFor(() => {
       expect(scroll).toHaveBeenCalledTimes(1);
@@ -546,7 +575,12 @@ describe("AI notice on the generate page", () => {
   it("repeats the server's statements when AI is off, and warns when content may be used for training", async () => {
     mockApi(
       generateRoutes({
-        body: { ai_enabled: false, trains_on_user_content: false, statements: ["AI is off.", "Nothing is sent."], provider: null },
+        body: {
+          ai_enabled: false,
+          trains_on_user_content: false,
+          statements: ["AI is off.", "Nothing is sent."],
+          provider: null,
+        },
       }),
     );
     const view = renderApp("/decks/d1/generate");

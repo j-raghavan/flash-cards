@@ -66,7 +66,9 @@ describe("charts", () => {
   });
 
   it("draws a single week in the middle and says when a range holds nothing", () => {
-    const { container } = render(<RetentionCurve points={[{ week_start: "2026-11-02", reviews: 1, recalled: 1, rate: 1 }]} />);
+    const { container } = render(
+      <RetentionCurve points={[{ week_start: "2026-11-02", reviews: 1, recalled: 1, rate: 1 }]} />,
+    );
     expect(container.querySelector("circle")?.getAttribute("cx")).toBe("314");
     expect(screen.getByText("Recall rate over 1 week, most recently 100%.")).toBeInTheDocument();
     render(

@@ -166,7 +166,10 @@ describe("edit card", () => {
     expect(await screen.findByLabelText("Header")).toHaveValue("Heart");
     expect(screen.getByLabelText("Back extra")).toHaveValue("");
     expect(screen.queryByLabelText("Front")).not.toBeInTheDocument();
-    expect(await screen.findByRole("img", { name: "The image to hide parts of" })).toHaveAttribute("src", "/api/media/m1");
+    expect(await screen.findByRole("img", { name: "The image to hide parts of" })).toHaveAttribute(
+      "src",
+      "/api/media/m1",
+    );
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
     expect(second.find((c) => c.method === "PATCH")?.body).toEqual({

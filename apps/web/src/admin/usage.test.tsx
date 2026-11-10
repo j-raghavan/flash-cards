@@ -36,7 +36,14 @@ const REPORT: UsageReport = {
   spend_cap_micro_usd: 50_000_000,
   by_user: [usage("u2", 2_500_000, 1000, 12), usage("a1", 10_004_200, 1000, 1234), usage("gone", 0)],
   by_provider: [
-    { provider: "anthropic", model: "claude-sonnet", calls: 5, input_tokens: 3000, output_tokens: 1500, cost_micro_usd: 12_504_200 },
+    {
+      provider: "anthropic",
+      model: "claude-sonnet",
+      calls: 5,
+      input_tokens: 3000,
+      output_tokens: 1500,
+      cost_micro_usd: 12_504_200,
+    },
   ],
 };
 
@@ -87,16 +94,18 @@ describe("usage report", () => {
     expect(within(totals).getByText("$50.00")).toBeInTheDocument();
     expect(within(totals).getByText("1,500")).toBeInTheDocument();
     // AI pages this month, summed over users.
-    expect(within(within(totals).getByText("AI pages").parentElement as HTMLElement).getByText("1,246")).toBeInTheDocument();
+    expect(
+      within(within(totals).getByText("AI pages").parentElement as HTMLElement).getByText("1,246"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Prices are not configured.")).not.toBeInTheDocument();
 
     const byUser = screen.getByRole("table", { name: "Usage by user" });
     await waitFor(() => {
-      expect(within(byUser).getAllByRole("rowheader").map((c) => c.textContent)).toEqual([
-        "root@example.com",
-        "bob@example.com",
-        "Deleted account gone",
-      ]);
+      expect(
+        within(byUser)
+          .getAllByRole("rowheader")
+          .map((c) => c.textContent),
+      ).toEqual(["root@example.com", "bob@example.com", "Deleted account gone"]);
     });
     expect(within(byUser).getByText("$2.50")).toBeInTheDocument();
     // Each user's AI pages sit in their own column.
@@ -124,7 +133,9 @@ describe("usage report", () => {
       cost_micro_usd: 0,
       spend_cap_micro_usd: null,
       by_user: [usage("u2", 0, 4000)],
-      by_provider: [{ provider: "openai", model: "local", calls: 2, input_tokens: 4000, output_tokens: 2000, cost_micro_usd: 0 }],
+      by_provider: [
+        { provider: "openai", model: "local", calls: 2, input_tokens: 4000, output_tokens: 2000, cost_micro_usd: 0 },
+      ],
     };
     mockApi({ ...asAdmin, "GET /admin/users": { status: 500 }, "GET /admin/usage": { body: unpriced } });
     renderApp("/admin");
@@ -139,7 +150,9 @@ describe("usage report", () => {
   it("draws at most the top bars, the table keeps every row", async () => {
     const many: UsageReport = {
       ...REPORT,
-      by_user: Array.from({ length: CHART_BARS + 2 }, (_, n) => usage(`user-with-a-very-long-identifier-${String(n)}`, Math.floor(n / 2) + 1)),
+      by_user: Array.from({ length: CHART_BARS + 2 }, (_, n) =>
+        usage(`user-with-a-very-long-identifier-${String(n)}`, Math.floor(n / 2) + 1),
+      ),
       by_provider: [],
     };
     mockApi({ ...asAdmin, "GET /admin/users": { body: [] }, "GET /admin/usage": { body: many } });
@@ -158,7 +171,13 @@ describe("usage report", () => {
       ...asAdmin,
       "GET /admin/users": { body: USERS },
       "GET /admin/usage": (call) => ({
-        body: { ...REPORT, period: new URLSearchParams(call.path.split("?")[1]).get("period"), by_user: [], by_provider: [], cost_micro_usd: 0 },
+        body: {
+          ...REPORT,
+          period: new URLSearchParams(call.path.split("?")[1]).get("period"),
+          by_user: [],
+          by_provider: [],
+          cost_micro_usd: 0,
+        },
       }),
     });
     renderApp("/admin");

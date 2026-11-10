@@ -48,7 +48,12 @@ describe("note types", () => {
   it("lists note types and creates one with fields, templates and a preview", async () => {
     const calls = mockApi({
       ...me,
-      "GET /note-types": { body: [VOCAB, { ...VOCAB, id: "nt2", name: "One", fields: ["A"], templates: [VOCAB.templates[0], VOCAB.templates[0]] }] },
+      "GET /note-types": {
+        body: [
+          VOCAB,
+          { ...VOCAB, id: "nt2", name: "One", fields: ["A"], templates: [VOCAB.templates[0], VOCAB.templates[0]] },
+        ],
+      },
       "POST /note-types": { status: 201, body: { ...VOCAB, id: "nt3", name: "Capitals" } },
       "GET /note-types/nt3": { body: { ...VOCAB, id: "nt3", name: "Capitals" } },
     });
@@ -166,7 +171,12 @@ describe("note types", () => {
     const many = {
       ...VOCAB,
       fields: Array.from({ length: 64 }, (_, i) => `F${String(i)}`),
-      templates: Array.from({ length: 16 }, (_, i) => ({ ordinal: i, name: `C${String(i)}`, front: "{{F0}}", back: "" })),
+      templates: Array.from({ length: 16 }, (_, i) => ({
+        ordinal: i,
+        name: `C${String(i)}`,
+        front: "{{F0}}",
+        back: "",
+      })),
     };
     mockApi({ ...me, "GET /note-types/nt1": { body: many } });
     renderApp("/note-types/nt1");

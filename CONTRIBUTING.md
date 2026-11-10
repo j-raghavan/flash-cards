@@ -8,7 +8,7 @@ Thanks for helping. Please read [docs/PRD.md](docs/PRD.md) first.
 2. Branch from `main`; keep pull requests small and focused.
 3. Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`).
 4. Record non-trivial design choices as an ADR in `docs/adr/`.
-5. All checks must pass: lint, type-check, tests, secret scan.
+5. All checks must pass: formatting, lint, type-check, tests, secret scan.
 
 ## Licence and CLA
 
@@ -26,6 +26,7 @@ Read [docs/ENGINEERING.md](docs/ENGINEERING.md). In short:
 - Treat uploaded files and model output as untrusted input.
 - **Coverage must stay at or above 97%** (lines and branches), including failure and authorization paths.
 - CI runs ruff, mypy `--strict`, import-linter and pytest; all must pass.
+- The web app and the end-to-end suite are formatted with Prettier: run `npm run format` in `apps/web` or `e2e`. CI runs `npm run format:check`.
 
 ## Security
 

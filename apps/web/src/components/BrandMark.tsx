@@ -13,7 +13,16 @@ export function BrandMark({ size = 28 }: { size?: number }) {
         </linearGradient>
       </defs>
       <rect width="32" height="32" rx="9" fill="url(#brand-mark-fill)" />
-      <rect x="10" y="7" width="15" height="11" rx="2.5" fill="#ffffff" opacity="0.55" transform="rotate(8 17.5 12.5)" />
+      <rect
+        x="10"
+        y="7"
+        width="15"
+        height="11"
+        rx="2.5"
+        fill="#ffffff"
+        opacity="0.55"
+        transform="rotate(8 17.5 12.5)"
+      />
       <rect x="7" y="12" width="16" height="12" rx="2.5" fill="#ffffff" />
       <rect x="10" y="16" width="9" height="1.8" rx="0.9" fill="#0f766e" />
       <rect x="10" y="19.5" width="6" height="1.8" rx="0.9" fill="#0f766e" opacity="0.6" />

@@ -53,7 +53,9 @@ function linkStatus(link: ShareLink, now: number): string {
   if (link.expires_at === null) {
     return "Active, never expires";
   }
-  return isExpired(link, now) ? `Expired ${formatDate(link.expires_at)}` : `Active until ${formatDate(link.expires_at)}`;
+  return isExpired(link, now)
+    ? `Expired ${formatDate(link.expires_at)}`
+    : `Active until ${formatDate(link.expires_at)}`;
 }
 
 function NewLink({ link }: { link: CreatedShareLink }) {

@@ -219,7 +219,14 @@ describe("shared deck page", () => {
     mockApi({
       ...me,
       "GET /shared/abc": {
-        body: { ...SHARED, decks: [{ name: "Solo", depth: 0 }], deck_count: 1, notes: [], note_count: 0, allow_clone: false },
+        body: {
+          ...SHARED,
+          decks: [{ name: "Solo", depth: 0 }],
+          deck_count: 1,
+          notes: [],
+          note_count: 0,
+          allow_clone: false,
+        },
       },
     });
     renderApp("/shared#token=abc");

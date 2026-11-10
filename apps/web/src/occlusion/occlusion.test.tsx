@@ -145,7 +145,13 @@ describe("occlusion editor", () => {
   });
 
   it("stops at the mask limit", () => {
-    const masks = Array.from({ length: MAX_MASKS }, (_, i) => ({ id: i + 1, left: 0, top: 0, width: 0.1, height: 0.1 }));
+    const masks = Array.from({ length: MAX_MASKS }, (_, i) => ({
+      id: i + 1,
+      left: 0,
+      top: 0,
+      width: 0.1,
+      height: 0.1,
+    }));
     render(<Harness initial={{ image_id: "m1", masks }} />);
     expect(screen.getByRole("button", { name: "Add a mask" })).toBeDisabled();
     expect(screen.getByText(/At most 100 masks/)).toBeInTheDocument();

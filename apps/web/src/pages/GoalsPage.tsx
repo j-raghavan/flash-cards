@@ -126,9 +126,7 @@ function GoalForm({
                   type="checkbox"
                   checked={chosen.includes(option.id)}
                   onChange={(event) => {
-                    setChosen(
-                      event.target.checked ? [...chosen, option.id] : chosen.filter((id) => id !== option.id),
-                    );
+                    setChosen(event.target.checked ? [...chosen, option.id] : chosen.filter((id) => id !== option.id));
                   }}
                 />
                 {option.label}
@@ -165,8 +163,8 @@ function GoalForm({
           }}
         />
         <small id="goal-grade-hint" className="muted">
-          Reviews are scheduled to keep about {retentionForGrade(grade)}% of cards in memory. Higher means more
-          reviews a day.
+          Reviews are scheduled to keep about {retentionForGrade(grade)}% of cards in memory. Higher means more reviews
+          a day.
         </small>
       </div>
       <ErrorText message={submit.error} />
@@ -233,8 +231,8 @@ function PlanPanel({ plan }: { plan: StudyPlan }) {
     <>
       <h2>Today's plan</h2>
       <p className="lead">
-        Study {plan.new_per_day} new card{plan.new_per_day === 1 ? "" : "s"} and about {plan.reviews_per_day}{" "}
-        review{plan.reviews_per_day === 1 ? "" : "s"} a day.
+        Study {plan.new_per_day} new card{plan.new_per_day === 1 ? "" : "s"} and about {plan.reviews_per_day} review
+        {plan.reviews_per_day === 1 ? "" : "s"} a day.
       </p>
       <h2>Readiness</h2>
       <div className="stats">

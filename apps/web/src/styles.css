@@ -98,8 +98,7 @@ body {
   -webkit-font-smoothing: antialiased;
   background:
     radial-gradient(900px 420px at 8% -8%, var(--glow-1), transparent 70%),
-    radial-gradient(800px 420px at 100% 0%, var(--glow-2), transparent 70%),
-    var(--bg);
+    radial-gradient(800px 420px at 100% 0%, var(--glow-2), transparent 70%), var(--bg);
   background-attachment: fixed;
 }
 

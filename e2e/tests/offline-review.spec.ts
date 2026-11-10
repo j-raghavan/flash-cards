@@ -25,9 +25,7 @@ test("an answer given offline syncs once when the connection returns", async ({ 
   // emulation, so it still reaches the server.
   expect((await member.api.exportAccount()).review_logs).toHaveLength(0);
 
-  const synced = page.waitForResponse(
-    (r) => r.url().endsWith("/review") && r.request().method() === "POST" && r.ok(),
-  );
+  const synced = page.waitForResponse((r) => r.url().endsWith("/review") && r.request().method() === "POST" && r.ok());
   await context.setOffline(false);
   await synced;
   await expect(banner).toHaveCount(0);

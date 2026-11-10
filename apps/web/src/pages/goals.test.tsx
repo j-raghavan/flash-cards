@@ -108,9 +108,7 @@ describe("goals", () => {
       "GET /goals/g1": { body: GOAL },
       "GET /decks": { body: [deck("d1", "Biology")] },
       "GET /goals/g1/plan": () => ({
-        body: accepted
-          ? { ...PLAN, changes: { ...changes, changed: false } }
-          : { ...PLAN, on_track: false, changes },
+        body: accepted ? { ...PLAN, changes: { ...changes, changed: false } } : { ...PLAN, on_track: false, changes },
       }),
       "POST /goals/g1/plan/accept": () => {
         accepted = true;
@@ -174,7 +172,14 @@ describe("goals", () => {
           ...PLAN,
           new_per_day: 1,
           reviews_per_day: 1,
-          changes: { since: "2026-11-01T10:00:00Z", changed: true, daily_load_before: 1, daily_load_after: 2, before: PLAN, reasons: [] },
+          changes: {
+            since: "2026-11-01T10:00:00Z",
+            changed: true,
+            daily_load_before: 1,
+            daily_load_after: 2,
+            before: PLAN,
+            reasons: [],
+          },
         },
       },
       "POST /goals/g1/plan/accept": { status: 500 },

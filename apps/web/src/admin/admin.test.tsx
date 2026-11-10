@@ -20,7 +20,10 @@ const account = (id: string, email: string, over: Partial<AdminUser> = {}): Admi
   ...over,
 });
 
-const USERS = [account("a1", "root@example.com", { role: "admin" }), account("u2", "bob@example.com", { email_verified: false })];
+const USERS = [
+  account("a1", "root@example.com", { role: "admin" }),
+  account("u2", "bob@example.com", { email_verified: false }),
+];
 
 const invite = (id: string, over: Partial<Invite> = {}): Invite => ({
   id,
@@ -73,7 +76,11 @@ describe("admin console", () => {
     const own = (await screen.findByText("root@example.com")).closest("tr") as HTMLElement;
     expect(within(own).getByText("(you)")).toBeInTheDocument();
     expect(within(own).getByRole("combobox")).toBeDisabled();
-    expect(within(own).getAllByRole("button").map((b) => b.textContent)).toEqual(["AI quota"]);
+    expect(
+      within(own)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["AI quota"]);
     expect(screen.getByText("Active, email not confirmed")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Role of bob@example.com"), "admin");
@@ -152,7 +159,10 @@ describe("admin console", () => {
       ...asAdmin,
       "GET /admin/users": { body: USERS },
       "GET /admin/invites": () => ({ body: list }),
-      "POST /admin/invites": { status: 201, body: { id: "i2", token: "tok", role: "member", email: null, expires_at: "2026-11-15T00:00:00Z" } },
+      "POST /admin/invites": {
+        status: 201,
+        body: { id: "i2", token: "tok", role: "member", email: null, expires_at: "2026-11-15T00:00:00Z" },
+      },
       "POST /admin/invites/i1/revoke": () => {
         list = [invite("i1", { status: "revoked" }), invite("i0", { status: "redeemed" })];
         return { status: 204 };
@@ -196,11 +206,26 @@ describe("admin console", () => {
     const calls = mockApi({
       ...asAdmin,
       "GET /admin/users": { body: USERS },
-      "GET /admin/invites": { body: [invite("i1", { email: "new@example.com" }), invite("i2"), invite("i3", { email: "x@example.com", status: "expired" })] },
-      "POST /admin/invites/i1/resend": {
-        body: { id: "i1", token: "fresh", role: "member", email: "new@example.com", expires_at: "2026-11-08T00:00:00Z" },
+      "GET /admin/invites": {
+        body: [
+          invite("i1", { email: "new@example.com" }),
+          invite("i2"),
+          invite("i3", { email: "x@example.com", status: "expired" }),
+        ],
       },
-      "POST /admin/invites": { status: 201, body: { id: "i4", token: "tok", role: "member", email: null, expires_at: "2026-11-15T00:00:00Z" } },
+      "POST /admin/invites/i1/resend": {
+        body: {
+          id: "i1",
+          token: "fresh",
+          role: "member",
+          email: "new@example.com",
+          expires_at: "2026-11-08T00:00:00Z",
+        },
+      },
+      "POST /admin/invites": {
+        status: 201,
+        body: { id: "i4", token: "tok", role: "member", email: null, expires_at: "2026-11-15T00:00:00Z" },
+      },
       "POST /admin/invites/i1/revoke": { status: 204 },
       "POST /admin/invites/i2/revoke": { status: 204 },
     });
@@ -258,7 +283,9 @@ describe("admin console", () => {
     await user.click(await screen.findByRole("tab", { name: "Invites" }));
     await user.click(await screen.findByRole("button", { name: "Resend" }));
     await user.click(screen.getByRole("button", { name: "Resend invite" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("This invite has no email address; share its link instead.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This invite has no email address; share its link instead.",
+    );
     expect(screen.queryByRole("textbox", { name: "New invite link" })).not.toBeInTheDocument();
   });
 

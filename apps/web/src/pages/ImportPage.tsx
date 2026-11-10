@@ -78,7 +78,9 @@ function Report({ report, preview }: { report: FullImportReport; preview: boolea
             {unsupported.map((item) => (
               <li key={item.kind}>
                 {UNSUPPORTED[item.kind]}: {item.count}
-                {item.examples.length > 0 ? <span className="muted"> (for example {item.examples.join(", ")})</span> : null}
+                {item.examples.length > 0 ? (
+                  <span className="muted"> (for example {item.examples.join(", ")})</span>
+                ) : null}
               </li>
             ))}
           </ul>

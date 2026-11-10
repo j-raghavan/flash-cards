@@ -73,13 +73,15 @@ describe("legal pages", () => {
     expect(await screen.findByRole("link", { name: "terms of use" })).toBeInTheDocument();
     invite.unmount();
 
-    mockApi({ "GET /auth/me": { body: USER }, "GET /decks": { body: [{ id: "d1", name: "Bio", parent_id: null, created_at: "2026-01-01T00:00:00Z" }] } });
+    mockApi({
+      "GET /auth/me": { body: USER },
+      "GET /decks": { body: [{ id: "d1", name: "Bio", parent_id: null, created_at: "2026-01-01T00:00:00Z" }] },
+    });
     renderApp("/");
     expect(await screen.findByRole("link", { name: "Bio" })).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Legal" })).getByRole("link", { name: "Privacy" })).toHaveAttribute(
-      "href",
-      "/privacy",
-    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Legal" })).getByRole("link", { name: "Privacy" }),
+    ).toHaveAttribute("href", "/privacy");
   });
 });
 

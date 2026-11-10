@@ -68,7 +68,9 @@ export function SecondFactorStep({
 
   let codeLabel = "Recovery code";
   if (hasTotp) {
-    codeLabel = hasRecovery ? "Code from your authenticator app, or a recovery code" : "Code from your authenticator app";
+    codeLabel = hasRecovery
+      ? "Code from your authenticator app, or a recovery code"
+      : "Code from your authenticator app";
   }
 
   return (

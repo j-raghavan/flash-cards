@@ -135,15 +135,7 @@ export interface BrowserQuery {
 }
 
 export type BulkAction =
-  | "move"
-  | "delete"
-  | "add_tags"
-  | "remove_tags"
-  | "suspend"
-  | "unsuspend"
-  | "bury"
-  | "unbury"
-  | "flag";
+  "move" | "delete" | "add_tags" | "remove_tags" | "suspend" | "unsuspend" | "bury" | "unbury" | "flag";
 
 export interface BulkRequest {
   card_ids: string[];
