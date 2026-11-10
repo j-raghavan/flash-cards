@@ -35,7 +35,10 @@ services:
       POSTGRES_USER: flashcards
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # A named volume by default. Set FLASHCARDS_PGDATA in .env to a host
+      # directory (e.g. /volume1/docker/flash-cards/pgdata on a Synology) to keep
+      # the data where host backups can see it.
+      - ${FLASHCARDS_PGDATA:-pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U flashcards -d flashcards"]
       interval: 5s
@@ -43,6 +46,25 @@ services:
       retries: 12
       start_period: 10s
     # No published port: only services on the backend network reach Postgres.
+    networks: [backend]
+
+  # Scheduled database backups (deploy/compose/backup.sh): a verified pg_dump
+  # every FLASHCARDS_BACKUP_INTERVAL_HOURS into FLASHCARDS_BACKUP_DIR, keeping
+  # the newest FLASHCARDS_BACKUP_KEEP. upgrade.sh also takes one before upgrading.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_KEEP: ${FLASHCARDS_BACKUP_KEEP:-14}
+      BACKUP_INTERVAL_HOURS: ${FLASHCARDS_BACKUP_INTERVAL_HOURS:-24}
+    volumes:
+      - ./backup.sh:/usr/local/bin/backup.sh:ro
+      - ${FLASHCARDS_BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
     networks: [backend]
 
   # Applies Alembic migrations, then exits. The API starts only after it succeeds,

@@ -34,3 +34,6 @@ coverage/
 
 # Personal Claude Code settings (not shared)
 .claude/settings.local.json
+
+# Compose stack database backups (deploy/compose/backup.sh)
+deploy/compose/backups/

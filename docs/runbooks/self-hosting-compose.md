@@ -11,20 +11,24 @@ Everything lives in `deploy/compose/`:
 | `compose.yaml` | The stack definition |
 | `.env.example` | Template for `.env`, documenting every setting in `apps/api/src/flashcards/config.py` |
 | `Caddyfile` | Configuration for the optional HTTPS proxy |
+| `upgrade.sh` | First start and upgrades: backup, build, migrate, wait for health |
+| `backup.sh` | Verified `pg_dump` backups with retention, run by the `backup` service |
+| `restore.sh` | Restores the database from one of those backups |
 
 The web service's own configuration is `apps/web/Caddyfile`, baked into its image by `apps/web/Dockerfile`.
 
 | Service | Role |
 |---|---|
-| `db` | Postgres 16 with the named volume `pgdata` and a `pg_isready` healthcheck. No host port is published. |
+| `db` | Postgres 16 with a `pg_isready` healthcheck. Its data is in the named volume `pgdata`, or in a host directory when `FLASHCARDS_PGDATA` is set. No host port is published. |
+| `backup` | Takes a verified database backup at start and every `FLASHCARDS_BACKUP_INTERVAL_HOURS` (default 24), keeping the newest `FLASHCARDS_BACKUP_KEEP` (default 14) in `FLASHCARDS_BACKUP_DIR` (default `deploy/compose/backups`). |
 | `migrate` | One-shot job running `alembic upgrade head`. It starts once `db` is healthy and must exit successfully before `api` starts. |
 | `api` | The API image built from `apps/api/Dockerfile`, running as a non-root user, with a `/healthz` healthcheck. No host port is published; it is reached through `web`. |
 | `web` | The web app and the site's entry point: a Caddy image (`apps/web/Dockerfile`) that serves the built app and forwards `/api/*` to `api`. It is published on `127.0.0.1:8000` only, over plain HTTP, and runs unprivileged with a read-only root file system. |
 | `proxy` | Optional (profile `proxy`). Caddy, which obtains and renews a TLS certificate for `FLASHCARDS_DOMAIN` and forwards everything to `web`. |
 
-`db` and `migrate` sit on a `backend` network, which is internal (no route to the internet). `api` joins both `backend` and `frontend`; `web` and `proxy` join only `frontend`, so neither reaches Postgres.
+`db`, `backup` and `migrate` sit on a `backend` network, which is internal (no route to the internet). `api` joins both `backend` and `frontend`; `web` and `proxy` join only `frontend`, so neither reaches Postgres.
 
-All persistent data, including uploaded media and AI source documents, is stored in Postgres. The `pgdata` volume is the only state that needs backing up; the `caddy_data` volume holds certificates, which Caddy can obtain again.
+All persistent data, including uploaded media and AI source documents, is stored in Postgres, so the database is the only state that needs backing up; the `caddy_data` volume holds certificates, which Caddy can obtain again. The `backup` service writes database backups to `FLASHCARDS_BACKUP_DIR`. Copy that directory and `.env` off the host (see [Backups](#backups)).
 
 ## First boot
 
@@ -155,12 +159,17 @@ In this in-memory development mode the API logs an admin invite token at startup
 
 ```sh
 git pull
-cd deploy/compose
-docker compose build
-docker compose up -d --wait          # add --profile proxy if used
+./deploy/compose/upgrade.sh
 ```
 
-`migrate` runs again on every `up` and applies any new migrations before the new `api` container starts. If it fails, the old `api` container is not replaced; `docker compose logs migrate` shows why. Take a backup before upgrading across releases that add migrations (`apps/api/migrations/versions/`). Migrations are forward-only in practice, so the backup is the rollback path.
+`upgrade.sh` does the whole upgrade, and the first start too:
+
+1. If the stack is running, it takes a verified backup and stops if the backup fails.
+2. It builds the images from the current source.
+3. It starts the stack. `migrate` applies any new migrations before the new `api` container starts; if a migration fails, the old `api` container is not replaced, and the script prints the `migrate` and `api` logs.
+4. It waits until the API reports healthy (`WAIT_SECONDS`, default 300).
+
+Migrations are forward-only in practice, so the backup taken in step 1 is the rollback path: check out the previous release and restore it (see [Restore](#restore)). Set `COMPOSE` (and `DOCKER`) when the commands differ, for example `COMPOSE="sudo docker-compose" DOCKER="sudo docker"`. With the `proxy` profile, set `COMPOSE_PROFILES=proxy` in `.env` so every command includes it.
 
 To update the base images (Postgres minor releases, Caddy):
 
@@ -173,11 +182,15 @@ Postgres major upgrades (16 to 17) need a dump and restore into a fresh volume; 
 
 ## Backups
 
-Back up the database with `pg_dump` in the custom format. It is consistent while the API keeps running:
+The `backup` service backs the database up automatically: once when it starts, then every `FLASHCARDS_BACKUP_INTERVAL_HOURS` (default 24). Each backup is a `pg_dump` in the custom format, consistent while the API keeps running. It is written to a temporary file, checked with `pg_restore --list`, and only then renamed to `flashcards-YYYYMMDD-HHMMSS.dump`, so a failed or truncated dump never replaces a good one. The newest `FLASHCARDS_BACKUP_KEEP` (default 14) are kept and older ones deleted. Files are readable by their owner only. `docker compose logs backup` shows each run.
+
+To take one now:
 
 ```sh
-docker compose exec -T db pg_dump -U flashcards -d flashcards -Fc > "flashcards-$(date +%F).dump"
+docker compose exec -T backup /bin/sh /usr/local/bin/backup.sh once
 ```
+
+Backups on the same disk do not survive the loss of that disk. Copy `FLASHCARDS_BACKUP_DIR` and `.env` to another machine or to off-site storage on a schedule (for example with the host's backup tool). Keep `.env` with them: it holds `POSTGRES_PASSWORD` and `FLASHCARDS_TOTP_ENCRYPTION_KEYS`.
 
 Backups contain everything the instance holds: email addresses, Argon2 password hashes, hashed session and invite tokens, decks, uploaded documents and media, and the audit log. Store them encrypted and with restricted access. A backup still holds the data of accounts deleted after it was taken, so expire backups on a fixed schedule that matches the instance's deletion promise to its users.
 
@@ -186,12 +199,10 @@ Restoring into a fresh stack is the only reliable test of a backup. Do one after
 ## Restore
 
 ```sh
-docker compose stop api
-docker compose exec -T db dropdb -U flashcards flashcards
-docker compose exec -T db createdb -U flashcards flashcards
-docker compose exec -T db pg_restore -U flashcards -d flashcards --no-owner < flashcards-YYYY-MM-DD.dump
-docker compose up -d --wait
+./deploy/compose/restore.sh --yes deploy/compose/backups/flashcards-YYYYMMDD-HHMMSS.dump
 ```
+
+The script replaces the whole database with the backup. It stops `api`, `web` and `backup`, restores into the running database (dropping and recreating every object), and starts the stack again. It works on a fresh, empty database too, for example on a new host or after the data directory was lost. Take a backup first if the current data might still be needed. Without `--yes` it does nothing.
 
 `migrate` runs on `up` and brings a dump taken on an older release up to the current schema. Every session in the dump is restored with it; to force everyone to sign in again, revoke sessions after the restore (for example `UPDATE sessions SET revoked_at = now() WHERE revoked_at IS NULL;` in `psql`).
 
@@ -272,6 +283,7 @@ and `order rate_limit before reverse_proxy` in the global options block.
 ## Troubleshooting
 
 - **`migrate` exits non-zero:** `docker compose logs migrate`. A wrong `POSTGRES_PASSWORD` after the volume was first created is the usual cause: Postgres keeps the password from the first boot. Either restore the original value or change the role's password in `psql`.
+- **The API restarts in a loop with exit code 132 and no log output on an Apple Silicon Mac:** OpenSSL's CPU feature detection hits an unsupported instruction inside Docker's Linux VM on recent Apple chips. Add `OPENSSL_armcap=0` to `.env`. Intel and AMD hosts are unaffected.
 - **Sign-in succeeds but the next request is `401`:** the cookie is `Secure` and the site is being reached over plain HTTP.
 - **Emails not arriving:** without `FLASHCARDS_SMTP_HOST` no mail is sent, and the API logs `did not send: <subject>`. Send failures are logged as `could not send email`.
 - **AI features fail:** no provider is configured, or it is unreachable. Synchronous AI requests (grading, summaries, mock exams, chat) return `503`; generation jobs end in the `failed` state with an error on the job. The startup log says when no provider is configured.
