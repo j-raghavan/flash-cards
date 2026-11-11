@@ -175,12 +175,11 @@ export function DeckReaderPage() {
             <button
               type="button"
               className="button"
-              aria-pressed={!revealed}
               onClick={() => {
                 setRevealed((shown) => !shown);
               }}
             >
-              Hide answers
+              {revealed ? "Hide answers" : "Show answers"}
             </button>
             <Link className="button" to={`/decks/${deckId}/study`}>
               Study this deck
