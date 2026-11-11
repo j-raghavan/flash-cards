@@ -88,18 +88,20 @@ describe("deck reader", () => {
     expect(previous).toBeDisabled();
 
     const user = userEvent.setup();
-    // Answers can be hidden, and stay hidden from card to card until shown again.
-    const hide = screen.getByRole("button", { name: "Hide answers" });
-    await user.click(hide);
-    expect(hide).toHaveAttribute("aria-pressed", "true");
+    // Answers can be hidden, and stay hidden from card to card until shown again;
+    // the button names what it will do next.
+    const toggle = screen.getByRole("button", { name: "Hide answers" });
+    await user.click(toggle);
+    expect(toggle).toHaveAccessibleName("Show answers");
     expect(screen.queryByText("Back 1")).toBeNull();
 
     await user.click(next);
     expect(screen.getByText(/^Card \d of 3$/)).toHaveTextContent("Card 2 of 3");
     expect(await screen.findByText("2")).toHaveProperty("tagName", "STRONG");
     expect(screen.queryByText("Back 2")).toBeNull();
-    await user.click(hide);
+    await user.click(toggle);
     expect(await screen.findByText("Back 2")).toBeInTheDocument();
+    expect(toggle).toHaveAccessibleName("Hide answers");
 
     // The arrow keys step too, and focus stays on a usable button at either end.
     await user.keyboard("{ArrowRight}");
