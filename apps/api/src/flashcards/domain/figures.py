@@ -24,9 +24,13 @@ MAX_FIGURES = 12
 # box is approximate, and cutting off an axis label costs more than a little
 # extra page around the figure.
 FIGURE_MARGIN = 40
-# A model box snaps to a figure found in the PDF itself when they overlap at
-# least this much (intersection over union); the PDF's box is exact.
+# A model box snaps to a figure measured on the page itself when they overlap at
+# least this much (intersection over union); the measured box is exact.
 SNAP_THRESHOLD = 0.5
+# A model's own box is used only when it covers at most this share of the page: a
+# box over most of the page is the page, and would put its worked answers on the
+# card's question side.
+MAX_GUESSED_AREA = 0.5
 
 
 class InvalidFigure(ValueError):
@@ -69,16 +73,19 @@ class FigureBox:
         return shared / (self.area + other.area - shared)
 
 
-def snap(box: FigureBox, found: tuple[FigureBox, ...]) -> FigureBox:
-    """The PDF's own figure box that best matches a model's box, padded, else the box padded.
+def snap(box: FigureBox, found: tuple[FigureBox, ...]) -> FigureBox | None:
+    """The box to crop for a model's figure box, or None when it is not a figure.
 
-    A figure found in the PDF (an embedded image or a cluster of drawings) has an
-    exact box, so it gets a small margin for its labels; a model's guess gets the
-    full margin.
+    A figure measured on the page (an embedded image, a cluster of drawings or a
+    ruled graph in a scan) has an exact box that already carries the margin its
+    labels need, so the best match is used as it is. Otherwise the model's guess
+    gets the full margin, unless it covers most of the page.
     """
     best = max(found, key=box.overlap, default=None)
     if best is not None and box.overlap(best) >= SNAP_THRESHOLD:
-        return best.padded(FIGURE_MARGIN // 2)
+        return best
+    if box.area > MAX_GUESSED_AREA * FIGURE_SCALE * FIGURE_SCALE:
+        return None
     return box.padded()
 
 

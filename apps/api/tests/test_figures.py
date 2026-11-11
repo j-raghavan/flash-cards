@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pymupdf
 import pytest
 from test_generation import (
@@ -80,14 +82,21 @@ def test_overlap_is_intersection_over_union() -> None:
     assert box.overlap(FigureBox(0, 300, 100, 400)) == 0.0
 
 
-def test_snap_prefers_the_pdfs_own_box_when_the_guess_matches_it() -> None:
+def test_snap_prefers_the_measured_box_when_the_guess_matches_it() -> None:
     guess = FigureBox(100, 100, 500, 500)
     exact = FigureBox(110, 90, 520, 480)
     elsewhere = FigureBox(600, 600, 900, 900)
-    assert snap(guess, (elsewhere, exact)) == exact.padded(FIGURE_MARGIN // 2)
+    # A measured box already carries its margin, so it is used as it is.
+    assert snap(guess, (elsewhere, exact)) == exact
     # A guess matching nothing (or with nothing to match) keeps its own box, padded.
     assert snap(guess, (elsewhere,)) == guess.padded()
     assert snap(guess, ()) == guess.padded()
+
+
+def test_a_guess_over_most_of_the_page_is_no_figure() -> None:
+    # Half the page is still a figure; more is the page, with its worked answers.
+    assert snap(FigureBox(0, 0, 1000, 500), ()) == FigureBox(0, 0, 1000, 500).padded()
+    assert snap(FigureBox(0, 0, 1000, 501), ()) is None
 
 
 def test_a_figure_goes_first_on_the_question_side() -> None:
@@ -136,7 +145,9 @@ def test_output_without_figure_keys_has_no_figures() -> None:
     [
         ({"left": 1}, ()),  # not a list: no figures
         (["box", _box(top=1.5), _box(right=False), {"left": 1, "top": 2, "right": 3}], (None,) * 4),
-        ([_box(right=5), _box(right=1200)], (None, None)),  # not a rectangle within the page
+        ([_box(right=5), _box(left=400)], (None, None)),  # not a rectangle
+        # Edges past the page are clipped to it.
+        ([_box(left=-30, right=1200)], (FigureBox(0, 20, 1000, 400),)),
         ([_box()] * 13, (FigureBox(10, 20, 300, 400),) * 12),  # past MAX_FIGURES: dropped
     ],
 )
@@ -149,7 +160,7 @@ def test_unusable_figures_are_dropped_keeping_their_numbers(
 
 @pytest.mark.parametrize("figure", [1, 2, 3, -1, True, "1", None])
 def test_a_card_naming_a_missing_or_unusable_figure_keeps_its_text(figure: object) -> None:
-    raw = {"cards": [_card(figure)], "figures": [_box(right=5), _box(right=1500)]}
+    raw = {"cards": [_card(figure)], "figures": [_box(right=5), _box(left=500, right=-1)]}
     (card,) = parse_draft_output(raw, source_page=1).cards
     assert card.figure == 0 and dict(card.fields) == {"front": "Q", "back": "A"}
 
@@ -198,9 +209,13 @@ def test_a_vector_graph_is_a_figure_with_its_exact_box() -> None:
     has_graphics, figures = _found(_graph_pdf())
     assert has_graphics
     (box,) = figures
-    # The grid spans x 300..500 and y 200..400 points on a 595 x 842 (A4) page.
-    assert box.left == pytest.approx(504, abs=3) and box.right == pytest.approx(840, abs=3)
-    assert box.top == pytest.approx(237, abs=3) and box.bottom == pytest.approx(475, abs=3)
+    # The grid spans x 300..500 and y 200..400 points on a 595 x 842 (A4) page,
+    # 504..840 and 237..475 in thousandths, plus half the margin for its labels.
+    half = FIGURE_MARGIN // 2
+    assert box.left == pytest.approx(504 - half, abs=3)
+    assert box.right == pytest.approx(840 + half, abs=3)
+    assert box.top == pytest.approx(237 - half, abs=3)
+    assert box.bottom == pytest.approx(475 + half, abs=3)
 
 
 def test_a_frame_around_text_and_small_marks_are_not_figures() -> None:
@@ -268,7 +283,7 @@ def test_a_page_wide_fill_is_ignored_and_the_figure_on_it_kept() -> None:
     data = doc.tobytes()
     doc.close()
     has_graphics, (box,) = _found(data)
-    assert has_graphics and box.left == pytest.approx(504, abs=3)
+    assert has_graphics and box.left == pytest.approx(504 - FIGURE_MARGIN // 2, abs=3)
 
 
 def test_boxes_follow_the_page_rotation() -> None:
@@ -345,8 +360,9 @@ _PAGE_IMAGE = b"\x89PNG-page"
 class FigureLLM:
     """Answers with two cards showing figure 1, one showing none, and one figure."""
 
-    def __init__(self) -> None:
+    def __init__(self, box: tuple[int, int, int, int] = (100, 100, 500, 500)) -> None:
         self.seen: list[StructuredRequest] = []
+        self._box = box
 
     async def generate_structured(self, request: StructuredRequest) -> StructuredResult:
         self.seen.append(request)
@@ -359,7 +375,8 @@ class FigureLLM:
             {"type": "cloze", "fields": {"text": "The line is {{c1::dashed}}."}, "figure": 1},
             {"type": "basic", "fields": {"front": "Q", "back": "A"}, "figure": 0},
         ]
-        figures: list[object] = [{"left": 100, "top": 100, "right": 500, "bottom": 500}]
+        left, top, right, bottom = self._box
+        figures: list[object] = [{"left": left, "top": top, "right": right, "bottom": bottom}]
         return StructuredResult(
             data={"cards": cards, "figures": figures},
             usage=TokenUsage(input_tokens=1, output_tokens=1),
@@ -395,10 +412,11 @@ async def _generate(
     *,
     media: InMemoryMediaRepository | None,
     cropper: FakeCropper | None,
+    llm: FigureLLM | None = None,
 ) -> tuple[list[dict[str, str]], FigureLLM]:
     jobs, drafts = InMemoryAiJobRepository(), InMemoryDraftCardRepository()
     store = InMemoryObjectStore()
-    llm = FigureLLM()
+    llm = llm or FigureLLM()
     clock = FakeClock()
     service = CardGenerationService(
         jobs, drafts, store, FakeExtractor([page]), llm, clock, RecordingUnitOfWork(),
@@ -416,12 +434,32 @@ async def test_a_figure_is_cropped_once_stored_and_shown_on_each_card() -> None:
     fields, _llm = await _generate(_page(), media=media, cropper=cropper)
     (asset,) = await media.list_for_owner(ALICE)
     assert asset.data == b"\x89PNG-crop" and asset.content_type == "image/png"
-    # One crop for the two cards that show it, snapped to the page's own box.
-    assert cropper.boxes == [FigureBox(110, 90, 520, 480).padded(FIGURE_MARGIN // 2)]
+    # One crop for the two cards that show it, snapped to the page's measured box.
+    assert cropper.boxes == [FigureBox(110, 90, 520, 480)]
     image = figure_markdown(asset.id)
     assert fields[0]["front"] == f"{image}\n\nWhich side is shaded?"
     assert fields[1]["text"] == f"{image}\n\nThe line is {{{{c1::dashed}}}}."
     assert fields[2] == {"front": "Q", "back": "A"}
+
+
+async def test_the_prompt_lists_the_figures_measured_on_the_page() -> None:
+    _fields, llm = await _generate(_page(), media=InMemoryMediaRepository(), cropper=FakeCropper())
+    assert "left 110, top 90, right 520, bottom 480" in llm.seen[0].instructions
+    # A page sent without its image has no figures to name.
+    _fields, llm = await _generate(
+        _page(kind=PageKind.TEXT, image=None), media=None, cropper=None
+    )
+    assert "measured exactly" not in llm.seen[0].instructions
+
+
+async def test_a_guess_over_most_of_an_unmeasured_page_is_not_cropped() -> None:
+    media, cropper = InMemoryMediaRepository(), FakeCropper()
+    page = replace(_page(), figure_boxes=())
+    fields, _llm = await _generate(
+        page, media=media, cropper=cropper, llm=FigureLLM((0, 0, 1000, 1000))
+    )
+    assert cropper.boxes == [] and await media.list_for_owner(ALICE) == []
+    assert fields[0]["front"] == "Which side is shaded?"
 
 
 async def test_a_text_page_with_graphics_is_sent_as_text_then_image() -> None:

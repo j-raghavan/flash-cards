@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from flashcards.domain.ai import Thoroughness
+from flashcards.domain.figures import FigureBox
 
 _BASE = (
     "You turn study material into flashcards. Use only the information in the provided "
@@ -21,12 +22,29 @@ _BASE = (
     "When the page is attached as an image and a card needs a figure on it (a graph, "
     "diagram, chart, table drawn as a picture or other drawing) to make sense, add that "
     "figure to figures with its bounding box as integers from 0 to 1000 measured from the "
-    "page's top-left corner (left, top, right, bottom), covering the whole figure "
-    "including its labels, and set the card's figure to the figure's 1-based position in "
-    "figures. The figure is shown with the card, so call it 'the graph shown' or 'the "
-    "figure shown'. List only figures a card shows, and set figure to 0 on every other "
-    "card."
+    "page's top-left corner (left, top, right, bottom), fitting tightly around the figure "
+    "and its labels and leaving out the question text, worked solutions and the rest of "
+    "the page, and set the card's figure to the figure's 1-based position in figures. "
+    "The figure is shown with the card, so call it 'the graph shown' or 'the figure "
+    "shown', never by where it sits on the page. For each graph, diagram or chart worth "
+    "studying, make at least one card that shows it and asks the student to read, "
+    "interpret or check it, such as which equation, inequality or system the graph shown "
+    "represents, or what its lines, shaded region, intersections or corner points mean. "
+    "Never show a figure that is blank or unfinished, such as an empty coordinate grid. "
+    "List only figures a card shows, and set figure to 0 on every other card."
 )
+
+
+def _measured(figures: tuple[FigureBox, ...]) -> str:
+    """The figures measured on the page, so the model copies an exact box (ADR 0026)."""
+    boxes = "; ".join(
+        f"left {box.left}, top {box.top}, right {box.right}, bottom {box.bottom}" for box in figures
+    )
+    return (
+        f" These figures were measured exactly on the page image: {boxes}. When a card "
+        "shows one of them, list it in figures with exactly that box."
+    )
+
 
 _DENSITY = {
     Thoroughness.CONCISE: "Create only the few most important cards; favour breadth over detail.",
@@ -37,8 +55,10 @@ _DENSITY = {
 }
 
 
-def prompt_for(thoroughness: Thoroughness) -> str:
-    return f"{_BASE} {_DENSITY[thoroughness]}"
+def prompt_for(thoroughness: Thoroughness, figures: tuple[FigureBox, ...] = ()) -> str:
+    """The generation prompt for a page, naming the figures measured on its image."""
+    measured = _measured(figures) if figures else ""
+    return f"{_BASE} {_DENSITY[thoroughness]}{measured}"
 
 
 def evaluation_prompt() -> str:

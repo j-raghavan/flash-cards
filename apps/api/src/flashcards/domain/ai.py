@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-from flashcards.domain.figures import MAX_FIGURES, FigureBox, InvalidFigure
+from flashcards.domain.figures import FIGURE_SCALE, MAX_FIGURES, FigureBox, InvalidFigure
 from flashcards.domain.notes import Fields, InvalidNote, NoteType, card_ordinals
 
 MAX_DRAFT_CARDS = 200
@@ -176,7 +176,8 @@ def parse_draft_output(raw: Mapping[str, object], *, source_page: int) -> DraftO
     """Validate a page's raw model output into its cards and figures.
 
     The cards are held to the schema (InvalidDraft). Figures are only an aid: a
-    box that is not a rectangle within the page, or past MAX_FIGURES, is dropped,
+    box's edges are clipped to the page, and one that is then not a rectangle, or
+    is past MAX_FIGURES, is dropped,
     and a card naming a missing or dropped figure keeps its text alone, so one
     bad box never costs the page its cards. Output without the figure keys (an
     older or lenient server) reads as having no figures.
@@ -207,7 +208,8 @@ def _parse_box(item: object) -> FigureBox | None:
         # bool is an int subclass; a true/false edge is not a coordinate.
         if not isinstance(value, int) or isinstance(value, bool):
             return None
-        edges.append(value)
+        # A box running off the page is clipped to it: models overshoot the edge.
+        edges.append(min(max(value, 0), FIGURE_SCALE))
     try:
         return FigureBox(*edges)
     except InvalidFigure:
