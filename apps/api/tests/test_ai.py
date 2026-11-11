@@ -29,6 +29,10 @@ def test_prompt_asks_for_cards_that_stand_alone_and_name_their_figures() -> None
     assert "Make no cards about the document itself" in prompt
     assert "1-based position in figures" in prompt
     assert "set figure to 0 on every other card" in prompt
+    # A figure is shown alone with the question: no place names, and never the answer.
+    assert "shows that one figure alone" in prompt
+    assert "printed or written on the figure" in prompt
+    assert "blank or unfinished" in prompt
 
 
 def test_parse_basic_and_cloze_cards_with_source_page() -> None:

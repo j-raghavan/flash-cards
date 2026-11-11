@@ -87,16 +87,15 @@ def test_snap_prefers_the_measured_box_when_the_guess_matches_it() -> None:
     exact = FigureBox(110, 90, 520, 480)
     elsewhere = FigureBox(600, 600, 900, 900)
     # A measured box already carries its margin, so it is used as it is.
-    assert snap(guess, (elsewhere, exact)) == exact
-    # A guess matching nothing (or with nothing to match) keeps its own box, padded.
-    assert snap(guess, (elsewhere,)) == guess.padded()
-    assert snap(guess, ()) == guess.padded()
-
-
-def test_a_guess_over_most_of_the_page_is_no_figure() -> None:
-    # Half the page is still a figure; more is the page, with its worked answers.
-    assert snap(FigureBox(0, 0, 1000, 500), ()) == FigureBox(0, 0, 1000, 500).padded()
-    assert snap(FigureBox(0, 0, 1000, 501), ()) is None
+    assert snap(guess, (elsewhere, exact), guess=False) == exact
+    assert snap(guess, (elsewhere, exact), guess=True) == exact
+    # On a scan a guess matching no measured figure is never cropped...
+    assert snap(guess, (elsewhere,), guess=False) is None
+    assert snap(guess, (), guess=False) is None
+    # ...while on a born-digital page it is, padded, unless it covers most of the page.
+    assert snap(guess, (elsewhere,), guess=True) == guess.padded()
+    assert snap(FigureBox(0, 0, 1000, 500), (), guess=True) == FigureBox(0, 0, 1000, 500).padded()
+    assert snap(FigureBox(0, 0, 1000, 501), (), guess=True) is None
 
 
 def test_a_figure_goes_first_on_the_question_side() -> None:
@@ -308,6 +307,7 @@ async def test_a_text_page_with_a_graph_is_sent_as_text_and_image() -> None:
     assert page.kind is PageKind.TEXT and page.text is not None and "11.7" in page.text
     assert page.image is not None and page.image.startswith(b"\x89PNG")
     assert page.image_media_type == "image/png" and len(page.figure_boxes) == 1
+    assert not page.measured_only  # a born-digital page: a reasonable guess may be cropped
     # Text-only extraction (chat indexing) never renders the page.
     (text_only,) = [
         p async for p in extractor.extract(_graph_pdf(), file_id="f", max_pages=5, text_only=True)
@@ -449,17 +449,39 @@ async def test_the_prompt_lists_the_figures_measured_on_the_page() -> None:
     _fields, llm = await _generate(
         _page(kind=PageKind.TEXT, image=None), media=None, cropper=None
     )
-    assert "measured exactly" not in llm.seen[0].instructions
+    instructions = llm.seen[0].instructions
+    assert "measured exactly" not in instructions
+    assert "No figure on this page can be shown" in instructions
 
 
-async def test_a_guess_over_most_of_an_unmeasured_page_is_not_cropped() -> None:
+async def test_a_scan_shows_only_its_measured_figures() -> None:
     media, cropper = InMemoryMediaRepository(), FakeCropper()
-    page = replace(_page(), figure_boxes=())
-    fields, _llm = await _generate(
-        page, media=media, cropper=cropper, llm=FigureLLM((0, 0, 1000, 1000))
-    )
+    scan = replace(_page(), measured_only=True)
+    _fields, llm = await _generate(scan, media=media, cropper=cropper)
+    assert "No other figure on this page can be shown" in llm.seen[0].instructions
+    assert cropper.boxes == [FigureBox(110, 90, 520, 480)]
+    # A box that names no measured figure is not cropped; the cards keep their text.
+    media, cropper = InMemoryMediaRepository(), FakeCropper()
+    fields, llm = await _generate(replace(scan, figure_boxes=()), media=media, cropper=cropper)
+    assert "No figure on this page can be shown" in llm.seen[0].instructions
     assert cropper.boxes == [] and await media.list_for_owner(ALICE) == []
     assert fields[0]["front"] == "Which side is shaded?"
+
+
+async def test_a_born_digital_page_crops_a_reasonable_guess() -> None:
+    cropper = FakeCropper()
+    page = replace(_page(kind=PageKind.TEXT), figure_boxes=())
+    _fields, llm = await _generate(page, media=InMemoryMediaRepository(), cropper=cropper)
+    instructions = llm.seen[0].instructions
+    assert "No figure on this page" not in instructions
+    assert "No other figure" not in instructions
+    assert cropper.boxes == [FigureBox(100, 100, 500, 500).padded()]
+    # A guess over most of the page is the page, not a figure.
+    cropper = FakeCropper()
+    _fields, _llm = await _generate(
+        page, media=InMemoryMediaRepository(), cropper=cropper, llm=FigureLLM((0, 0, 1000, 1000))
+    )
+    assert cropper.boxes == []
 
 
 async def test_a_text_page_with_graphics_is_sent_as_text_then_image() -> None:

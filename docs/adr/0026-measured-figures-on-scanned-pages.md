@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-10
 - **Amends:** ADR 0025
+- **Revised:** 2026-11-10, after rebuilding a deck with it: on a scanned or photographed page, only measured figures are shown.
 
 ## Context
 
@@ -52,7 +53,15 @@ The extractor pads each figure it finds. `snap` then uses a matched box as it is
 
 The generation prompt lists the page's measured boxes and asks the model to use exactly one of them when a card shows that figure. In testing, the model copied the listed box on every page that had one. The crop is then exact. Born-digital pages with drawings or images list their boxes the same way.
 
-When nothing matches, the model's own box is used with the full margin. If that box covers more than half the page, the figure is left out and the card keeps its text.
+### On a scan, only measured figures are shown
+
+On a scanned or photographed page (`ExtractedPage.measured_only`), a box of the model's own that matches no measured figure is never cropped. The first rebuild showed why: a guessed box around a printed diagram took in its caption, "Consistent system; one solution", on the question side of a card asking exactly that.
+
+The prompt says so up front. A scanned page with measured figures lists them and says no other figure can be shown. A page with none, or with no image, is told that no figure can be shown, so every card is written to make sense without one.
+
+A born-digital page keeps ADR 0025's fallback. Its drawings and pictures are measured from the PDF, but a graph can be split into several drawing clusters that no single box matches. There the model's own box is cropped with the full margin, unless it covers more than half the page.
+
+Rewriting figure numbers ("(figure 1)") out of card text was considered and rejected. Patterns that catch them also rewrite code such as `new Graph(3)`, units ("graph 2 units up") and chemistry ("Lewis diagram 2 electrons").
 
 ### Boxes that run off the page are clipped
 
@@ -62,15 +71,17 @@ A box edge outside 0 to 1000 is clipped to the page instead of the whole figure 
 
 The prompt now asks the model to:
 
-- Make at least one card that shows each graph, diagram or chart worth studying, and asks the student to read or interpret it.
-- Call it "the graph shown", never by where it sits on the page.
+- Make at least one card that shows each graph, diagram or chart worth studying, and asks the student to read, interpret or check it.
+- Call it "the graph shown", never by where it sits on the page or by its caption, number or letter.
+- Never show a figure on a card whose answer (for a Cloze card, any hidden text) is printed or written on it, even in part. If its labels already state what a card would ask, ask something else or make no card for it.
 - Never show a blank or unfinished figure.
 - Keep the question text and worked solutions out of a figure's box.
 
 ## Consequences
 
-- A figure drawn without straight lines on a scanned page (a photo, or a freehand sketch) is not measured. Its crop still comes from the model's box.
+- A figure drawn without straight lines on a scanned page (a printed diagram, a photo, a freehand sketch) is not measured, so it is not shown. Its cards are written without it.
+- A born-digital model box over half the page is not cropped, so a full-page diagram on such a page may go unshown.
+- The model may still write "(figure 1)" against instructions. Drafts are reviewed before they join a deck.
 - A ruled figure that holds the student's own working (labels, plotted points) shows that working. The measure cannot tell printed lines from handwriting on them.
 - Measuring is plain Python on the PyMuPDF worker thread. It adds about 0.1 seconds to each scanned page.
-- A large figure that is not measured, such as a full-page diagram on a text-less page or a photo of a whiteboard, is no longer shown if the model's box covers more than half the page. Only that figure is lost. On worksheets, a box that size was the page with its answers.
 - A card whose figure is left out keeps its text, which may still say "the graph shown". The owner reviews every draft before it joins a deck.
