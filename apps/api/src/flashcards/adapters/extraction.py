@@ -20,7 +20,8 @@ import puremagic
 import pymupdf
 
 from flashcards.adapters.offload import PYMUPDF, run_blocking
-from flashcards.domain.figures import FIGURE_SCALE, FigureBox
+from flashcards.adapters.ruled_figures import ruled_figures
+from flashcards.domain.figures import FIGURE_MARGIN, FIGURE_SCALE, FigureBox
 from flashcards.domain.sources import (
     ExtractedPage,
     PageKind,
@@ -84,11 +85,16 @@ class PyMuPDFExtractor:
         if media != "application/pdf":
             if skip > 0 or text_only:
                 return
+            try:
+                figures = await _parse(partial(_image_figures, data))
+            except UnreadableDocument:  # figures are only an aid; the model still sees it
+                figures = ()
             yield ExtractedPage(
                 ref=SourceRef(file_id=file_id, page=1),
                 kind=PageKind.IMAGE,
                 image=data,
                 image_media_type=media,
+                figure_boxes=figures,
             )
             return
 
@@ -159,6 +165,8 @@ def _render_page(
         has_graphics, figures = graphic_boxes(page)
         if not has_graphics:
             return ExtractedPage(ref=ref, kind=PageKind.TEXT, text=text)
+        if not figures:  # a scan under a text layer: its figures are ruled, not drawn
+            figures = _measured(page)
         # A page with a picture or drawing is also sent as an image, so the model
         # sees the graph its text only labels, and can name its box (F-AI-5).
         return ExtractedPage(
@@ -172,8 +180,20 @@ def _render_page(
     if text_only:
         return None  # a text-less page is not rasterized when only text is wanted
     return ExtractedPage(
-        ref=ref, kind=PageKind.IMAGE, image=_raster(page), image_media_type="image/png"
+        ref=ref,
+        kind=PageKind.IMAGE,
+        image=_raster(page),
+        image_media_type="image/png",
+        figure_boxes=_measured(page),
     )
+
+
+def _measured(page: pymupdf.Page) -> tuple[FigureBox, ...]:
+    """The page's ruled figures; none when measuring fails, as figures are only an aid."""
+    try:
+        return ruled_figures(page)
+    except _PDF_ERRORS:
+        return ()
 
 
 def _raster(page: pymupdf.Page) -> bytes:
@@ -191,7 +211,8 @@ def graphic_boxes(page: pymupdf.Page) -> tuple[bool, tuple[FigureBox, ...]]:
     is a background fill and is left out before clustering, so it neither counts
     nor swallows the figures drawn on it. An image covering nearly the whole page
     (a scan under its text layer) means the page has graphics, but it is the
-    page, not a figure to crop. Boxes are in the page as shown, after rotation.
+    page, not a figure to crop. Boxes are in the page as shown, after rotation,
+    with half the figure margin added for labels set beside the drawing.
     """
     shown = page.rect
     page_area = shown.get_area()
@@ -232,7 +253,7 @@ def graphic_boxes(page: pymupdf.Page) -> tuple[bool, tuple[FigureBox, ...]]:
                 top=math.floor((rect.y0 - shown.y0) / shown.height * FIGURE_SCALE),
                 right=math.ceil((rect.x1 - shown.x0) / shown.width * FIGURE_SCALE),
                 bottom=math.ceil((rect.y1 - shown.y0) / shown.height * FIGURE_SCALE),
-            )
+            ).padded(FIGURE_MARGIN // 2)
         )
     return has_graphics, tuple(figures)
 
@@ -254,9 +275,15 @@ class PyMuPDFFigureCropper:
         return await _parse(partial(_crop, image, box))
 
 
-def _crop(image: bytes, box: FigureBox) -> bytes:
-    # Only the page images this app renders or accepts (PNG, JPEG) are cropped, and
-    # opened as exactly that type, so a polyglot file is never read as another kind.
+def _open_image(image: bytes) -> tuple[pymupdf.Document, int]:
+    """A PNG or JPEG page image opened as a one-page document, and its width in pixels.
+
+    Only the page images this app renders or accepts are opened, as exactly that
+    type, so a polyglot file is never read as another kind. The size is read from
+    the image header before anything is decoded: MuPDF decodes the whole image to
+    render any part of it, so a small file claiming a huge size is refused here
+    rather than allocated.
+    """
     if image.startswith(b"\x89PNG"):
         filetype = "png"
     elif image.startswith(b"\xff\xd8"):
@@ -264,17 +291,30 @@ def _crop(image: bytes, box: FigureBox) -> bytes:
     else:
         raise UnreadableDocument("not a PNG or JPEG page image")
     doc = pymupdf.open(stream=image, filetype=filetype)
+    infos = doc[0].get_image_info()
+    if not infos:  # pragma: no cover - a PNG or JPEG that opens is one image
+        doc.close()
+        raise UnreadableDocument("no image in the page image")
+    pixels_wide, pixels_high = int(infos[0]["width"]), int(infos[0]["height"])
+    if pixels_wide * pixels_high > MAX_RASTER_PIXELS:
+        doc.close()
+        raise UnreadableDocument("the page image is too large")
+    return doc, pixels_wide
+
+
+def _image_figures(image: bytes) -> tuple[FigureBox, ...]:
+    """The ruled figures on an uploaded page image (a scan or photo of a page)."""
+    doc, _ = _open_image(image)
+    try:
+        return ruled_figures(doc[0])
+    finally:
+        doc.close()
+
+
+def _crop(image: bytes, box: FigureBox) -> bytes:
+    doc, pixels_wide = _open_image(image)
     try:
         page = doc[0]
-        infos = page.get_image_info()
-        # Read from the image header before anything is decoded: MuPDF decodes the
-        # whole image to render any part of it, so a small file claiming a huge
-        # size is refused here rather than allocated.
-        if not infos:  # pragma: no cover - a PNG or JPEG that opens is one image
-            raise UnreadableDocument("no image to crop")
-        pixels_wide, pixels_high = int(infos[0]["width"]), int(infos[0]["height"])
-        if pixels_wide * pixels_high > MAX_RASTER_PIXELS:
-            raise UnreadableDocument("the page image is too large to crop")
         r = page.rect
         clip = pymupdf.Rect(
             r.x0 + r.width * box.left / FIGURE_SCALE,
