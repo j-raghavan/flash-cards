@@ -174,7 +174,7 @@ async def test_a_scanned_page_and_an_uploaded_photo_carry_their_ruled_figures() 
     (pdf_page,) = await _pages(_grid_pdf(text=False))  # a page with no text: an image page
     (upload,) = await _pages(_scan(_grid_pdf(text=False)))
     for page in (pdf_page, upload):
-        assert page.kind is PageKind.IMAGE
+        assert page.kind is PageKind.IMAGE and page.measured_only
         (box,) = page.figure_boxes
         assert abs(box.left - 504) <= 12 and abs(box.bottom - 475) <= 12
 
@@ -186,6 +186,7 @@ async def test_a_scan_under_a_text_layer_carries_its_ruled_figures() -> None:
     page.insert_text((72, 72), _TEXT)
     (extracted,) = await _pages(doc.tobytes())
     assert extracted.kind is PageKind.TEXT and extracted.image is not None
+    assert extracted.measured_only
     (box,) = extracted.figure_boxes
     assert abs(box.left - 504) <= 12
 

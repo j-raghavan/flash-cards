@@ -95,6 +95,7 @@ class PyMuPDFExtractor:
                 image=data,
                 image_media_type=media,
                 figure_boxes=figures,
+                measured_only=True,
             )
             return
 
@@ -165,7 +166,9 @@ def _render_page(
         has_graphics, figures = graphic_boxes(page)
         if not has_graphics:
             return ExtractedPage(ref=ref, kind=PageKind.TEXT, text=text)
-        if not figures:  # a scan under a text layer: its figures are ruled, not drawn
+        # A scan under a text layer: its figures are measured from the image only.
+        scanned = not figures
+        if scanned:
             figures = _measured(page)
         # A page with a picture or drawing is also sent as an image, so the model
         # sees the graph its text only labels, and can name its box (F-AI-5).
@@ -176,6 +179,7 @@ def _render_page(
             image=_raster(page),
             image_media_type="image/png",
             figure_boxes=figures,
+            measured_only=scanned,
         )
     if text_only:
         return None  # a text-less page is not rasterized when only text is wanted
@@ -185,6 +189,7 @@ def _render_page(
         image=_raster(page),
         image_media_type="image/png",
         figure_boxes=_measured(page),
+        measured_only=True,
     )
 
 

@@ -25,12 +25,20 @@ _BASE = (
     "page's top-left corner (left, top, right, bottom), fitting tightly around the figure "
     "and its labels and leaving out the question text, worked solutions and the rest of "
     "the page, and set the card's figure to the figure's 1-based position in figures. "
-    "The figure is shown with the card, so call it 'the graph shown' or 'the figure "
-    "shown', never by where it sits on the page. For each graph, diagram or chart worth "
-    "studying, make at least one card that shows it and asks the student to read, "
-    "interpret or check it, such as which equation, inequality or system the graph shown "
-    "represents, or what its lines, shaded region, intersections or corner points mean. "
-    "Never show a figure that is blank or unfinished, such as an empty coordinate grid. "
+    "The card shows that one figure alone, so call it 'the graph shown' or 'the figure "
+    "shown', never by its place on the page (left, right, top, bottom, first, other) "
+    "or by its caption, number or letter, such as 'Figure 1' or 'graph (b)'; labels "
+    "drawn inside it, such as point A or line L1, may be used. For each graph, diagram "
+    "or chart worth studying, make at least one card that shows it and asks the student "
+    "to read, interpret or check it, such as which equation, inequality or system the "
+    "graph shown represents, or what its lines, shaded region, intersections or corner "
+    "points mean. Show a figure only on a card that asks the student to read, interpret "
+    "or check it. The figure appears with the question, so never show it on a card whose "
+    "answer (for a Cloze card, any hidden text) is printed or written on the figure, "
+    "even in part, such as a label naming what the card asks for; if a figure's labels "
+    "already state what a card would ask, ask something they do not state, or make no "
+    "card for that figure. Never show a figure that is blank or unfinished, such as an "
+    "empty coordinate grid. "
     "List only figures a card shows, and set figure to 0 on every other card."
 )
 
@@ -55,10 +63,29 @@ _DENSITY = {
 }
 
 
-def prompt_for(thoroughness: Thoroughness, figures: tuple[FigureBox, ...] = ()) -> str:
-    """The generation prompt for a page, naming the figures measured on its image."""
-    measured = _measured(figures) if figures else ""
-    return f"{_BASE} {_DENSITY[thoroughness]}{measured}"
+# On a scan only a measured figure is ever shown (domain.figures.snap); the model is
+# told so up front, so it writes for what the student will see.
+_ONLY_MEASURED = " No other figure on this page can be shown."
+_NO_FIGURES = (
+    " No figure on this page can be shown with a card, whatever the instructions about "
+    "figures above say: list no figures, set figure to 0 on every card, and write every "
+    "card so it makes sense without a figure."
+)
+
+
+def prompt_for(
+    thoroughness: Thoroughness,
+    figures: tuple[FigureBox, ...] = (),
+    *,
+    others_shown: bool = False,
+) -> str:
+    """The generation prompt for a page: the figures measured on its image, and
+    whether a figure that was not measured can be shown too (a born-digital page)."""
+    if figures:
+        note = _measured(figures) + ("" if others_shown else _ONLY_MEASURED)
+    else:
+        note = "" if others_shown else _NO_FIGURES
+    return f"{_BASE} {_DENSITY[thoroughness]}{note}"
 
 
 def evaluation_prompt() -> str:

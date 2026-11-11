@@ -245,10 +245,15 @@ class CardGenerationService:
         return page_cap(self._max_pages, admin=owner is not None and owner.is_active_admin)
 
     async def _generate_page(self, job: AiJob, page: ExtractedPage) -> list[DraftCardRecord]:
-        # The model is told the figures measured on the page image it is shown.
-        measured = page.figure_boxes if page.image is not None else ()
+        # The model is told the figures measured on the page image it is shown, and
+        # whether any other figure on it can be shown (only on a born-digital page).
+        has_image = page.image is not None
         request = StructuredRequest(
-            instructions=prompt_for(job.thoroughness, measured),
+            instructions=prompt_for(
+                job.thoroughness,
+                page.figure_boxes if has_image else (),
+                others_shown=has_image and not page.measured_only,
+            ),
             documents=_page_documents(page),
             schema=DRAFT_CARDS_SCHEMA,
             max_output_tokens=MAX_OUTPUT_TOKENS,
@@ -310,8 +315,8 @@ class CardGenerationService:
         }
         shown: dict[int, str] = {}
         for number, box in sorted(wanted.items()):
-            clip = snap(box, page.figure_boxes)
-            if clip is None:  # most of the page, not a figure: the cards keep their text
+            clip = snap(box, page.figure_boxes, guess=not page.measured_only)
+            if clip is None:  # no figure to crop: the cards keep their text
                 continue
             try:
                 data = await self._cropper.crop(page.image, clip)

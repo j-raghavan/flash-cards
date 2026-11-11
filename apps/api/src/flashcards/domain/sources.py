@@ -97,5 +97,8 @@ class ExtractedPage:
     # pictures or drawings, so the model sees them too (F-AI-5).
     image: bytes | None = None
     image_media_type: str | None = None  # image/png or image/jpeg when image is set
-    # Exact boxes of the figures found in a PDF page, to snap the model's boxes to.
+    # Exact boxes of the figures found on the page, to snap the model's boxes to.
     figure_boxes: tuple[FigureBox, ...] = ()
+    # A scanned or photographed page: only its measured figures are ever shown, as
+    # a model's own box on a scan is too far off to crop (ADR 0026).
+    measured_only: bool = False

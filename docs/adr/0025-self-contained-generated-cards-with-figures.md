@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-10
+- **Amended by:** ADR 0026 (measured figures on scanned pages; a model's own box is not cropped on a scan)
 
 ## Context
 

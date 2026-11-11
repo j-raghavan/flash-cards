@@ -20,16 +20,14 @@ from flashcards.domain.notes import Fields, NoteType
 FIGURE_SCALE = 1000
 # Most figures one page's output may name; more is not a page of study material.
 MAX_FIGURES = 12
-# Margin added on every side of a model-reported box, in thousandths: a model's
-# box is approximate, and cutting off an axis label costs more than a little
-# extra page around the figure.
+# Margin added on every side of a model's own box, in thousandths: a model's box
+# is approximate, and cutting off an axis label costs more than a little extra page.
 FIGURE_MARGIN = 40
-# A model box snaps to a figure measured on the page itself when they overlap at
-# least this much (intersection over union); the measured box is exact.
+# A model's box names a figure measured on the page itself when they overlap at
+# least this much (intersection over union); the measured box is what is cropped.
 SNAP_THRESHOLD = 0.5
 # A model's own box is used only when it covers at most this share of the page: a
-# box over most of the page is the page, and would put its worked answers on the
-# card's question side.
+# box over most of the page is the page, with its worked answers.
 MAX_GUESSED_AREA = 0.5
 
 
@@ -73,18 +71,21 @@ class FigureBox:
         return shared / (self.area + other.area - shared)
 
 
-def snap(box: FigureBox, found: tuple[FigureBox, ...]) -> FigureBox | None:
-    """The box to crop for a model's figure box, or None when it is not a figure.
+def snap(box: FigureBox, found: tuple[FigureBox, ...], *, guess: bool) -> FigureBox | None:
+    """The box to crop for a model's figure box, or None when there is none.
 
     A figure measured on the page (an embedded image, a cluster of drawings or a
     ruled graph in a scan) has an exact box that already carries the margin its
-    labels need, so the best match is used as it is. Otherwise the model's guess
-    gets the full margin, unless it covers most of the page.
+    labels need, so the best match is cropped as it is. Otherwise the model's own
+    box is cropped with the full margin only where guessing is allowed (a
+    born-digital page) and it covers at most half the page. On a scan the model's
+    box misses by up to a fifth of the page, cutting figures in half or taking in
+    the labels and worked answers around them, so it is never cropped (ADR 0026).
     """
     best = max(found, key=box.overlap, default=None)
     if best is not None and box.overlap(best) >= SNAP_THRESHOLD:
         return best
-    if box.area > MAX_GUESSED_AREA * FIGURE_SCALE * FIGURE_SCALE:
+    if not guess or box.area > MAX_GUESSED_AREA * FIGURE_SCALE * FIGURE_SCALE:
         return None
     return box.padded()
 
