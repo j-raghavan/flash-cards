@@ -42,8 +42,15 @@ class _FakeLLM:
         )
 
 
-def _app(llm: _FakeLLM | None = None) -> FastAPI:
-    settings = Settings(environment="test", session_cookie_secure=False, max_upload_pages=CAP)
+def _app(llm: _FakeLLM | None = None, *, default_monthly_pages: int | None = 10) -> FastAPI:
+    # The shipped default is unlimited; these tests pin a finite default so the
+    # monthly quota is exercised, except where they pass None on purpose.
+    settings = Settings(
+        environment="test",
+        session_cookie_secure=False,
+        max_upload_pages=CAP,
+        ai_default_monthly_pages=default_monthly_pages,
+    )
     return create_app(settings, llm=llm or _FakeLLM())
 
 
@@ -185,6 +192,27 @@ def test_a_member_sees_the_page_cap_and_that_the_quota_applies() -> None:
     quota = client.get("/account/ai-quota").json()
     assert quota["max_document_pages"] == CAP
     assert quota["quota_applies"] is True
+
+
+def test_a_member_with_no_default_limit_is_unlimited_but_still_page_capped() -> None:
+    # The shipped default (no monthly limit): a member is never refused by the page
+    # quota, their pages are still counted, but the per-document cap still applies.
+    app = _app(default_monthly_pages=None)
+    client, user_id = _join(app, Role.MEMBER, "m@example.com")
+    admin, _ = _join(app, Role.ADMIN, "a@example.com")
+    deck_id = _deck(client)
+    # Far more pages than the old free-tier allowance, in several documents.
+    assert _upload(client, deck_id, CAP).status_code == 202
+    assert _upload(client, deck_id, CAP).status_code == 202
+    quota = client.get("/account/ai-quota").json()
+    assert quota["monthly_pages"] is None
+    assert quota["quota_applies"] is False
+    assert quota["max_document_pages"] == CAP  # the per-document cap is unchanged
+    assert quota["used_pages"] == CAP * 2  # counted for the usage report
+    # Over the per-document cap is still refused with 413.
+    assert _upload(client, deck_id, CAP + 1).status_code == 413
+    usage = admin.get("/admin/usage").json()
+    assert [(u["user_id"], u["pages"]) for u in usage["by_user"]] == [(user_id, CAP * 2)]
 
 
 def test_a_demoted_admin_is_capped_from_the_next_request() -> None:

@@ -58,12 +58,14 @@ async def my_ai_quota(
     """
     quota = await container.quotas.user_quota(caller.user.id)
     admin = caller.user.is_active_admin
+    # A member whose limit in force is unlimited (None) is not metered either.
+    unlimited = admin or quota.monthly_pages is None
     return MyAiQuotaOut(
         period=quota.period,
-        monthly_pages=quota.monthly_pages,
+        monthly_pages=None if admin else quota.monthly_pages,
         used_pages=quota.used_pages,
         max_document_pages=page_cap(settings.max_upload_pages, admin=admin),
-        quota_applies=not admin,
+        quota_applies=not unlimited,
     )
 
 

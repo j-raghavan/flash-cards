@@ -88,6 +88,20 @@ describe("per-user AI quota", () => {
     expect(screen.queryByLabelText(/Monthly AI pages/)).not.toBeInTheDocument();
   });
 
+  it("shows no limit when the instance default is unlimited and there is no override", async () => {
+    mockApi({
+      ...base,
+      "GET /admin/users/u2/quota": { body: quota({ monthly_pages: null, override: null, used_pages: 15 }) },
+    });
+    renderApp("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "AI quota for bob@example.com" }));
+    await screen.findByLabelText("Monthly AI pages for bob@example.com (pages)");
+    expect(
+      screen.getByText(/15 pages used of no limit in November 2026\. The instance default applies\./),
+    ).toBeInTheDocument();
+  });
+
   it("refuses a malformed limit and asks before a limit below this month's use", async () => {
     const calls = mockApi({
       ...base,

@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from flashcards.domain.quotas import DEFAULT_MONTHLY_PAGES, MAX_MONTHLY_PAGES
+from flashcards.domain.quotas import MAX_MONTHLY_PAGES
 from flashcards.domain.sources import DEFAULT_MAX_UPLOAD_PAGES
 from flashcards.domain.transcripts import parse_language_preference
 
@@ -72,7 +72,9 @@ class Settings(BaseSettings):
     ai_input_usd_per_mtok: float = Field(default=0.0, ge=0)
     ai_output_usd_per_mtok: float = Field(default=0.0, ge=0)
     # Initial quotas, used until an admin sets them at PUT /admin/quotas.
-    ai_default_monthly_pages: int = Field(default=DEFAULT_MONTHLY_PAGES, ge=0, le=MAX_MONTHLY_PAGES)
+    # Unset (None) means members have no monthly page limit (ADR 0022); set a number
+    # to meter them. The spend cap still applies either way.
+    ai_default_monthly_pages: int | None = Field(default=None, ge=0, le=MAX_MONTHLY_PAGES)
     ai_monthly_spend_cap_usd: float | None = Field(default=None, ge=0)
     # The AI data-use disclosure (F-LEGAL-2): the provider's display name and terms
     # link. Known providers have defaults; a self-hosted endpoint should set both.
@@ -121,6 +123,13 @@ class Settings(BaseSettings):
     def _languages(cls, value: str) -> str:
         parse_language_preference(value)  # raises ValueError with the reason
         return value
+
+    @field_validator("ai_default_monthly_pages", mode="before")
+    @classmethod
+    def _blank_page_limit_is_unlimited(cls, value: object) -> object:
+        # An empty env value (FLASHCARDS_AI_DEFAULT_MONTHLY_PAGES=) means unlimited,
+        # so documenting the variable cannot crash startup (ADR 0027).
+        return None if isinstance(value, str) and value.strip() == "" else value
 
     @model_validator(mode="after")
     def _fake_llm_only_in_tests(self) -> Settings:

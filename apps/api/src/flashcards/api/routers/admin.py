@@ -251,7 +251,8 @@ async def set_instance_quotas(
     admin: CurrentUser = Depends(require_admin),
     container: Container = Depends(get_container, scope="function"),
 ) -> InstanceQuotasOut:
-    """Set the default monthly page limit and the monthly spend cap (null: no cap)."""
+    """Set the default monthly page limit (null: members are unlimited) and the
+    monthly spend cap (null: no cap)."""
     quotas = await container.quotas.set_instance(admin_id=admin.user.id, quotas=body.to_domain())
     return InstanceQuotasOut.from_domain(quotas)
 

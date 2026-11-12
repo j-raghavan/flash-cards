@@ -1118,7 +1118,8 @@ class InstanceQuotaRow(Base):
     __tablename__ = "instance_quotas"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    default_monthly_pages: Mapped[int] = mapped_column(Integer)
+    # NULL means members have no monthly page limit (ADR 0027).
+    default_monthly_pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
     monthly_spend_cap_micro_usd: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 

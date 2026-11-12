@@ -28,11 +28,12 @@ export interface AuthOptions {
 export interface AiQuota {
   /** The month counted against, as "YYYY-MM". */
   period: string;
-  monthly_pages: number;
+  /** The caller's monthly page limit; null means no limit (an admin, or a member whose limit is unlimited). */
+  monthly_pages: number | null;
   used_pages: number;
   /** Most pages one uploaded document may have; null means no limit (an admin). */
   max_document_pages: number | null;
-  /** False for an admin: their pages are counted but never refused. */
+  /** False for an admin, or a member with no monthly page limit: their pages are counted but never refused. */
   quota_applies: boolean;
 }
 

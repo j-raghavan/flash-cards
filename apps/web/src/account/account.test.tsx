@@ -230,6 +230,19 @@ describe("AI quota", () => {
     expect(await screen.findByText(/You have used 1 page for/)).toBeInTheDocument();
   });
 
+  it("tells a member with no monthly limit, but still with a per-document cap", async () => {
+    accountApi({
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: null, used_pages: 15, max_document_pages: 300, quota_applies: false },
+      },
+    });
+    await openAccount();
+    const text = await screen.findByText(/You have no monthly page limit/);
+    expect(text).not.toHaveTextContent("As an admin");
+    expect(text).toHaveTextContent("You have used 15 pages for");
+    expect(screen.queryByRole("meter")).toBeNull();
+  });
+
   it("shows when the quota cannot load", async () => {
     accountApi({ "GET /account/ai-quota": { status: 500 } });
     await openAccount();

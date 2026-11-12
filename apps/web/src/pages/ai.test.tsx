@@ -149,6 +149,19 @@ describe("generate page", () => {
     ).toBeInTheDocument();
   });
 
+  it("tells a member with no monthly limit, while still showing the per-document cap", async () => {
+    mockApi({
+      ...me,
+      "GET /account/ai-quota": {
+        body: { period: "2026-11", monthly_pages: null, used_pages: 40, max_document_pages: 300, quota_applies: false },
+      },
+    });
+    renderApp("/decks/d1/generate");
+    expect(
+      await screen.findByText("PDFs up to 300 pages, 25 MB. You have no monthly AI-generation limit; each page counts once."),
+    ).toBeInTheDocument();
+  });
+
   it("shows a generic size until the limits load, and never a negative allowance", async () => {
     mockApi({
       ...me,

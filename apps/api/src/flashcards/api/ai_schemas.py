@@ -23,7 +23,8 @@ MAX_SPEND_CAP_MICRO_USD = 10_000_000 * 1_000_000
 
 
 class InstanceQuotasIn(BaseModel):
-    default_monthly_pages: int = Field(ge=0, le=MAX_MONTHLY_PAGES)
+    # None means members have no monthly page limit (ADR 0027).
+    default_monthly_pages: int | None = Field(ge=0, le=MAX_MONTHLY_PAGES)
     # None removes the cap.
     monthly_spend_cap_micro_usd: int | None = Field(ge=0, le=MAX_SPEND_CAP_MICRO_USD)
 
@@ -35,7 +36,8 @@ class InstanceQuotasIn(BaseModel):
 
 
 class InstanceQuotasOut(BaseModel):
-    default_monthly_pages: int
+    # None means members have no monthly page limit (ADR 0027).
+    default_monthly_pages: int | None
     monthly_spend_cap_micro_usd: int | None
 
     @classmethod
@@ -54,7 +56,8 @@ class UserQuotaIn(BaseModel):
 class UserQuotaOut(BaseModel):
     user_id: str
     period: str
-    monthly_pages: int
+    # The limit in force (override, else instance default); None means unlimited.
+    monthly_pages: int | None
     override: int | None
     used_pages: int
 
@@ -71,11 +74,14 @@ class UserQuotaOut(BaseModel):
 
 class MyAiQuotaOut(BaseModel):
     period: str
-    monthly_pages: int
+    # The caller's monthly page limit; null means no limit (an admin, or a member
+    # when the limit in force is unlimited).
+    monthly_pages: int | None
     used_pages: int
     # Most pages one uploaded document may have; null means no limit (an admin).
     max_document_pages: int | None
-    # False for an admin: their pages are counted but never refused (ADR 0022).
+    # False for an admin, or a member with no monthly page limit: their pages are
+    # counted but never refused (ADR 0022, 0027).
     quota_applies: bool
 
 

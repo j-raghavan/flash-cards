@@ -11,7 +11,10 @@ import { useResource } from "../lib/useResource";
 import { useSubmit } from "../lib/useSubmit";
 import { PAGES_ERROR } from "./QuotasPanel";
 
-function pagesText(n: number): string {
+function pagesText(n: number | null): string {
+  if (n === null) {
+    return "no limit";
+  }
   return `${n.toLocaleString()} ${n === 1 ? "page" : "pages"}`;
 }
 

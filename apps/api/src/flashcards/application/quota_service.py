@@ -28,7 +28,8 @@ from flashcards.domain.users import UserNotFound
 class UserQuota:
     user_id: str
     period: str
-    monthly_pages: int  # the limit in force: the override, else the default
+    # The limit in force: the override, else the default. None means unlimited.
+    monthly_pages: int | None
     override: int | None
     used_pages: int
 
@@ -44,6 +45,10 @@ class UsageReport:
 
 def _or_none(cap: int | None) -> str:
     return "none" if cap is None else str(cap)
+
+
+def _pages_or_unlimited(pages: int | None) -> str:
+    return "unlimited" if pages is None else str(pages)
 
 
 class QuotaService:
@@ -79,16 +84,19 @@ class QuotaService:
             AuditAction.QUOTA_DEFAULTS_CHANGED,
             actor_id=admin_id,
             detail={
-                "pages_from": str(before.default_monthly_pages),
-                "pages_to": str(quotas.default_monthly_pages),
+                "pages_from": _pages_or_unlimited(before.default_monthly_pages),
+                "pages_to": _pages_or_unlimited(quotas.default_monthly_pages),
                 "cap_from": _or_none(before.monthly_spend_cap_micro_usd),
                 "cap_to": _or_none(quotas.monthly_spend_cap_micro_usd),
             },
         )
         return quotas
 
-    async def page_limit(self, user_id: str) -> int:
-        """The user's monthly page limit: their override, else the instance default."""
+    async def page_limit(self, user_id: str) -> int | None:
+        """The user's monthly page limit: their override, else the instance default.
+
+        None means unlimited: generation is never refused by the quota.
+        """
         override = await self._settings.get_user_pages(user_id)
         if override is not None:
             return override
