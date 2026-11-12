@@ -158,7 +158,9 @@ describe("generate page", () => {
     });
     renderApp("/decks/d1/generate");
     expect(
-      await screen.findByText("PDFs up to 300 pages, 25 MB. You have no monthly AI-generation limit; each page counts once."),
+      await screen.findByText(
+        "PDFs up to 300 pages, 25 MB. You have no monthly AI-generation limit; each page counts once.",
+      ),
     ).toBeInTheDocument();
   });
 

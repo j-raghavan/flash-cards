@@ -177,6 +177,18 @@ def test_an_admins_transcripts_are_not_held_to_the_quota() -> None:
     assert resp.status_code == 422
 
 
+def test_a_member_with_no_limit_is_not_held_to_the_quota_for_transcripts() -> None:
+    # With no monthly limit (ADR 0027), the pre-check lets a member's transcript
+    # generation through instead of refusing it with 429.
+    app = _app(default_monthly_pages=None)
+    client, _ = _join(app, Role.MEMBER, "m@example.com")
+    deck_id = _deck(client)
+    resp = client.post(
+        "/ai/generate/transcript", json={"deck_id": deck_id, "transcript": "Cells make ATP."}
+    )
+    assert resp.status_code == 202
+
+
 def test_the_spend_cap_still_applies_to_an_admin() -> None:
     app = _app()
     admin, _ = _join(app, Role.ADMIN, "a@example.com")

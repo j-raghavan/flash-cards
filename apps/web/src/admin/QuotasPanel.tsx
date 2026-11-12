@@ -76,9 +76,7 @@ function QuotasForm({
   spent: number | undefined;
   onSaved: (quotas: InstanceQuotas) => void;
 }) {
-  const [pages, setPages] = useState(
-    saved.default_monthly_pages === null ? "" : String(saved.default_monthly_pages),
-  );
+  const [pages, setPages] = useState(saved.default_monthly_pages === null ? "" : String(saved.default_monthly_pages));
   const [cap, setCap] = useState(
     saved.monthly_spend_cap_micro_usd === null ? "" : usdInput(saved.monthly_spend_cap_micro_usd),
   );
