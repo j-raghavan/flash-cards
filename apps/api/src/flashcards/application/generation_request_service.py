@@ -138,6 +138,8 @@ class GenerationRequestService:
             return  # the spend cap above applies to admins; the page quota does not
         period = billing_period(self._clock.now())
         limit = await self._limits.page_limit(owner_id)
+        if limit is None:
+            return  # the member has no page limit (ADR 0027); only the spend cap applies
         if await self._quotas.used(owner_id, period) >= limit:
             raise QuotaExceeded(remaining=0, limit=limit)
 
@@ -162,9 +164,11 @@ class GenerationRequestService:
         await self._spend.ensure_available()
         now = self._clock.now()
         period = billing_period(now)
-        # An admin's pages are still counted, so the usage report shows them, but
-        # against a limit that never refuses them.
-        limit = UNMETERED_PAGE_LIMIT if admin else await self._limits.page_limit(owner_id)
+        # An admin's pages, and those of a member with no page limit, are still
+        # counted so the usage report shows them, but against a limit that never
+        # refuses them (ADR 0022, 0027).
+        effective = None if admin else await self._limits.page_limit(owner_id)
+        limit = UNMETERED_PAGE_LIMIT if effective is None else effective
         if not await self._quotas.try_reserve_pages(owner_id, pages, period, limit=limit):
             remaining = max(limit - await self._quotas.used(owner_id, period), 0)
             raise QuotaExceeded(pages=pages, remaining=remaining, limit=limit)

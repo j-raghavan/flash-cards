@@ -42,7 +42,8 @@ export const MAX_MONTHLY_PAGES = 100_000;
 export const MAX_SPEND_CAP_MICRO_USD = 10_000_000 * 1_000_000;
 
 export interface InstanceQuotas {
-  default_monthly_pages: number;
+  /** null: members have no monthly page limit (ADR 0027). */
+  default_monthly_pages: number | null;
   /** null: no cap. */
   monthly_spend_cap_micro_usd: number | null;
 }
@@ -50,8 +51,8 @@ export interface InstanceQuotas {
 export interface UserQuota {
   user_id: string;
   period: string;
-  /** The limit in force: the override, or the instance default without one. */
-  monthly_pages: number;
+  /** The limit in force: the override, or the instance default without one; null means unlimited. */
+  monthly_pages: number | null;
   override: number | null;
   used_pages: number;
 }

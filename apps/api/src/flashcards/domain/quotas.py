@@ -11,8 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+# The historical free-tier allowance, and the page repositories' constructor
+# default. The instance default (InstanceQuotas.default_monthly_pages) is unlimited
+# out of the box (None), and the page-reservation path always passes an explicit
+# limit, so this value is not consulted for page quotas; an operator reinstates a
+# free tier by setting FLASHCARDS_AI_DEFAULT_MONTHLY_PAGES (ADR 0027).
 DEFAULT_MONTHLY_PAGES = 10
-# Upper bound an admin may set for a monthly page limit (a sanity bound, not a cost).
+# Upper bound an admin may set for a finite monthly page limit (a sanity bound, not
+# a cost). None always means unlimited and is not bounded by this.
 MAX_MONTHLY_PAGES = 100_000
 MICRO_USD_PER_USD = 1_000_000
 # Synchronous AI calls per user per day (each one is a model request).
@@ -78,12 +84,15 @@ class InvalidQuota(ValueError):
 class InstanceQuotas:
     """Instance-wide AI limits an admin sets (F-ADMIN-3, F-AI-11).
 
-    default_monthly_pages applies to every user without an override.
+    default_monthly_pages applies to every user without an override; None means
+    members have no monthly page limit (like admins, ADR 0027): their pages are
+    still counted for the usage report but generation is never refused by the
+    quota, leaving the spend cap as the only brake.
     monthly_spend_cap_micro_usd stops new AI work for everyone once the month's
     recorded spend reaches it; None means no cap.
     """
 
-    default_monthly_pages: int = DEFAULT_MONTHLY_PAGES
+    default_monthly_pages: int | None = None
     monthly_spend_cap_micro_usd: int | None = None
 
     def __post_init__(self) -> None:
@@ -92,8 +101,9 @@ class InstanceQuotas:
             raise InvalidQuota("the spend cap cannot be negative")
 
 
-def check_monthly_pages(pages: int) -> None:
-    if not 0 <= pages <= MAX_MONTHLY_PAGES:
+def check_monthly_pages(pages: int | None) -> None:
+    """Validate a finite monthly page limit; None (unlimited) is always allowed."""
+    if pages is not None and not 0 <= pages <= MAX_MONTHLY_PAGES:
         raise InvalidQuota(f"monthly pages must be between 0 and {MAX_MONTHLY_PAGES}")
 
 

@@ -200,21 +200,25 @@ function SessionsPanel() {
 
 function quotaText(quota: AiQuota): string {
   const month = formatPeriod(quota.period);
-  if (!quota.quota_applies) {
-    // An admin: pages are counted for the usage report, never refused.
+  if (!quota.quota_applies || quota.monthly_pages === null) {
+    // No monthly limit: pages are counted for the usage report, never refused.
+    // Only admins also have no per-document cap (max_document_pages null); a member
+    // whose limit is unlimited still has one.
     const used = `${String(quota.used_pages)} ${quota.used_pages === 1 ? "page" : "pages"}`;
-    return `As an admin you have no monthly page limit. You have used ${used} for ${month}.`;
+    const who = quota.max_document_pages === null ? "As an admin you" : "You";
+    return `${who} have no monthly page limit. You have used ${used} for ${month}.`;
   }
-  if (quota.monthly_pages === 0) {
+  const limit = quota.monthly_pages;
+  if (limit === 0) {
     return `AI generation is not included in your account for ${month}.`;
   }
-  const used = Math.min(quota.used_pages, quota.monthly_pages);
-  const left = quota.monthly_pages - used;
+  const used = Math.min(quota.used_pages, limit);
+  const left = limit - used;
   const pages = (n: number): string => `${String(n)} ${n === 1 ? "page" : "pages"}`;
   if (left === 0) {
-    return `You have used all ${pages(quota.monthly_pages)} for ${month}. The allowance renews at the start of next month.`;
+    return `You have used all ${pages(limit)} for ${month}. The allowance renews at the start of next month.`;
   }
-  return `You have used ${String(used)} of ${pages(quota.monthly_pages)} for ${month}, so ${pages(left)} are left.`;
+  return `You have used ${String(used)} of ${pages(limit)} for ${month}, so ${pages(left)} are left.`;
 }
 
 function QuotaPanel() {
@@ -227,7 +231,7 @@ function QuotaPanel() {
       {quota.data === undefined ? null : (
         <>
           <p>{quotaText(quota.data)}</p>
-          {quota.data.quota_applies && quota.data.monthly_pages > 0 ? (
+          {quota.data.quota_applies && quota.data.monthly_pages !== null && quota.data.monthly_pages > 0 ? (
             <meter
               aria-label="AI pages used this month"
               min={0}

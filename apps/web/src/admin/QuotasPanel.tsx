@@ -76,7 +76,7 @@ function QuotasForm({
   spent: number | undefined;
   onSaved: (quotas: InstanceQuotas) => void;
 }) {
-  const [pages, setPages] = useState(String(saved.default_monthly_pages));
+  const [pages, setPages] = useState(saved.default_monthly_pages === null ? "" : String(saved.default_monthly_pages));
   const [cap, setCap] = useState(
     saved.monthly_spend_cap_micro_usd === null ? "" : usdInput(saved.monthly_spend_cap_micro_usd),
   );
@@ -89,9 +89,11 @@ function QuotasForm({
   const capRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
+  // An empty field means members have no monthly page limit (ADR 0022).
+  const unlimited = pages.trim() === "";
   const pageCount = parsePages(pages);
   const capValue = parseCap(cap);
-  const pagesError = checked && pageCount === null ? PAGES_ERROR : null;
+  const pagesError = checked && !unlimited && pageCount === null ? PAGES_ERROR : null;
   const capError = checked && capValue === undefined ? CAP_ERROR : null;
 
   useEffect(() => {
@@ -112,7 +114,7 @@ function QuotasForm({
     event.preventDefault();
     setChecked(true);
     setNote(null);
-    if (pageCount === null) {
+    if (!unlimited && pageCount === null) {
       pagesRef.current?.focus();
       return;
     }
@@ -120,7 +122,10 @@ function QuotasForm({
       capRef.current?.focus();
       return;
     }
-    const quotas = { default_monthly_pages: pageCount, monthly_spend_cap_micro_usd: capValue };
+    const quotas = {
+      default_monthly_pages: unlimited ? null : pageCount,
+      monthly_spend_cap_micro_usd: capValue,
+    };
     // A new cap at or below what this month has already spent stops all AI work
     // at once (the server refuses work once spend >= cap). Without this month's
     // spend there is nothing to compare with, so that asks too.
@@ -141,11 +146,11 @@ function QuotasForm({
         <span>Default monthly limit per user (pages)</span>
         <input
           ref={pagesRef}
-          type="number"
+          // Text, not a number input: a number input reports unparseable text as
+          // empty, which here would silently save "no limit" for every member.
+          type="text"
           inputMode="numeric"
-          min={0}
-          max={MAX_MONTHLY_PAGES}
-          step={1}
+          autoComplete="off"
           value={pages}
           aria-invalid={pagesError !== null}
           aria-describedby={pagesError === null ? "quota-pages-hint" : "quota-pages-hint quota-pages-error"}
@@ -156,7 +161,8 @@ function QuotasForm({
         />
       </label>
       <p className="muted" id="quota-pages-hint">
-        AI pages each user may generate per calendar month (UTC), unless their account has an override. 0 allows none.
+        AI pages each user may generate per calendar month (UTC), unless their account has an override. Leave empty for
+        no limit; 0 allows none.
       </p>
       {pagesError === null ? null : (
         <p className="error" id="quota-pages-error">

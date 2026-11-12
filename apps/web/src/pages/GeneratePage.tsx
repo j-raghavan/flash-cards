@@ -37,6 +37,9 @@ function limitsText(quota: AiQuota | undefined): string {
     return "PDFs of any length, up to 25 MB: as an admin you have no page limit.";
   }
   const limit = `PDFs up to ${pages(quota.max_document_pages)}, 25 MB.`;
+  if (quota.monthly_pages === null) {
+    return `${limit} You have no monthly AI-generation limit; each page counts once.`;
+  }
   const left = Math.max(quota.monthly_pages - quota.used_pages, 0);
   return `${limit} You have ${pages(left)} of AI generation left this month; each page counts once.`;
 }

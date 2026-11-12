@@ -120,10 +120,17 @@ def test_generate_rejects_too_many_pages(member: tuple[TestClient, str]) -> None
     assert resp.json() == {"detail": "This document has 301 pages; the limit is 300."}
 
 
-def test_generate_rejects_over_quota(member: tuple[TestClient, str]) -> None:
-    client, _ = member
+def test_generate_rejects_over_quota() -> None:
+    # The shipped default is unlimited (ADR 0027), so this instance sets a finite
+    # monthly quota of 10 pages; an 11-page document is then refused.
+    app = create_app(
+        Settings(environment="test", session_cookie_secure=False, ai_default_monthly_pages=10)
+    )
+    token = asyncio.run(app.state.container.invites.create(created_by="t", role=Role.MEMBER))
+    client = TestClient(app)
+    body = {"token": token.raw_token, "email": "quota@example.com", "password": PASSWORD}
+    assert client.post("/auth/signup", json=body).status_code == 201
     deck_id = _make_deck(client)
-    # Default monthly quota is 10 pages; an 11-page document is refused.
     resp = _upload(client, deck_id, _pdf(11))
     assert resp.status_code == 429
     assert resp.json() == {

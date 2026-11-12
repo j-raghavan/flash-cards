@@ -78,6 +78,20 @@ def test_instance_quotas_are_range_checked() -> None:
         InstanceQuotas(default_monthly_pages=10**9)
     with pytest.raises(InvalidQuota):
         InstanceQuotas(monthly_spend_cap_micro_usd=-1)
+    # None is unlimited (ADR 0027) and is always allowed.
+    assert InstanceQuotas(default_monthly_pages=None).default_monthly_pages is None
+
+
+def test_a_blank_default_page_limit_setting_means_unlimited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An empty env value must not crash startup; it means no limit (ADR 0027).
+    monkeypatch.setenv("FLASHCARDS_AI_DEFAULT_MONTHLY_PAGES", "")
+    assert Settings(environment="test").ai_default_monthly_pages is None
+    monkeypatch.setenv("FLASHCARDS_AI_DEFAULT_MONTHLY_PAGES", "7")
+    assert Settings(environment="test").ai_default_monthly_pages == 7
+    monkeypatch.delenv("FLASHCARDS_AI_DEFAULT_MONTHLY_PAGES")
+    assert Settings(environment="test").ai_default_monthly_pages is None
 
 
 class _Quotas:
@@ -117,7 +131,8 @@ async def test_admin_quota_changes_apply_and_are_audited() -> None:
     await q.users.add(User(id="u1", email="a@example.com", password_hash="x",
                            role=Role.MEMBER, created_at=NOW))
     assert await q.service.instance() == InstanceQuotas()
-    assert await q.service.page_limit("u1") == 10
+    # The shipped default is unlimited (ADR 0027): members have no page limit.
+    assert await q.service.page_limit("u1") is None
 
     await q.service.set_instance(
         admin_id="admin", quotas=InstanceQuotas(default_monthly_pages=25,
@@ -138,7 +153,7 @@ async def test_admin_quota_changes_apply_and_are_audited() -> None:
     assert [(e.action, dict(e.detail)) for e in reversed(events)] == [
         (
             AuditAction.QUOTA_DEFAULTS_CHANGED,
-            {"pages_from": "10", "pages_to": "25", "cap_from": "none", "cap_to": "5000000"},
+            {"pages_from": "unlimited", "pages_to": "25", "cap_from": "none", "cap_to": "5000000"},
         ),
         (AuditAction.QUOTA_USER_CHANGED, {"from": "none", "to": "100"}),
         (AuditAction.QUOTA_USER_CHANGED, {"from": "100", "to": "none"}),
@@ -155,6 +170,22 @@ async def test_user_quota_rules() -> None:
     with pytest.raises(InvalidQuota):
         await q.service.set_user_pages(admin_id="admin", user_id="ghost", pages=-5)
     assert await q.events.list_recent(limit=10) == []
+
+
+async def test_the_default_is_unlimited_until_an_admin_meters_members() -> None:
+    q = _Quotas()
+    await q.users.add(
+        User(id="u1", email="a@example.com", password_hash="x", role=Role.MEMBER, created_at=NOW)
+    )
+    quota = await q.service.user_quota("u1")
+    assert quota.monthly_pages is None and quota.override is None
+    # An admin may still set a finite default to meter members, or a per-user cap.
+    await q.service.set_instance(
+        admin_id="admin", quotas=InstanceQuotas(default_monthly_pages=5)
+    )
+    assert await q.service.page_limit("u1") == 5
+    capped = await q.service.set_user_pages(admin_id="admin", user_id="u1", pages=2)
+    assert capped.monthly_pages == 2
 
 
 async def test_the_spend_cap_stops_new_ai_work_once_reached() -> None:

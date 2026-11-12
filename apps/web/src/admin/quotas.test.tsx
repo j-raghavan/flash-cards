@@ -68,7 +68,7 @@ describe("instance quotas", () => {
     const user = await openQuotas();
     const pages = await screen.findByLabelText("Default monthly limit per user (pages)");
     const cap = screen.getByLabelText("Monthly spend cap (US dollars)");
-    expect(pages).toHaveValue(10);
+    expect(pages).toHaveValue("10");
     expect(cap).toHaveValue("50");
     expect(pages).toHaveAccessibleDescription(/AI pages each user may generate/);
     expect(await screen.findByText("$12.50 spent of the $50.00 cap.")).toBeInTheDocument();
@@ -106,6 +106,40 @@ describe("instance quotas", () => {
     expect(calls.some((c) => c.path.startsWith("/admin/audit"))).toBe(true);
   });
 
+  it("shows no default limit as an empty field, and clearing it saves no limit", async () => {
+    const calls = mockApi({
+      ...asAdmin,
+      "GET /admin/quotas": { body: { default_monthly_pages: null, monthly_spend_cap_micro_usd: null } },
+      "GET /admin/usage": { body: spending(0, 0) },
+      "PUT /admin/quotas": (call) => ({ body: call.body }),
+      "GET /admin/audit": { body: [] },
+    });
+    renderApp("/admin");
+    const user = await openQuotas();
+    const pages = await screen.findByLabelText("Default monthly limit per user (pages)");
+    expect(pages).toHaveValue(""); // empty: members have no limit
+    expect(pages).toHaveAccessibleDescription(/Leave empty for\s+no limit/);
+
+    // A number meters members.
+    await user.type(pages, "25");
+    await user.click(screen.getByRole("button", { name: "Save quotas" }));
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+      default_monthly_pages: 25,
+      monthly_spend_cap_micro_usd: null,
+    });
+
+    // Clearing it again removes the limit (sends null).
+    await user.clear(pages);
+    await user.click(screen.getByRole("button", { name: "Save quotas" }));
+    await waitFor(() => {
+      expect(calls.filter((c) => c.method === "PUT")[1]?.body).toEqual({
+        default_monthly_pages: null,
+        monthly_spend_cap_micro_usd: null,
+      });
+    });
+  });
+
   it("checks the fields like the server, focusing the first wrong one", async () => {
     const calls = mockApi({
       ...asAdmin,
@@ -117,6 +151,12 @@ describe("instance quotas", () => {
     const pages = await screen.findByLabelText("Default monthly limit per user (pages)");
     const cap = screen.getByLabelText("Monthly spend cap (US dollars)");
     expect(cap).toHaveValue("");
+    await user.clear(pages);
+    // Non-numeric text is an error, never silently read as "no limit".
+    await user.type(pages, "12a");
+    await user.click(screen.getByRole("button", { name: "Save quotas" }));
+    expect(pages).toHaveAttribute("aria-invalid", "true");
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
     await user.clear(pages);
     await user.type(pages, "100001");
     await user.type(cap, "10000000.01");
